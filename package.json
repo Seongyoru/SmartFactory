@@ -1,0 +1,26 @@
+{
+  "name": "egis-smart-factory",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "EGIS Smart Factory - 설비 배치 에디터 (Factorio-like layout builder + Digital Twin)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.1.5"
+  }
+}

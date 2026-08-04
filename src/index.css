@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+ * 테마 토큰
+ * ---------------------------------------------------------------------------
+ *  화면 전체가 "의미 이름" 만 쓰도록 한다 — bg-panel, text-ink, border-line …
+ *  실제 색은 루트의 data-theme 속성이 결정하고, 컴포넌트는 어느 테마인지 모른다.
+ *  이렇게 해야 새 UI 를 추가할 때 라이트 대응을 빠뜨릴 수가 없다.
+ * ------------------------------------------------------------------------- */
+
+:root,
+:root[data-theme="dark"] {
+  --c-app: #020617;
+  --c-head: #0f172a;
+  --c-panel: #0b1322;
+  --c-card: #0f172a;
+  --c-line: rgba(255, 255, 255, 0.07);
+  --c-ink: #e2e8f0;
+  --c-ink2: #cbd5e1;
+  --c-ink3: #94a3b8;
+  --c-ink4: #64748b;
+  --c-raise: rgba(255, 255, 255, 0.05);
+  --c-raise-h: rgba(255, 255, 255, 0.1);
+  --c-edge: rgba(255, 255, 255, 0.1);
+  --c-field: rgba(0, 0, 0, 0.4);
+  --c-overlay: rgba(0, 0, 0, 0.6);
+  --c-scroll: rgba(148, 163, 184, 0.28);
+  --c-scroll-h: rgba(148, 163, 184, 0.5);
+  --c-kbd: rgba(255, 255, 255, 0.1);
+  --c-float: rgba(15, 23, 42, 0.9);
+}
+
+:root[data-theme="light"] {
+  --c-app: #e9eef5;
+  --c-head: #ffffff;
+  --c-panel: #f7f9fc;
+  --c-card: #ffffff;
+  --c-line: rgba(15, 23, 42, 0.1);
+  --c-ink: #0f172a;
+  --c-ink2: #334155;
+  --c-ink3: #64748b;
+  --c-ink4: #94a3b8;
+  --c-raise: rgba(15, 23, 42, 0.045);
+  --c-raise-h: rgba(15, 23, 42, 0.09);
+  --c-edge: rgba(15, 23, 42, 0.12);
+  --c-field: #ffffff;
+  --c-overlay: rgba(15, 23, 42, 0.35);
+  --c-scroll: rgba(71, 85, 105, 0.3);
+  --c-scroll-h: rgba(71, 85, 105, 0.5);
+  --c-kbd: rgba(15, 23, 42, 0.08);
+  --c-float: rgba(255, 255, 255, 0.94);
+}
+
+/* inline 이어야 유틸리티가 var(--c-*) 를 그대로 물고 간다 —
+   그래야 data-theme 이 바뀌는 즉시 색이 따라간다. */
+@theme inline {
+  --font-sans: "Pretendard", "Malgun Gothic", ui-sans-serif, system-ui, sans-serif;
+
+  --color-app: var(--c-app);
+  --color-head: var(--c-head);
+  --color-panel: var(--c-panel);
+  --color-card: var(--c-card);
+  --color-line: var(--c-line);
+  --color-ink: var(--c-ink);
+  --color-ink2: var(--c-ink2);
+  --color-ink3: var(--c-ink3);
+  --color-ink4: var(--c-ink4);
+  --color-raise: var(--c-raise);
+  --color-raiseh: var(--c-raise-h);
+  --color-edge: var(--c-edge);
+  --color-field: var(--c-field);
+  --color-overlay: var(--c-overlay);
+  --color-kbd: var(--c-kbd);
+  --color-float: var(--c-float);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--c-app);
+  color: var(--c-ink);
+  overflow: hidden;
+  user-select: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--c-scroll);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--c-scroll-h);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 배치 모드에서 커서가 도면 위에 있을 때 텍스트 선택 방지 */
+canvas {
+  outline: none;
+  touch-action: none;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* 라이브러리 아이템을 잡아 끌 때의 커서 */
+.cursor-grab-item {
+  cursor: grab;
+}
+.cursor-grab-item:active {
+  cursor: grabbing;
+}
