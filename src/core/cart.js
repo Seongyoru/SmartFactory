@@ -16,9 +16,32 @@
 import { buildFreePath } from './routing.js';
 import { allPorts } from './link.js';
 import { PORT_KIND } from './ports.js';
+import { isShelf } from '../data/library.js';
+import { ZONE, shelfCapacity, shelfZones } from './shelf.js';
+import { rotateXZ } from './grid.js';
+import { getSpec } from './modelStore.js';
 
 /** 경로에서 이 거리 안으로 지나가는 포트를 역으로 삼는다(m) */
 export const STATION_DIST = 3.5;
+
+/**
+ * 역의 표시 규칙 — 색과 이름의 유일한 출처.
+ * ---------------------------------------------------------------------------
+ *  씬의 정차역 링과 인스펙터 목록이 각자 색을 정하다가, 구역을 입고/출고로
+ *  나눈 뒤에도 옛 분류를 보고 있어서 둘 다 "내리기(초록)" 로 나왔다.
+ *  바닥 구역 색과도 반드시 같아야 하므로 한 곳에 모은다.
+ *
+ *    주황 = 카트가 **싣는** 곳  (설비 유출부 · 선반 출고 구역)
+ *    초록 = 카트가 **내리는** 곳 (설비 유입부 · 선반 입고 구역)
+ */
+export const STATION_STYLE = {
+  load: { color: '#fb923c', label: '싣기' },
+  'shelf-out': { color: '#fb923c', label: '싣기' },
+  unload: { color: '#34d399', label: '내리기' },
+  'shelf-in': { color: '#34d399', label: '내리기' },
+};
+
+export const stationStyle = (kind) => STATION_STYLE[kind] ?? STATION_STYLE.unload;
 
 /**
  * 포트 정면으로 인정하는 범위(코사인).
@@ -83,10 +106,65 @@ export function cartStations(path, placedList, itemOf) {
       kind: port.kind === PORT_KIND.OUT ? 'load' : 'unload',
       uid: port.uid,
       portId: port.id,
+      /* 한 설비의 유입·유출부는 서로 다른 역이다 — 키를 포트까지 포함해야
+         "싣고 나서 곧바로 내리는" 정상 동작이 중복으로 막히지 않는다 */
+      key: `${port.uid}:${port.id}`,
       name: owner?.name ?? port.uid,
       count: Math.max(0, owner?.outputCount ?? 3),
     });
   }
+
+  /* 선반 — 입고 구역과 출고 구역을 따로 잡는다.
+     구역마다 앞뒤 양면을 훑어 경로에 가장 가까운 지점을 역으로 삼는다. */
+  for (const p of placedList) {
+    const item = itemOf(p.itemId);
+    if (!isShelf(item)) continue;
+    const spec = item.modelKey ? getSpec(item.modelKey) : null;
+
+    const best = {};   // kind → { s, dist }
+    for (const z of shelfZones(p, spec)) {
+      const dir = rotateXZ(z.dir, p.rot);
+      const samples = Math.max(2, Math.ceil(z.w) + 1);
+      for (let i = 0; i < samples; i++) {
+        const lx = z.cx - z.w / 2 + (i * z.w) / (samples - 1);
+        const [ox, oz] = rotateXZ([lx, z.fz], p.rot);
+        const at2 = [p.pos[0] + ox, p.pos[1] + oz];
+        const hit = closestOnPath(path, at2);
+        if (hit.dist > STATION_DIST) continue;
+
+        const at = path.at(hit.s).pos;
+        const vx = at[0] - at2[0];
+        const vz = at[2] - at2[1];
+        const len = Math.hypot(vx, vz);
+        if (len > 1e-3 && (vx * dir[0] + vz * dir[1]) / len < FRONT_COS) continue;
+        if (!best[z.kind] || hit.dist < best[z.kind].dist) best[z.kind] = { s: hit.s, dist: hit.dist };
+      }
+    }
+
+    /* 한 선반은 한 카트 경로에 대해 **역할 하나**만 갖는다.
+       ---------------------------------------------------------------------
+       경로 끝이 선반 옆에서 맴돌면 입고 구역과 출고 구역이 몇 미터 사이로
+       둘 다 잡혀서, 같은 선반에서 실었다 내렸다를 반복하게 된다.
+       경로가 더 가까이 지나가는 쪽 하나만 남긴다 — 그래야 "이 선반은 이 카트에게
+       싣는 곳" 이라는 게 도면에서 한눈에 정해진다. */
+    const kinds = Object.keys(best);
+    if (!kinds.length) continue;
+    const kind = kinds.reduce((a, b) => (best[b].dist < best[a].dist ? b : a));
+    const hit = best[kind];
+
+    out.push({
+      s: hit.s,
+      dist: hit.dist,
+      kind: kind === ZONE.IN ? 'shelf-in' : 'shelf-out',
+      uid: p.uid,
+      key: p.uid,
+      name: p.name ?? p.uid,
+      capacity: shelfCapacity(p, spec),
+      /** 빈 카트가 오면 실어 보낼 수량 */
+      dispatch: Math.max(0, p.dispatchCount ?? 3),
+    });
+  }
+
   return out.sort((a, b) => a.s - b.s);
 }
 
@@ -113,40 +191,51 @@ export function crossedStations(stations, s0, s1, dir) {
  *  useFrame 안에 두면 눈으로만 확인할 수 있어서 순수 함수로 뺐다.
  *  들어온 상태를 바꾸지 않고 다음 상태를 돌려준다.
  *
- *  @param st  { s, dir, pause, carried }
- *  @returns   같은 모양 + { arrived } (이번에 도착한 역, 없으면 null)
+ *  @param st  { s, dir, pause, lastKey }
+ *  @returns   { s, dir, pause, arrived }
+ *
+ *  lastKey — 직전에 **실제로 자재를 주고받은** 역. 같은 역을 연달아 처리하지
+ *  않기 위한 기억이다. 왕복 경로에서는 되돌아오며 같은 선반을 다시 지나는데,
+ *  그때마다 반응하면 한 선반에서 넣었다 뺐다를 반복한다. 다른 역에서 무언가를
+ *  주고받으면 풀린다.
+ *
+ *  "지나가기만 하고 아무 일도 없었던" 경우는 들른 것으로 치지 않는다.
+ *  빈 카트가 입고 구역을 지났다는 이유로 바로 옆 출고 구역이 막히면 곤란하다.
  */
 export function stepCart(st, { length, closed, speed, dwell }, stations, dt) {
   const L = length;
-  if (!(L > 0.01)) return { ...st, arrived: null };
+  if (!(L > 0.01)) return { s: st.s, dir: st.dir, pause: st.pause, arrived: null };
 
   // 정차 중이면 시간만 흘린다
-  if (st.pause > 0) return { ...st, pause: st.pause - dt, arrived: null };
+  if (st.pause > 0) return { s: st.s, dir: st.dir, pause: st.pause - dt, arrived: null };
 
-  const step = speed * Math.min(dt, 0.1) * st.dir;
+  const dir0 = st.dir;
+  const step = speed * Math.min(dt, 0.1) * dir0;
   let s1 = st.s + step;
   let dir = st.dir;
 
   if (closed) {
     s1 = ((s1 % L) + L) % L;
   } else if (s1 > L) {
-    s1 = Math.max(0, L - (s1 - L));   // 끝에서 되돌아온다
+    /* 끝점을 **정확히 밟고** 다음 프레임에 되돌아간다.
+       튕겨 나온 위치로 바로 접어 버리면 경로 맨 끝(s = 0 또는 L)에 있는
+       정차역을 영영 지나치지 못한다. 구간 판정이 반개구간이라 끝값이 빠지기
+       때문인데, 그러면 "끝에서 싣고 반대쪽 끝에서 내리는" 왕복 경로가
+       한쪽만 동작해서 카트가 짐을 든 채 계속 오가게 된다. */
+    s1 = L;
     dir = -1;
   } else if (s1 < 0) {
-    s1 = Math.min(L, -s1);
+    s1 = 0;
     dir = 1;
   }
 
-  const hit = crossedStations(stations, st.s, s1, st.dir);
-  if (!hit.length) return { s: s1, dir, pause: 0, carried: st.carried, arrived: null };
+  const crossed = crossedStations(stations, st.s, s1, st.dir);
+  // 직전에 "실제로 주고받은" 역은 건너뛴다
+  const hit = crossed.filter((x) => (x.key ?? x.uid) !== st.lastKey);
+  if (!hit.length) return { s: s1, dir, pause: 0, arrived: null };
 
-  // 한 프레임에 여러 역을 지났다면 마지막 것이 최종 상태다
-  const last = hit[hit.length - 1];
-  return {
-    s: s1,
-    dir,
-    pause: dwell,
-    carried: last.kind === 'load' ? last.count : 0,
-    arrived: last,
-  };
+  /* 한 프레임에 여러 역을 지났다면 마지막 것만 처리한다.
+     자재가 실제로 오갔는지(수용량·재고에 달렸다)는 여기서 알 수 없으므로
+     역만 알려 주고, 수량 계산과 lastKey 갱신은 호출부가 맡는다. */
+  return { s: s1, dir, pause: dwell, arrived: hit[hit.length - 1] };
 }

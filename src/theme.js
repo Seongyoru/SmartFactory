@@ -34,7 +34,7 @@ export const SCENE_THEME = {
     keyIso: 1.6,
     fill: 0.35,
     /* 하이라이트 — 어두운 바닥 위라 밝은 톤이 잘 보인다 */
-    select: '#38bdf8',
+    select: '#4ade80',
     ghostOk: '#22d3ee',
     ghostBad: '#f43f5e',
     fillOpacity: 0.22,
@@ -59,7 +59,7 @@ export const SCENE_THEME = {
     keyIso: 1.35,
     fill: 0.45,
     /* 밝은 바닥 위에서는 파스텔 톤이 날아가므로 한 단계 진하게 */
-    select: '#0284c7',
+    select: '#16a34a',
     ghostOk: '#0891b2',
     ghostBad: '#e11d48',
     fillOpacity: 0.3,

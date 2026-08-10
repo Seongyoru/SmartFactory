@@ -55,6 +55,56 @@ function FootprintFill({ rect, color, opacity = 0.18 }) {
   );
 }
 
+/**
+ * 선택 표시 — 높이를 가진 상자 케이지.
+ * ---------------------------------------------------------------------------
+ *  바닥 외곽선만 그리면 3D 뷰에서 설비에 가려 거의 보이지 않는다. 특히 선반처럼
+ *  높은 물건은 "발밑에 선 하나" 라서 무엇이 선택됐는지 읽히지 않는다.
+ *  실제 부피를 감싸는 12개 모서리를 그려 어느 각도에서도 형태가 잡히게 한다.
+ *
+ *  선 굵기(lineWidth)는 WebGL 에서 무시되므로 얇은 상자 막대로 그린다.
+ *  depthTest 를 끄면 항상 위에 떠서 위치 감각이 사라지므로, 대신 살짝 부풀린
+ *  케이지를 그려 모델 표면과 z-파이팅이 나지 않게 한다.
+ */
+const CAGE_BAR = 0.05;      // 모서리 막대 두께(m)
+const CAGE_PAD = 0.04;      // 모델 표면에서 띄우는 여유(m)
+
+export function SelectionCage({ rect, height = 0, y0 = 0, color = DEFAULT_COLORS.select }) {
+  const x0 = rect.minX - CAGE_PAD;
+  const x1 = rect.maxX + CAGE_PAD;
+  const z0 = rect.minZ - CAGE_PAD;
+  const z1 = rect.maxZ + CAGE_PAD;
+  const h = Math.max(height, 0.4) + CAGE_PAD;      // 납작한 물건도 잡히도록 최소 높이
+  const cx = (x0 + x1) / 2;
+  const cz = (z0 + z1) / 2;
+  const w = x1 - x0;
+  const d = z1 - z0;
+
+  /* [position, size] 12개 — 아래·위 테두리 각 4개 + 기둥 4개 */
+  const bars = [];
+  for (const yy of [y0, y0 + h]) {
+    bars.push([[cx, yy, z0], [w, CAGE_BAR, CAGE_BAR]]);
+    bars.push([[cx, yy, z1], [w, CAGE_BAR, CAGE_BAR]]);
+    bars.push([[x0, yy, cz], [CAGE_BAR, CAGE_BAR, d]]);
+    bars.push([[x1, yy, cz], [CAGE_BAR, CAGE_BAR, d]]);
+  }
+  for (const xx of [x0, x1]) {
+    for (const zz of [z0, z1]) bars.push([[xx, y0 + h / 2, zz], [CAGE_BAR, h, CAGE_BAR]]);
+  }
+
+  return (
+    <group renderOrder={6}>
+      {bars.map(([pos, size], i) => (
+        <mesh key={i} position={pos} renderOrder={6}>
+          <boxGeometry args={size} />
+          <meshBasicMaterial color={color} toneMapped={false} transparent opacity={0.95} depthWrite={false} />
+        </mesh>
+      ))}
+      <FootprintFill rect={rect} color={color} opacity={0.16} />
+    </group>
+  );
+}
+
 /** 모델이 아직 로드되지 않았을 때의 자리표시 */
 function Placeholder({ color = '#475569' }) {
   return (
@@ -135,12 +185,8 @@ export default function PlacedModel({
           <FootprintOutline rect={rect} color={valid ? okColor : badColor} />
         </>
       )}
-      {rect && selected && !ghost && (
-        <>
-          <FootprintFill rect={rect} color={selColor} opacity={fillOpacity * 0.55} />
-          <FootprintOutline rect={rect} color={selColor} />
-        </>
-      )}
+      {/* 선택 표시는 EditorScene 이 SelectionCage 로 한 곳에서 그린다 —
+          설비와 선반이 같은 모양으로 보여야 하고, 높이는 씬이 아는 값이다. */}
     </group>
   );
 }

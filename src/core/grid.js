@@ -54,14 +54,23 @@ export const ROT_DIRS = [
 
 /**
  * 로컬 XZ 벡터를 rot(0..3) 만큼 회전.
- *  three.js 의 Y축 회전과 부호를 맞춘다: rotY=θ 일 때 +X → (cosθ, -sinθ).
- *  θ = rot*90° 이므로 정수 회전은 성분 교환/부호반전으로만 끝난다(오차 0).
+ * ---------------------------------------------------------------------------
+ *  반드시 three.js 의 Y축 회전과 같아야 한다. 화면에 그려지는 건 three 의
+ *  rotation.y 이고, 포트 위치·선반 앞면·설비 접점은 이 함수로 계산하기 때문에,
+ *  둘이 어긋나면 "보이는 곳" 과 "판정되는 곳" 이 달라진다.
+ *
+ *    RotY(θ):  x' = x·cosθ + z·sinθ
+ *              z' = −x·sinθ + z·cosθ
+ *    θ = 90°:  (x, z) → (z, −x)
+ *
+ *  90°·270° 에서만 어긋나므로(0°·180° 는 부호 대칭이라 우연히 맞는다)
+ *  증상이 "가로로 돌렸을 때만 반대쪽에 걸린다" 로 나타난다.
  */
 export function rotateXZ([x, z], rot) {
   switch (((rot % 4) + 4) % 4) {
-    case 1: return [-z, x];
+    case 1: return [z, -x];
     case 2: return [-x, -z];
-    case 3: return [z, -x];
+    case 3: return [-z, x];
     default: return [x, z];
   }
 }
@@ -72,7 +81,9 @@ export function rotateXZ([x, z], rot) {
  *  결과도 축 정렬 사각형이다. 반환값은 월드 XZ 기준 min/max.
  */
 export function footprintOf(placed, item) {
-  const bb = item?.bbox;
+  /* 선반은 길이를 사용자가 정하므로 모델의 바운딩 박스가 아니라 설정값에서
+     나온다. placed.bbox 로 미리 계산해 넘겨 준 경우 그쪽을 우선한다. */
+  const bb = placed?.bboxOverride ?? item?.bbox;
   if (!bb) return { minX: placed.pos[0], maxX: placed.pos[0], minZ: placed.pos[1], maxZ: placed.pos[1] };
 
   // 로컬 bbox 의 네 모서리를 회전시켜 다시 min/max 를 취한다

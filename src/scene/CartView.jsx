@@ -17,10 +17,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
-import { stepCart } from '../core/cart.js';
+import { stationStyle, stepCart } from '../core/cart.js';
+import { addStock, takeStock } from '../core/simStore.js';
 
-const LOAD_COLOR = '#fb923c';
-const UNLOAD_COLOR = '#34d399';
 const CART_COLOR = '#a78bfa';
 
 /** 순찰 경로 선 */
@@ -47,7 +46,7 @@ function StationMarks({ path, stations }) {
           <mesh key={i} position={[p[0], p[1] + 0.05, p[2]]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={7}>
             <ringGeometry args={[0.35, 0.5, 20]} />
             <meshBasicMaterial
-              color={st.kind === 'load' ? LOAD_COLOR : UNLOAD_COLOR}
+              color={stationStyle(st.kind).color}
               transparent
               opacity={0.9}
               depthTest={false}
@@ -68,6 +67,9 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
   const sRef = useRef(startS);
   const dirRef = useRef(1);
   const pauseRef = useRef(0);
+  const lastKeyRef = useRef(null);
+  /** 지금 싣고 있는 짐을 어디서 받았는가 — 같은 곳에 도로 내려놓지 않기 위해 */
+  const sourceRef = useRef(null);
   const [carried, setCarried] = useState(0);
 
   // 대수가 바뀌면 출발 지점을 다시 나눠 갖는다
@@ -104,7 +106,7 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
 
     if (running) {
       const next = stepCart(
-        { s: sRef.current, dir: dirRef.current, pause: pauseRef.current, carried },
+        { s: sRef.current, dir: dirRef.current, pause: pauseRef.current, lastKey: lastKeyRef.current },
         {
           length: path.length,
           closed: cart.closed,
@@ -117,7 +119,42 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
       sRef.current = next.s;
       dirRef.current = next.dir;
       pauseRef.current = next.pause;
-      if (next.arrived) setCarried(next.carried);
+
+      /* 수량 계산은 여기서 한다 — 선반이 몇 개나 받아 줄지는 재고에 달렸고,
+         "실제로 주고받았을 때만" 그 역을 들른 것으로 기록해야 하기 때문이다. */
+      if (next.arrived) {
+        const a = next.arrived;
+        let acted = false;
+
+        if (a.kind === 'shelf-in') {
+          /* 내리기.
+             실어 온 곳으로 도로 가져다 놓지 않는다 — 1번 선반에서 실은 짐을
+             1번 선반에 내리면 아무 일도 안 한 셈이고, 왕복 경로에서는 그게
+             무한히 반복된다. 어디서 실었는지 기억해 두고 그 선반은 건너뛴다. */
+          if (carried > 0 && sourceRef.current !== a.uid) {
+            const moved = addStock(a.uid, carried, a.capacity);
+            if (moved > 0) {
+              const left = carried - moved;
+              setCarried(left);
+              if (left === 0) sourceRef.current = null;
+              acted = true;
+            }
+          }
+        } else if (a.kind === 'shelf-out') {
+          // 싣기 — 비어 있을 때만
+          if (carried === 0) {
+            const took = takeStock(a.uid, a.dispatch ?? 0);
+            if (took > 0) { setCarried(took); sourceRef.current = a.uid; acted = true; }
+          }
+        } else if (a.kind === 'load') {
+          if (a.count > 0) { setCarried(a.count); sourceRef.current = a.uid; acted = true; }
+        } else if (a.kind === 'unload') {
+          if (carried > 0) { setCarried(0); sourceRef.current = null; acted = true; }
+        }
+
+        if (acted) lastKeyRef.current = a.key ?? a.uid;
+        else pauseRef.current = 0;      // 아무 일도 없었으면 서 있을 이유도 없다
+      }
     }
 
     const f = path.at(sRef.current);

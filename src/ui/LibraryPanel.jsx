@@ -1,32 +1,51 @@
 /**
  * =============================================================================
- *  라이브러리 패널 — 설비 / 연결장치 두 탭
+ *  라이브러리 패널 — 작업영역 / 기계설비 / 연결장치 / 운송적재
  * =============================================================================
- *  탭을 나누는 이유는 단순한 분류가 아니라 "배치 방식이 다르기 때문" 이다.
+ *  탭을 나누는 이유는 단순한 분류가 아니라 "놓는 방식이 다르기 때문" 이다.
+ *    작업영역 — 끌거나 찍어서 **면과 선**을 그린다 (건물)
+ *    기계설비 — 클릭 한 번에 한 대 (그리드 스냅)
+ *    연결장치 — 포트 → 포트 (길이는 계산 결과)
+ *    운송적재 — 카트는 경로, 선반은 자리
  *  그래서 탭마다 하단 안내 문구도 다르게 준다.
+ *
+ *  탭 이름은 네 글자로 맞췄다. 폭이 좁아 한 줄에 아이콘+글자를 나란히 두면
+ *  글자가 잘리므로 **아이콘을 위, 글자를 아래**로 쌓는다.
  * ---------------------------------------------------------------------------
  */
 
 import React, { useMemo, useState } from 'react';
-import { Box, Cable, Plus, Trash2, Truck } from 'lucide-react';
-import { CATEGORY, CATEGORY_META } from '../data/library.js';
-import { useEditor } from '../core/store.jsx';
+import { Box, Cable, Columns3, Layers, PenTool, Plus, Square, SquareDashed, Trash2, Truck, Building2, Frame } from 'lucide-react';
+import { CATEGORY, KIND } from '../data/library.js';
+import { SHAPE, TOOL, useEditor } from '../core/store.jsx';
 import { deleteModelBuffer } from '../core/persistence.js';
 import { dropModel, getSpec } from '../core/modelStore.js';
 import ImportDialog from './ImportDialog.jsx';
+import { ColorField, Slider } from './common.jsx';
+
+/** 건물 탭은 라이브러리 항목이 아니라 도구 모음이라 별도의 id 를 쓴다 */
+const BUILD = 'build';
 
 const TABS = [
-  { id: CATEGORY.EQUIPMENT, label: '설비', Icon: Box },
+  { id: BUILD, label: '작업영역', Icon: Building2 },
+  { id: CATEGORY.EQUIPMENT, label: '기계설비', Icon: Box },
   { id: CATEGORY.CONNECTOR, label: '연결장치', Icon: Cable },
-  { id: CATEGORY.CART, label: '카트', Icon: Truck },
+  { id: CATEGORY.LOGISTICS, label: '운송적재', Icon: Truck },
+];
+
+/** 작업영역 탭의 도구. 면(영역·구역)은 사각형/펜을 고를 수 있다. */
+const BUILD_TOOLS = [
+  { tool: TOOL.AREA, label: '영역', Icon: Frame, shaped: true, desc: '바닥을 그리면 바깥으로 벽이 선다' },
+  { tool: TOOL.WALL, label: '벽', Icon: SquareDashed, desc: '두 점을 찍어 내벽을 세운다' },
+  { tool: TOOL.PILLAR, label: '기둥', Icon: Columns3, desc: '누른 자리에 사각 기둥 하나' },
+  { tool: TOOL.ZONE, label: '구역', Icon: Square, shaped: true, desc: '바닥 위에만 · 이름이 바닥에 찍힌다' },
 ];
 
 function ItemCard({ item, active, onPick, onRemove }) {
   const spec = item.modelKey ? getSpec(item.modelKey) : null;
   const size = spec?.bbox.size;
   const isConn = item.category === CATEGORY.CONNECTOR;
-  const isCartItem = item.category === CATEGORY.CART;
-  const Icon = isCartItem ? Truck : isConn ? Cable : Box;
+  const Icon = item.kind === KIND.SHELF ? Layers : item.kind === KIND.CART ? Truck : isConn ? Cable : Box;
 
   return (
     <div
@@ -76,6 +95,116 @@ function ItemCard({ item, active, onPick, onRemove }) {
   );
 }
 
+/* --------------------------------------------------------------------------
+ * 작업영역 도구 모음
+ * ------------------------------------------------------------------------ */
+function BuildTools() {
+  const { state, dispatch } = useEditor();
+  const active = BUILD_TOOLS.find((t) => t.tool === state.tool);
+  const b = state.build;
+  const setB = (patch) => dispatch({ type: 'SET_BUILD', patch });
+
+  return (
+    <div className="space-y-2">
+      {BUILD_TOOLS.map(({ tool, label, Icon, desc }) => (
+        <button
+          key={tool}
+          onClick={() => dispatch({ type: 'SET_TOOL', tool: state.tool === tool ? TOOL.SELECT : tool })}
+          className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
+            state.tool === tool
+              ? 'border-sky-500/70 bg-sky-500/10'
+              : 'border-line bg-raise hover:border-edge hover:bg-raiseh'
+          }`}
+        >
+          <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-md text-sky-500 ring-1 ring-edge">
+            <Icon size={14} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xs font-medium text-ink">{label}</span>
+            <span className="mt-0.5 block text-[10.5px] leading-snug text-ink4">{desc}</span>
+          </span>
+        </button>
+      ))}
+
+      {/* 놓기 전에 정해 두는 규격.
+          같은 두께의 벽을 여러 장 세우는 일이 훨씬 많아서, 놓고 나서 하나씩
+          고치는 것보다 먼저 맞춰 두고 계속 찍는 쪽이 손이 덜 간다. */}
+      {(active?.tool === TOOL.AREA || active?.tool === TOOL.WALL) && (
+        <div className="rounded-lg border border-line bg-raise p-2">
+          <p className="mb-1 text-[10.5px] text-ink4">
+            {active.tool === TOOL.AREA ? '새 영역의 벽' : '새 내벽'} 규격
+          </p>
+          <Slider
+            label="두께" min={0.05} max={1.5} step={0.05}
+            value={b.wallThickness} text={`${b.wallThickness.toFixed(2)} m`}
+            onChange={(v) => setB({ wallThickness: v })}
+          />
+          <Slider
+            label="높이" min={0.3} max={12} step={0.1}
+            value={b.wallHeight} text={`${b.wallHeight.toFixed(2)} m`}
+            onChange={(v) => setB({ wallHeight: v })}
+          />
+          <ColorField label="벽 색" value={b.wallColor} onChange={(v) => setB({ wallColor: v })} />
+        </div>
+      )}
+
+      {active?.tool === TOOL.PILLAR && (
+        <div className="rounded-lg border border-line bg-raise p-2">
+          <p className="mb-1 text-[10.5px] text-ink4">새 기둥 규격</p>
+          <Slider
+            label="가로" min={0.1} max={3} step={0.05}
+            value={b.pillarW} text={`${b.pillarW.toFixed(2)} m`}
+            onChange={(v) => setB({ pillarW: v })}
+          />
+          <Slider
+            label="세로" min={0.1} max={3} step={0.05}
+            value={b.pillarD} text={`${b.pillarD.toFixed(2)} m`}
+            onChange={(v) => setB({ pillarD: v })}
+          />
+          <Slider
+            label="높이" min={0.3} max={12} step={0.1}
+            value={b.pillarHeight} text={`${b.pillarHeight.toFixed(2)} m`}
+            onChange={(v) => setB({ pillarHeight: v })}
+          />
+          <ColorField label="색" value={b.pillarColor} onChange={(v) => setB({ pillarColor: v })} />
+        </div>
+      )}
+
+      {/* 면을 그리는 방식 — 영역·구역에만 해당한다 */}
+      {active?.shaped && (
+        <div className="rounded-lg border border-line bg-raise p-2">
+          <p className="mb-1.5 text-[10.5px] text-ink4">{active.label} 그리는 방식</p>
+          <div className="flex gap-1.5">
+            {[
+              { id: SHAPE.RECT, label: '사각형', Icon: Square },
+              { id: SHAPE.PEN, label: '펜', Icon: PenTool },
+            ].map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                onClick={() => dispatch({ type: 'SET', patch: { drawShape: id, polyDraft: null } })}
+                className={`flex flex-1 items-center justify-center gap-1 rounded-md border px-2 py-1.5 text-[11px] transition-colors ${
+                  state.drawShape === id
+                    ? 'border-sky-500/70 bg-sky-500/10 text-sky-500'
+                    : 'border-line text-ink4 hover:text-ink2'
+                }`}
+              >
+                <Icon size={12} /> {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-lg border border-line bg-raise px-3 py-2 text-[10.5px] leading-relaxed text-ink4">
+        영역을 겹쳐 그리면 안쪽 선이 사라지고 <b className="text-ink3">바깥 윤곽 하나</b>로 합쳐집니다.
+        3D 뷰에서는 보는 쪽 벽이 자동으로 감춰집니다.
+      </div>
+    </div>
+  );
+}
+
+/* ========================================================================== */
+
 export default function LibraryPanel() {
   const { state, dispatch } = useEditor();
   const [tab, setTab] = useState(CATEGORY.EQUIPMENT);
@@ -92,19 +221,24 @@ export default function LibraryPanel() {
 
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r border-line bg-panel">
-      {/* 탭 */}
+      {/* 탭 — 아이콘 위, 이름 아래 */}
       <div className="flex border-b border-line">
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
-            onClick={() => setTab(id)}
-            className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+            onClick={() => {
+              setTab(id);
+              /* 다른 탭으로 넘어가면 그리던 도구는 놓는다 — 영역 도구를 든 채
+                 설비 탭을 보고 있으면 클릭이 어디로 가는지 알 수 없다 */
+              if (id !== BUILD) dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT });
+            }}
+            className={`flex flex-1 flex-col items-center justify-center gap-1 border-b-2 px-1 py-2 text-[11px] font-medium transition-colors ${
               tab === id
                 ? 'border-sky-500 text-sky-400'
                 : 'border-transparent text-ink4 hover:text-ink2'
             }`}
           >
-            <Icon size={13} />
+            <Icon size={15} />
             {label}
           </button>
         ))}
@@ -112,41 +246,54 @@ export default function LibraryPanel() {
 
       {/* 목록 */}
       <div className="flex-1 space-y-2 overflow-y-auto p-2.5">
-        {items.map((item) => (
-          <ItemCard
-            key={item.id}
-            item={item}
-            active={state.activeItemId === item.id}
-            onPick={() => dispatch({ type: 'PICK_ITEM', itemId: item.id })}
-            onRemove={() => remove(item)}
-          />
-        ))}
-        {items.length === 0 && (
-          <p className="px-2 py-8 text-center text-[11px] text-ink4">등록된 항목이 없습니다</p>
-        )}
+        {tab === BUILD ? (
+          <BuildTools />
+        ) : (
+          <>
+            {items.map((item) => (
+              <ItemCard
+                key={item.id}
+                item={item}
+                active={state.activeItemId === item.id}
+                onPick={() => dispatch({ type: 'PICK_ITEM', itemId: item.id })}
+                onRemove={() => remove(item)}
+              />
+            ))}
+            {items.length === 0 && (
+              <p className="px-2 py-8 text-center text-[11px] text-ink4">등록된 항목이 없습니다</p>
+            )}
 
-        <button
-          onClick={() => setImporting(true)}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-edge px-3 py-2.5 text-[11px] text-ink3 transition-colors hover:border-sky-500/60 hover:text-sky-600"
-        >
-          <Plus size={13} /> 내 모델 추가 (GLB)
-        </button>
+            <button
+              onClick={() => setImporting(true)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-edge px-3 py-2.5 text-[11px] text-ink3 transition-colors hover:border-sky-500/60 hover:text-sky-600"
+            >
+              <Plus size={13} /> 내 모델 추가 (GLB)
+            </button>
+          </>
+        )}
       </div>
 
       {/* 탭별 안내 */}
       <div className="border-t border-line px-3 py-2.5">
         <p className="text-[10.5px] leading-relaxed text-ink4">
-          {tab === CATEGORY.EQUIPMENT ? (
+          {tab === BUILD ? (
+            <>
+              <b className="text-ink3">사각형</b>은 끌어서, <b className="text-ink3">펜</b>은 점을 찍고
+              <kbd className="mx-1 rounded bg-kbd px-1 text-ink2">더블클릭</kbd>(또는 첫 점 다시 클릭)으로 닫습니다.
+              벽은 <b className="text-ink3">면을 한 번 더</b> 누르면 그 면만 따로 고칠 수 있습니다.
+            </>
+          ) : tab === CATEGORY.EQUIPMENT ? (
             <>
               항목을 고르면 <b className="text-ink3">탑뷰</b>로 전환됩니다. 클릭해서 배치하고
               <kbd className="mx-1 rounded bg-kbd px-1 text-ink2">R</kbd>로 90° 회전.
             </>
-          ) : tab === CATEGORY.CART ? (
+          ) : tab === CATEGORY.LOGISTICS ? (
             <>
-              바닥을 클릭해 <b className="text-ink3">순찰 경로</b>를 찍고
+              <b className="text-ink3">카트</b>는 바닥을 클릭해 순찰 경로를 찍고
               <kbd className="mx-1 rounded bg-kbd px-1 text-ink2">더블클릭</kbd>으로 마칩니다.
-              첫 점을 다시 누르면 고리로 닫힙니다. 경로가 설비 유출부 옆을 지나면 싣고,
-              유입부 옆을 지나면 내립니다.
+              <b className="text-ink3"> 선반</b>은 클릭해서 놓고
+              <kbd className="mx-1 rounded bg-kbd px-1 text-ink2">[ ]</kbd>로 길이를 조절합니다.
+              카트가 선반 앞을 지나면 싣고 있던 자재를 부립니다.
             </>
           ) : (
             <>
@@ -160,7 +307,7 @@ export default function LibraryPanel() {
 
       {importing && (
         <ImportDialog
-          defaultCategory={tab}
+          defaultCategory={tab === BUILD ? CATEGORY.EQUIPMENT : tab}
           onClose={() => setImporting(false)}
           onAdd={(item) => dispatch({ type: 'ADD_LIB_ITEM', item })}
         />

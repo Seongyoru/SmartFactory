@@ -27,6 +27,10 @@ export const layoutSnapshot = (state) => ({
   placed: state.placed,
   links: state.links,
   carts: state.carts,
+  areas: state.areas,
+  walls: state.walls,
+  pillars: state.pillars,
+  zones: state.zones,
   seq: state.seq,
 });
 

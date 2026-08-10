@@ -58,6 +58,45 @@ export function Row({ label, children }) {
   );
 }
 
+/** 값이 오른쪽에 붙는 슬라이더 — 인스펙터에서 가장 많이 쓰는 모양 */
+export function Slider({ label, value, text, onChange, min, max, step = 0.05 }) {
+  return (
+    <label className="mt-2 block first:mt-0">
+      <span className="mb-1 flex items-center justify-between text-[11px] text-ink4">
+        {label}
+        <b className="text-ink tabular-nums">{text}</b>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full accent-sky-500"
+      />
+    </label>
+  );
+}
+
+/** 색 고르기 — 견본을 크게 두어 도면 색을 눈으로 맞출 수 있게 한다 */
+export function ColorField({ label, value, onChange }) {
+  return (
+    <div className="flex items-center justify-between gap-2 py-1">
+      <span className="text-[11px] text-ink4">{label}</span>
+      <span className="flex items-center gap-1.5">
+        <span className="text-[10.5px] uppercase tabular-nums text-ink4">{value}</span>
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="h-6 w-9 cursor-pointer rounded border border-edge bg-field p-0.5"
+        />
+      </span>
+    </div>
+  );
+}
+
 export function Field({ label, ...rest }) {
   return (
     <label className="block py-1">

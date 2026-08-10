@@ -15,6 +15,7 @@
 import { getSpec } from './modelStore.js';
 import { worldPorts } from './ports.js';
 import { buildConnectorPath } from './routing.js';
+import { rotateXZ } from './grid.js';
 
 /** 배치된 설비 하나의 월드 포트 목록 */
 export function portsOf(placed, item) {
@@ -68,8 +69,8 @@ export function resolveEndpoint(ep, placedList, itemOf, ctx = {}) {
   /* 설비에 붙은 부속 접점 — 자재 포트와 무관하게 자기 높이에 붙는다 */
   if (ep.anchor) {
     const [lx, lz] = ep.local ?? [0, 0];
-    const [wx, wz] = rotateLocal([lx, lz], placed.rot);
-    const [dx, dz] = rotateLocal(ep.dir ?? [1, 0], placed.rot);
+    const [wx, wz] = rotateXZ([lx, lz], placed.rot);
+    const [dx, dz] = rotateXZ(ep.dir ?? [1, 0], placed.rot);
     return {
       world: [placed.pos[0] + wx, (placed.y ?? 0) + (ep.y ?? 1), placed.pos[1] + wz],
       dir: [dx, dz],
@@ -81,15 +82,6 @@ export function resolveEndpoint(ep, placedList, itemOf, ctx = {}) {
   return ports.find((p) => p.id === ep.portId) ?? ports[0] ?? null;
 }
 
-/* grid.js 의 rotateXZ 와 같은 식 (순환 import 회피) */
-function rotateLocal([x, z], rot) {
-  switch (((rot % 4) + 4) % 4) {
-    case 1: return [-z, x];
-    case 2: return [-x, -z];
-    case 3: return [z, -x];
-    default: return [x, z];
-  }
-}
 
 /* ---------------------------------------------------------------------------
  * 레이어 (층)

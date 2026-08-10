@@ -75,6 +75,8 @@ export function loadModel(key, { url = null, buffer = null, axis = null } = {}) 
         reject(e);
       }
     };
+    /* 파일이 없어도 되는 모델(선반처럼 절차적 대안이 있는 것)은 실패해도
+       그냥 'error' 로 두고 넘어간다. 호출부가 상태를 보고 대안을 그린다. */
     const onErr = (e) => {
       entry.status = 'error';
       entry.error = e;
@@ -127,6 +129,14 @@ export function useModelSpec(item) {
 
   if (!key) return null;
   return getSpec(key);
+}
+
+/** 모델을 못 구했는지 (없어도 되는 모델의 대안 렌더 판단용) */
+export function useModelMissing(item) {
+  const key = item?.modelKey ?? null;
+  const [, force] = useState(0);
+  useEffect(() => subscribeModels(() => force((n) => n + 1)), []);
+  return !!key && getStatus(key) === 'error';
 }
 
 /** 씬 사본. 머티리얼까지 복제할지 선택 (하이라이트/고스트용) */

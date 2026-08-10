@@ -25,14 +25,20 @@
 export const CATEGORY = {
   EQUIPMENT: 'equipment',
   CONNECTOR: 'connector',
-  CART: 'cart',
+  /** 운송/적재 — 카트와 선반이 함께 들어간다.
+      둘 다 "자재를 옮기고 쌓는" 물건이라 한 탭에 두지만, 놓는 방식은 다르다.
+      그래서 항목마다 kind 로 갈라 도구를 고른다. */
+  LOGISTICS: 'logistics',
 };
 
 export const CATEGORY_META = {
   equipment: { label: '설비', hint: '클릭해서 바닥에 배치합니다' },
   connector: { label: '연결장치', hint: '포트 → 포트로 이어 그립니다' },
-  cart: { label: '카트', hint: '순찰 경로를 찍어 그립니다' },
+  logistics: { label: '운송/적재', hint: '카트는 경로를, 선반은 자리를 정합니다' },
 };
+
+/** 운송/적재 탭 안의 세부 종류 */
+export const KIND = { CART: 'cart', SHELF: 'shelf' };
 
 export const BUILTIN_LIBRARY = [
   {
@@ -97,11 +103,29 @@ export const BUILTIN_LIBRARY = [
     id: 'CART',
     name: '이송 카트 (AGV)',
     desc: '1.37 × 2.15 m · 적재/하역',
-    category: CATEGORY.CART,
+    category: CATEGORY.LOGISTICS,
+    kind: KIND.CART,
     modelKey: '/models/Cart.glb',
     url: '/models/Cart.glb',
     axis: 'z',
     color: '#a78bfa',
+    source: 'builtin',
+  },
+
+  /* 선반(랙) — 카트가 부린 자재를 쌓아 둔다.
+     GLB 가 아직 없어도 절차적으로 그려서 바로 쓸 수 있다.
+     public/models/Shelf.glb 를 넣으면 그때부터 그 모델을 한 칸씩 이어 붙인다.
+     (optional: 파일이 없어도 조용히 넘어가라는 표시) */
+  {
+    id: 'SHELF',
+    name: '선반 (랙)',
+    desc: '길이 조절 · 3단 · 자재 적재',
+    category: CATEGORY.LOGISTICS,
+    kind: KIND.SHELF,
+    modelKey: '/models/Shelf.glb',
+    url: '/models/Shelf.glb',
+    optional: true,
+    color: '#34d399',
     source: 'builtin',
   },
 ];
@@ -126,7 +150,12 @@ export const isMaterialConnector = (item) =>
 /** 부속 배선/배관인가 — 자기 높이에 따로 놓이고 겹쳐도 층을 쌓지 않는다 */
 export const isUtility = (item) => item?.category === CATEGORY.CONNECTOR && !!item?.utility;
 
-export const isCart = (item) => item?.category === CATEGORY.CART;
+export const isCart = (item) => item?.kind === KIND.CART;
+export const isShelf = (item) => item?.kind === KIND.SHELF;
+
+/** 바닥에 클릭해서 놓는 물건인가 (설비 + 선반) */
+export const isPlaceable = (item) =>
+  item?.category === CATEGORY.EQUIPMENT || isShelf(item);
 
 export const isConnector = (item) => item?.category === CATEGORY.CONNECTOR;
 

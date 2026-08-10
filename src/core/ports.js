@@ -27,6 +27,7 @@
  */
 
 import * as THREE from 'three';
+import { rotateXZ } from './grid.js';
 
 const PORT_NAME = /^(port|in|out)[_\-.]/i;
 const DIR_SUFFIX = /@\s*([xz])\s*([+-])/i;
@@ -205,6 +206,87 @@ export function analyzeModel(object) {
     hasExplicitPorts: ports.length > 0,
     belt: analyzeBelt(object),
     payload: analyzePayload(object),
+    shelf: analyzeShelf(object),
+  };
+}
+
+/* ---------------------------------------------------------------------------
+ * 선반(랙) 분석
+ * ---------------------------------------------------------------------------
+ *  랙은 "한 칸" 을 만들어 두고 길이만큼 이어 붙인다. 그러려면 두 가지를 알아야 한다.
+ *
+ *   피치  — 한 칸의 길이. 기둥(Bar*) 사이 거리로 잰다. 이 간격으로 이어 붙이면
+ *          옆 칸의 기둥이 정확히 겹치므로, 이어지는 자리마다 기둥 하나만 남긴다.
+ *          바깥 바운딩 박스로 재면 기둥 두께만큼 벌어져 마디가 생긴다.
+ *   단높이 — 자재를 올리는 면. 선반판의 윗면 Y 를 그대로 쓴다.
+ *
+ *  선반판은 "넓고 납작한 메시" 로 가려낸다. 장식용 작은 부품이 단으로 잡히면
+ *  없는 층이 생기기 때문이다.
+ * ------------------------------------------------------------------------- */
+
+const BAR_NAME = /^(bar|post|기둥)/i;
+
+function analyzeShelf(root) {
+  const inv = new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const bars = [];
+  const boards = [];
+  const v = new THREE.Vector3();
+
+  root.traverse((n) => {
+    if (!n.isMesh) return;
+    n.updateWorldMatrix(true, false);
+    const local = new THREE.Matrix4().multiplyMatrices(inv, n.matrixWorld);
+    const pos = n.geometry.attributes.position;
+    const box = new THREE.Box3();
+    for (let i = 0; i < pos.count; i++) box.expandByPoint(v.fromBufferAttribute(pos, i).applyMatrix4(local));
+    const size = box.getSize(new THREE.Vector3());
+
+    if (BAR_NAME.test(n.name ?? '')) {
+      bars.push({ name: n.name, x: (box.min.x + box.max.x) / 2, box });
+    } else if (size.x > 0.8 && size.y < 0.4) {
+      boards.push({ name: n.name, top: box.max.y, box, size });
+    }
+  });
+
+  if (!boards.length) return null;
+
+  // 같은 높이의 판이 여러 장이어도 한 단으로 본다
+  const levels = [...new Set(boards.map((b) => Math.round(b.top * 1000) / 1000))].sort((a, b) => a - b);
+
+  const barXs = bars.map((b) => b.x);
+  const pitch = barXs.length >= 2
+    ? Math.max(...barXs) - Math.min(...barXs)
+    : Math.max(...boards.map((b) => b.size.x));
+
+  const depth = Math.max(...boards.map((b) => b.size.z));
+  const usable = Math.max(...boards.map((b) => b.size.x));
+
+  /* 단 간격 — 모델이 알려 주는 기본값. 사용자가 단 수와 간격을 바꾸면
+     이 판 하나를 그 높이마다 복제해서 쌓는다. */
+  const gaps = levels.slice(1).map((y, i) => y - levels[i]);
+  const spacing = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 1.4;
+
+  const lowest = boards.reduce((a, b) => (b.top < a.top ? b : a));
+
+  return {
+    /** 한 칸 길이 — 이 간격으로 이어 붙이면 기둥이 겹친다 */
+    pitch: pitch > 0.2 ? pitch : usable,
+    /** 모델이 갖고 있는 단 높이들 (참고용) */
+    levels,
+    /** 1단 높이 · 단 간격 — 단 수를 늘릴 때 이 값으로 새 단을 만든다 */
+    baseTop: levels[0],
+    spacing,
+    depth,
+    /** 한 단에서 실제로 자재를 놓을 수 있는 가로 길이 */
+    usable,
+    /** 복제해서 쌓을 선반판 (가장 아래 것) 과 그 판의 윗면 높이 */
+    boardName: lowest.name,
+    boardTop: lowest.top,
+    /** 기둥들 — 높이를 늘릴 때 Y 로 늘인다 */
+    postNames: bars.map((b) => b.name),
+    postHeight: bars.length ? Math.max(...bars.map((b) => b.box.max.y)) : 3.4,
+    /** 이어 붙일 때 첫 칸에만 남길 기둥 (가장 -X 쪽) */
+    startBar: bars.length ? bars.reduce((a, b) => (b.x < a.x ? b : a)).name : null,
   };
 }
 
@@ -405,8 +487,8 @@ export function worldPorts(placed, spec) {
   if (!spec?.ports) return [];
   const rot = placed.rot ?? 0;
   return spec.ports.map((p) => {
-    const [px, pz] = rotateXZ2([p.pos[0], p.pos[2]], rot);
-    const [dx, dz] = rotateXZ2(p.dir, rot);
+    const [px, pz] = rotateXZ([p.pos[0], p.pos[2]], rot);
+    const [dx, dz] = rotateXZ(p.dir, rot);
     return {
       ...p,
       uid: placed.uid,
@@ -417,12 +499,3 @@ export function worldPorts(placed, spec) {
   });
 }
 
-/* grid.js 의 rotateXZ 와 같은 식 — 순환 import 를 피하려고 여기 한 벌 둔다 */
-function rotateXZ2([x, z], rot) {
-  switch (((rot % 4) + 4) % 4) {
-    case 1: return [-z, x];
-    case 2: return [-x, -z];
-    case 3: return [z, -x];
-    default: return [x, z];
-  }
-}

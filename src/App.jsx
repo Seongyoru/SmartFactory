@@ -12,15 +12,17 @@
  */
 
 import React, { useEffect } from 'react';
-import { Ban, Cable, Crosshair, MousePointer2, Eraser, Truck, Box as BoxIcon } from 'lucide-react';
-import { EditorProvider, TOOL, VIEW, useEditor } from './core/store.jsx';
+import { Ban, Building2, Cable, Crosshair, MousePointer2, Eraser, Truck, Box as BoxIcon } from 'lucide-react';
+import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { loadModel } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
-import { BUILTIN_LIBRARY, PAYLOAD_ITEM, isUtility } from './data/library.js';
+import { BUILTIN_LIBRARY, PAYLOAD_ITEM, isShelf, isUtility } from './data/library.js';
+import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
 import LibraryPanel from './ui/LibraryPanel.jsx';
 import Toolbar from './ui/Toolbar.jsx';
 import Inspector from './ui/Inspector.jsx';
+import ZoneLayers from './ui/ZoneLayers.jsx';
 
 /* 기본 제공 모델은 앱이 뜨자마자 받아 둔다 — 라이브러리 카드에 치수를 띄우고,
    첫 배치 때 고스트가 늦게 나타나는 것을 막기 위해. */
@@ -33,7 +35,7 @@ function usePreloadBuiltins() {
 }
 
 function useShortcuts() {
-  const { state, dispatch } = useEditor();
+  const { state, dispatch, activeItem } = useEditor();
   useEffect(() => {
     const onKey = (e) => {
       const tag = e.target?.tagName;
@@ -53,19 +55,45 @@ function useShortcuts() {
         case 'X':
           dispatch({ type: 'SET_TOOL', tool: state.tool === TOOL.ERASE ? TOOL.SELECT : TOOL.ERASE });
           break;
+        /* 선반 길이 — 배치 중에는 손에 든 것을, 선택 중에는 그 선반을 늘린다 */
+        case '[':
+        case ']': {
+          const d = e.key === ']' ? 1 : -1;
+          if (state.tool === TOOL.PLACE && isShelf(activeItem)) dispatch({ type: 'SHELF_BAYS', delta: d });
+          else if (state.selected?.kind === 'equip') {
+            const p = state.placed.find((x) => x.uid === state.selected.uid);
+            if (p && isShelf(state.library.find((i) => i.id === p.itemId))) {
+              dispatch({
+                type: 'UPDATE_PLACED',
+                uid: p.uid,
+                patch: { bays: Math.max(MIN_BAYS, Math.min(MAX_BAYS, (p.bays ?? DEFAULT_BAYS) + d)) },
+              });
+            }
+          }
+          break;
+        }
         case 'Enter':
           if (state.tool === TOOL.PATH) dispatch({ type: 'PATH_FINISH', closed: e.shiftKey });
           break;
         case 'Escape':
-          if (state.pathDraft?.points.length) dispatch({ type: 'PATH_CANCEL' });
+          if (state.polyDraft?.points.length || state.wallDraft) dispatch({ type: 'POLY_CANCEL' });
+          else if (state.pathDraft?.points.length) dispatch({ type: 'PATH_CANCEL' });
           else if (state.connectFrom) dispatch({ type: 'CANCEL_CONNECT' });
           else dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT, itemId: null });
           break;
         case 'Delete':
         case 'Backspace':
-          // 경로를 찍는 중이면 마지막 점을 물린다
+          // 경로·도형을 찍는 중이면 마지막 점을 물린다
           if (state.tool === TOOL.PATH && state.pathDraft?.points.length) dispatch({ type: 'PATH_UNDO' });
-          else if (state.selected) dispatch({ type: 'DELETE', kind: state.selected.kind, uid: state.selected.uid });
+          else if (state.polyDraft?.points.length) dispatch({ type: 'POLY_UNDO' });
+          else if (state.selected) {
+            dispatch({
+              type: 'DELETE',
+              kind: state.selected.kind,
+              uid: state.selected.uid,
+              uids: state.selected.uids,
+            });
+          }
           break;
         case 'Tab':
           e.preventDefault();
@@ -77,7 +105,7 @@ function useShortcuts() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [state, dispatch]);
+  }, [state, dispatch, activeItem]);
 }
 
 /** 현재 무엇을 하는 중인지 캔버스 위에 띄우는 안내 */
@@ -94,9 +122,31 @@ function ModeBanner() {
 
   if (tool === TOOL.SELECT) return null;
 
+  const buildText = () => {
+    const pen = state.drawShape === SHAPE.PEN;
+    const n = state.polyDraft?.points.length ?? 0;
+    if (tool === TOOL.PILLAR) return '기둥을 세울 자리를 클릭하세요';
+    if (tool === TOOL.WALL) {
+      return state.wallDraft ? '끝점을 클릭하세요 · 다른 벽 끝에 붙습니다' : '내벽 시작점을 클릭하세요';
+    }
+    const what = tool === TOOL.ZONE ? '구역' : '영역';
+    if (!pen) return `${what} — 끌어서 사각형을 그리세요${tool === TOOL.ZONE ? ' (바닥 위에서만)' : ''}`;
+    return n === 0
+      ? `${what} — 펜: 첫 점을 클릭하세요`
+      : `점 ${n}개 · 더블클릭으로 닫기 · 첫 점을 다시 눌러도 됩니다`;
+  };
+
   const info =
-    tool === TOOL.PLACE
-      ? { Icon: BoxIcon, color: 'text-cyan-600 ring-cyan-500/40', text: `${activeItem?.name ?? ''} 배치 — 클릭해서 놓기 · R 회전` }
+    isBuildTool(tool)
+      ? { Icon: Building2, color: 'text-emerald-600 ring-emerald-500/40', text: buildText() }
+    : tool === TOOL.PLACE
+      ? {
+          Icon: BoxIcon,
+          color: 'text-cyan-600 ring-cyan-500/40',
+          text: isShelf(activeItem)
+            ? `${activeItem?.name ?? ''} · 길이 ${state.shelfBays}칸 — [ ] 로 조절 · R 회전`
+            : `${activeItem?.name ?? ''} 배치 — 클릭해서 놓기 · R 회전`,
+        }
       : tool === TOOL.PATH
         ? {
             Icon: Truck,
@@ -180,6 +230,7 @@ function Shell() {
         <main className="relative min-w-0 flex-1">
           <EditorScene />
           <ModeBanner />
+          <ZoneLayers />
         </main>
         <Inspector />
       </div>
