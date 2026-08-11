@@ -327,9 +327,40 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false, roles
     ? out
         .filter((st) => st.kind !== 'unload')
         .map((st) => (st.kind === 'shelf-in' ? { ...st, kind: 'shelf-out' } : st))
-    : out;
+    : settleShelfRoles(out);
 
   return list.sort((a, b) => a.s - b.s);
+}
+
+/**
+ * 역할을 정하지 않은 선반의 기본값을 **경로 전체를 보고** 정한다.
+ * ---------------------------------------------------------------------------
+ *  선반 하나만 놓고 보면 어느 쪽 반을 지나느냐로 싣기·내리기가 갈린다. 그런데 그
+ *  판정은 **경로에 무엇이 더 있는지를 모른다.** 적치대에서 싣고 선반에 내려놓는,
+ *  가장 흔한 구성에서 이런 일이 생긴다.
+ *
+ *    적치대 — 싣기 하나뿐이다(방향이 형상으로 정해져 있다)
+ *    선반   — 하필 출고 구역 쪽을 지나가서 **싣기**로 잡힌다
+ *    → 싣는 곳만 둘. 카트는 한 번 실으면 내릴 데가 없어 짐을 진 채 계속 돈다
+ *
+ *  방향이 형상으로 **정해진** 역이 한쪽뿐이라면, 고르지 않은 선반은 반대쪽이어야
+ *  경로가 말이 된다 — 적치대에서 실었으면 선반은 내려놓는 곳이다. 그렇게 두면
+ *  경로를 그리자마자 자재가 돈다.
+ *
+ *  직접 정한 선반(role)은 건드리지 않는다. 정해진 역이 양쪽 다 있거나 하나도
+ *  없으면(선반끼리 나르는 경우) 판단할 근거가 없으므로 가까운 쪽 구역을 따른다.
+ */
+function settleShelfRoles(list) {
+  if (!list.some((st) => st.canRole && !st.role)) return list;
+
+  const fixed = list.filter((st) => !st.canRole);
+  const takesOnly = fixed.some((st) => st.kind === 'shelf-out' || st.kind === 'load');
+  const givesOnly = fixed.some((st) => st.kind === 'shelf-in' || st.kind === 'unload');
+  if (takesOnly === givesOnly) return list;          // 둘 다거나 둘 다 아니면 그대로
+
+  const kind = takesOnly ? 'shelf-in' : 'shelf-out';
+  return list.map((st) =>
+    (st.canRole && !st.role ? { ...st, kind, settled: true } : st));
 }
 
 /**

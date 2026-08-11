@@ -138,6 +138,8 @@ const STEPS = [
               정차역이 잡혔지만 아직 <b>싣는 곳과 내리는 곳이 둘 다</b> 있지는 않습니다.
               적치대(싣기)와 선반(내리기)을 모두 지나가야 자재가 실제로 옮겨집니다.
             </span>
+            <br />역할이 잘못 잡혔다면 <b className="text-ink2">카트를 고르고 → 정차역 목록</b>에서
+            그 줄을 눌러 <b className="text-ink2">싣기 / 내리기</b>를 직접 바꿀 수 있습니다.
           </>
         )}
       </>
@@ -296,9 +298,13 @@ function Checklist({ facts, canClose, onClose }) {
     </button>
   );
 
+  /* 가리킬 곳 — 단계가 남았으면 그 단계, 다 했는데 3D 를 아직 안 봤으면 그 버튼.
+     마지막에 닫기를 잠가 놓고 어디를 눌러야 풀리는지 안 알려 주면 갇힌다. */
+  const spotSel = step ? step.spot(facts) : canClose ? [] : ['[data-guide="view-iso"]'];
+
   return (
     <>
-      {!folded && step && <Spot selectors={step.spot(facts)} />}
+      {!folded && spotSel.length > 0 && <Spot selectors={spotSel} />}
 
       <div className="absolute bottom-3 left-3 z-10 w-[286px] overflow-hidden rounded-lg border border-line bg-float shadow-lg backdrop-blur">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2">
@@ -356,8 +362,20 @@ function Checklist({ facts, canClose, onClose }) {
 
             {allDone && (
               <div className="mt-2 rounded-md bg-emerald-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-ink2 ring-1 ring-emerald-500/25">
-                전부 마쳤습니다. 이제 도면을 늘려 가며 어디가 막히는지 지켜보세요 —
-                적치대가 차면 그 앞 공정이 줄줄이 섭니다.
+                {canClose ? (
+                  <>
+                    전부 마쳤습니다. 이제 도면을 늘려 가며 어디가 막히는지 지켜보세요 —
+                    적치대가 차면 그 앞 공정이 줄줄이 섭니다.
+                  </>
+                ) : (
+                  <>
+                    전부 마쳤습니다. <b className="text-ink">마지막으로 3D 로 한 번 보세요.</b>
+                    <br />툴바 왼쪽 위의 <b className="text-ink">3D · 확인</b>을 누르거나
+                    <kbd className="mx-0.5 rounded bg-kbd px-1">Tab</kbd> 을 치면 됩니다
+                    (지금 <span className="text-sky-500">파란 테두리</span>로 깜빡이는 곳).
+                    <br />앞을 가리는 벽은 저절로 감춰집니다. 보고 나면 이 안내를 닫을 수 있습니다.
+                  </>
+                )}
                 <div className="mt-2">{closeBtn('닫기')}</div>
               </div>
             )}

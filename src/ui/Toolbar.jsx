@@ -71,6 +71,7 @@ export default function Toolbar() {
         </button>
         <button
           onClick={() => setView(VIEW.ISO)}
+          data-guide="view-iso"
           className={`rounded px-2.5 py-1 text-[11px] font-medium transition-colors ${
             state.view === VIEW.ISO ? 'bg-sky-500 text-white' : 'text-ink3 hover:text-ink'
           }`}
