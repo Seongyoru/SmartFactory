@@ -16,6 +16,7 @@ import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, 
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { loadModel } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
+import { useShipped } from './core/simStore.js';
 import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
@@ -242,6 +243,46 @@ function ModeBanner() {
  *  화면에만** 영향을 주기 때문이다 — 도면 자체는 달라지지 않는다.
  *  탑뷰에서는 애초에 벽이 감춰지지 않으므로 버튼도 나오지 않는다.
  */
+/**
+ * 출하 누계 — 화면 왼쪽 위에 종류별로 쌓인다.
+ * ---------------------------------------------------------------------------
+ *  트럭이 개구부로 빠져나가면 싣고 있던 것이 공장을 떠난다. 그 결과가 인스펙터
+ *  안에만 있으면 도면을 보는 동안에는 알 수 없다 — 라인이 도는 것을 지켜보는
+ *  일이 곧 이 도면의 목적이므로, 성과는 **늘 보이는 자리**에 있어야 한다.
+ *
+ *  종류별로 나눠 세는 이유: 총량만으로는 한쪽 공정만 돌고 있어도 숫자가 오른다.
+ *  두 값이 나란히 오르는지를 보면 라인이 균형 있게 도는지가 그대로 드러난다.
+ *
+ *  아무것도 안 나갔으면 띄우지 않는다 — 0 만 적힌 상자는 화면만 가린다.
+ */
+function ShippedHUD() {
+  const shipped = useShipped();
+  const kinds = Object.entries(shipped).filter(([, n]) => n > 0);
+  if (!kinds.length) return null;
+
+  return (
+    <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-1">
+      {kinds.map(([kind, n]) => {
+        const it = PAYLOAD_ITEMS[kind];
+        return (
+          <div
+            key={kind}
+            className="flex items-center gap-2 rounded-full bg-float px-2.5 py-1 text-[11.5px] ring-1 ring-edge backdrop-blur"
+            title={`${it?.name ?? kind} 출하 누계`}
+          >
+            <i
+              className="inline-block h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-black/20"
+              style={{ background: it?.color ?? '#94a3b8' }}
+            />
+            <b className="tabular-nums text-ink">{n.toLocaleString()}</b>
+            <span className="text-ink4">{it?.name ?? kind}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ViewOptions() {
   const { state, dispatch } = useEditor();
   if (state.view !== VIEW.ISO) return null;
@@ -304,6 +345,7 @@ function Shell() {
             <EditorScene />
           </ErrorBoundary>
           <ModeBanner />
+          <ShippedHUD />
           <ViewOptions />
           <ZoneLayers />
         </main>

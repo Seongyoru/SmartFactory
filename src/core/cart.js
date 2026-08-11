@@ -65,6 +65,26 @@ export const stationStyle = (kind) => STATION_STYLE[kind] ?? STATION_STYLE.unloa
  */
 const FRONT_COS = 0.35;
 
+/**
+ * 이번 역에서 몇 개나 더 실을 수 있는가.
+ * ---------------------------------------------------------------------------
+ *  ── 카트 (topUp = false) ─────────────────────────────────────────────────
+ *  **비어 있을 때만** 싣는다. 한 곳에서 받아 다른 곳에 옮기는 것이 카트의 일이라,
+ *  가는 길에 이것저것 주워 담으면 어디에 무엇을 내려놓아야 하는지가 흐려진다.
+ *  실을 양은 그 역이 권하는 값(want)을 따른다.
+ *
+ *  ── 트럭 (topUp = true) ──────────────────────────────────────────────────
+ *  하는 일이 "밖으로 내보내기" 하나뿐이라 목적지가 갈리지 않는다. 첫 역에서 다
+ *  못 채웠는데 그대로 나가면 반쯤 빈 차가 왕복하게 되므로, **자리가 남는 동안
+ *  다음 역에서 마저 채운다.** 다 차면 0 이 되어 남은 역을 그냥 지나친다.
+ *
+ *  @param want 그 역이 권하는 양 (선반의 dispatch · 설비의 count). 트럭은 안 본다
+ */
+export function loadRoom(carried, capacity, topUp, want) {
+  if (topUp) return Math.max(0, capacity - carried);
+  return carried === 0 ? Math.max(0, want ?? 0) : 0;
+}
+
 export function cartPath(cart) {
   if (!cart?.points || cart.points.length < 2) return null;
   return buildFreePath(cart.points, {

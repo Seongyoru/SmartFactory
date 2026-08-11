@@ -16,8 +16,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
+import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
-import { stationStyle, stepCart } from '../core/cart.js';
+import { loadRoom, stationStyle, stepCart } from '../core/cart.js';
 import { addLots, addShipped, takeLots } from '../core/simStore.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
@@ -119,6 +120,24 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
 
   const axis = spec?.connector?.axis ?? 'z';
 
+  /**
+   * 얼마나 실을 수 있는가 · 나눠 채울 것인가.
+   * -------------------------------------------------------------------------
+   *  트럭은 하는 일이 "밖으로 내보내기" 하나뿐이라 목적지가 갈리지 않는다.
+   *  그래서 자리가 남는 동안 **여러 역에서 나눠 채우고** 다 차면 그대로 나간다.
+   *  카트는 한 곳에서 받아 다른 곳에 옮기는 것이 일이라, 가는 길에 이것저것
+   *  주워 담으면 어디에 무엇을 내려놓을지가 흐려진다 — 비어 있을 때만 싣는다.
+   */
+  const topUp = shipOutside;
+  const capacity = Math.max(0, cart.loadCount ?? (shipOutside ? 10 : 3));
+  const full = carried >= capacity && capacity > 0;
+
+  /* 적재량 표시는 트럭에만 붙인다. 카트는 실을 양이 가는 곳마다 달라서
+     (선반이 권하는 양을 따른다) 분모로 삼을 수가 없다. */
+  const showLoad = shipOutside && capacity > 0;
+  /* 차체 위 — 모델 높이를 알면 그 위로, 모르면 넉넉히 */
+  const loadLabelY = (spec?.bbox?.size?.[1] ?? 3.3) + 0.6;
+
   useFrame((_, dt) => {
     const g = groupRef.current;
     if (!g || !path) return;
@@ -169,19 +188,26 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
             }
           }
         } else if (a.kind === 'shelf-out') {
-          // 싣기 — 비어 있을 때만
-          if (carried === 0) {
-            /* 몇 개를 싣고 나갈지는 **차량이** 정한다 — 선반은 얼마든지 내줄
-               수 있고, 한 번에 실어 낼 양은 차의 성질이기 때문이다.
-               지정이 없으면 선반이 권하는 양을 따른다(기존 카트 동작). */
-            const want = cart.loadCount ?? a.dispatch ?? 0;
+          /**
+           * 싣기.
+           * -------------------------------------------------------------------
+           *  카트는 **비어 있을 때만** 싣는다. 한 곳에서 받아 다른 곳에 옮기는
+           *  것이 카트의 일이라, 가는 길에 이것저것 주워 담으면 어디에 무엇을
+           *  내려놓아야 하는지가 흐려진다.
+           *
+           *  트럭은 반대다. 하는 일이 "밖으로 내보내기" 하나뿐이라 목적지가
+           *  갈리지 않는다. 첫 역에서 다 못 채웠는데 그대로 나가면 반쯤 빈 차가
+           *  왕복하게 되므로, **자리가 남는 동안 다음 역에서 마저 채운다.**
+           */
+          const room = loadRoom(carried, capacity, topUp, cart.loadCount ?? a.dispatch ?? 0);
+          if (room > 0) {
             /* 무엇을 가져올지 정해 두었으면 **그 종류만** 골라 온다.
                선반에는 여러 종류가 섞여 쌓이므로, 정해 두지 않으면 위에 있던
                것이 잡히는 대로 실린다 — 필요한 것만 나르려면 골라야 한다. */
-            const got = takeLots(a.uid, want, cart.pickKind ?? null);
+            const got = takeLots(a.uid, room, cart.pickKind ?? null);
             if (got.length > 0) {
-              setCarried(got.length);
-              setCarriedKinds(got);
+              setCarried(carried + got.length);
+              setCarriedKinds([...carriedKinds, ...got]);
               sourceRef.current = a.uid;
               acted = true;
             }
@@ -189,9 +215,10 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
         } else if (a.kind === 'load') {
           /* 설비에서 싣는 것도 마찬가지다 — "이 종류만 나른다" 고 정해 둔
              카트는 다른 것을 만드는 설비 앞을 그냥 지나간다. */
-          if (a.count > 0 && (!cart.pickKind || (a.payloadKind ?? 'OBJ') === cart.pickKind)) {
-            setCarried(a.count);
-            setCarriedKinds(Array.from({ length: a.count }, () => a.payloadKind ?? 'OBJ'));
+          const take = Math.min(a.count, loadRoom(carried, capacity, topUp, a.count));
+          if (take > 0 && (!cart.pickKind || (a.payloadKind ?? 'OBJ') === cart.pickKind)) {
+            setCarried(carried + take);
+            setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind ?? 'OBJ')]);
             sourceRef.current = a.uid;
             acted = true;
           }
@@ -217,7 +244,8 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
        않아, 도면이 틀렸다는 것이 짐을 실은 채 도는 트럭으로 드러난다. */
     const outside = floor && !pointInMP(floor, [f.pos[0], f.pos[2]]);
     if (running && shipOutside && carried > 0 && outside && inGate(gates, [f.pos[0], f.pos[2]])) {
-      addShipped(carried);
+      /* 무엇이 나갔는지까지 넘긴다 — 총량만 세면 라인이 한쪽으로 치우쳐도 모른다 */
+      addShipped(carriedKinds);
       setCarried(0);
       setCarriedKinds([]);
       sourceRef.current = null;
@@ -244,6 +272,36 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
           </mesh>
         )}
       </group>
+
+      {/* 적재량 — 눌러 보지 않아도 몇 개를 실었는지 보인다.
+          차체 위에 띄우되 화면 픽셀 크기로 그린다(Html) — 도면을 줌 아웃해도
+          숫자는 읽혀야 하기 때문이다. 축척에 맞춰 줄어들면 정작 전체를 볼 때
+          안 보인다. 채워질수록 색이 짙어져 멀리서는 숫자를 안 읽어도 안다. */}
+      {showLoad && (
+        <Html
+          position={[0, loadLabelY, 0]}
+          center
+          zIndexRange={[20, 0]}
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
+          <div
+            style={{
+              padding: '1px 6px',
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 700,
+              lineHeight: 1.5,
+              fontVariantNumeric: 'tabular-nums',
+              whiteSpace: 'nowrap',
+              color: '#fff',
+              background: full ? '#16a34a' : carried > 0 ? '#0284c7' : 'rgba(15,23,42,0.72)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
+            }}
+          >
+            {carried}/{capacity}
+          </div>
+        </Html>
+      )}
 
       {selected && (
         <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={6}>

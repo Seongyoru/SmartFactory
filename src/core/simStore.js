@@ -179,14 +179,31 @@ export const useAllStock = () =>
  *  쌓이지 않으므로 재고와 달리 "나간 총량" 만 센다. 이 값이 있어야 도면이
  *  실제로 물건을 내보내고 있는지 눈으로 확인할 수 있다.
  */
-let shipped = 0;
+/**
+ *  ── 왜 종류별로 세는가 ────────────────────────────────────────────────────
+ *  총량 하나만 세면 "오늘 300개 나갔다" 는 알아도 그중 무엇이 몇 개인지는 알 수
+ *  없다. 설비마다 다른 물건을 만들고 카트가 골라 나르는 지금은, 라인이 제대로
+ *  도는지가 **종류별 비율**로 드러난다 — 한쪽만 쌓이면 어딘가 막힌 것이다.
+ *
+ *  { [종류]: 개수 } 로 두고 총량은 필요할 때 더한다.
+ */
+let shipped = {};
+const EMPTY_SHIPPED = {};
 
-export function addShipped(n) {
-  if (!(n > 0)) return;
-  shipped += n;
+/** @param kinds 나간 물건들의 종류 목록 (카트가 싣고 있던 그대로) */
+export function addShipped(kinds) {
+  const list = Array.isArray(kinds) ? kinds : [];
+  if (!list.length) return;
+  const next = { ...shipped };
+  for (const k of list) next[k ?? 'OBJ'] = (next[k ?? 'OBJ'] ?? 0) + 1;
+  shipped = next;
   emit();
 }
 
-export const resetShipped = () => { shipped = 0; emit(); };
+export const resetShipped = () => { shipped = EMPTY_SHIPPED; emit(); };
 
-export const useShipped = () => useSyncExternalStore(subscribe, () => shipped, () => 0);
+/** 종류별 출하 누계 { [종류]: 개수 } */
+export const useShipped = () =>
+  useSyncExternalStore(subscribe, () => shipped, () => EMPTY_SHIPPED);
+
+export const shippedTotal = (map) => Object.values(map ?? {}).reduce((s, n) => s + n, 0);

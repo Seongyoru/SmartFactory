@@ -8,7 +8,7 @@ import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import { cartPath, cartStations, nextRole, stationStyle } from '../core/cart.js';
-import { clearStock, setStock, useLots, useShipped, useStock } from '../core/simStore.js';
+import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { PAYLOAD_ITEMS, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
   MAX_BAYS,
@@ -1798,8 +1798,12 @@ function Summary() {
         </Row>
         <Row label="총 연장 길이">{total.toFixed(2)} m</Row>
         <Row label="건물">영역 {state.areas.length} · 개구부 {state.openings.length}</Row>
-        {/* 트럭이 개구부로 실어 낸 누계 — 도면이 실제로 물건을 내보내는지 확인용 */}
-        <Row label="출하 누계">{shipped} 개</Row>
+        {/* 트럭이 개구부로 실어 낸 누계 — 도면이 실제로 물건을 내보내는지 확인용.
+            종류별 내역은 화면 왼쪽 위에 늘 떠 있다(ShippedHUD). */}
+        <Row label="출하 누계">{shippedTotal(shipped)} 개</Row>
+        {Object.entries(shipped).map(([kind, n]) => (
+          <Row key={kind} label={`· ${PAYLOAD_ITEMS[kind]?.name ?? kind}`}>{n} 개</Row>
+        ))}
       </Section>
 
       <Section title="조작">
