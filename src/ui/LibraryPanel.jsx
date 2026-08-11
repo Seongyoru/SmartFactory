@@ -127,6 +127,7 @@ function BuildTools() {
       {BUILD_TOOLS.map(({ tool, label, Icon, desc }) => (
         <button
           key={tool}
+          data-guide={`tool-${tool}`}
           onClick={() => dispatch({ type: 'SET_TOOL', tool: state.tool === tool ? TOOL.SELECT : tool })}
           className={`flex w-full items-start gap-2.5 rounded-lg border px-3 py-2.5 text-left transition-colors ${
             state.tool === tool
@@ -267,6 +268,7 @@ export default function LibraryPanel() {
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
+            data-guide={`tab-${id}`}
             onClick={() => {
               setTab(id);
               /* 다른 탭으로 넘어가면 그리던 도구는 놓는다 — 영역 도구를 든 채
