@@ -8,6 +8,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  GraduationCap,
   Grid3x3,
   Magnet,
   Moon,
@@ -174,6 +175,15 @@ export default function Toolbar() {
         />
         <span className="w-14 tabular-nums text-ink2">{state.beltSpeed.toFixed(2)} m/s</span>
       </label>
+
+      {/* 따라 하기 — 처음 한 번은 저절로 뜨고, 그 뒤로는 여기서 다시 연다 */}
+      <IconBtn
+        title="따라 하기 — 순서대로 도면 하나 만들어 보기"
+        active={!!state.guide}
+        onClick={() => dispatch({ type: 'SET', patch: { guide: state.guide ? null : 'steps' } })}
+      >
+        <GraduationCap size={14} />
+      </IconBtn>
 
       <IconBtn
         title={state.appearance === 'light' ? '다크 모드로' : '라이트 모드로'}

@@ -13,6 +13,7 @@
 const LAYOUT_KEY = 'egis.factory.layout.v1';
 const LIB_KEY = 'egis.factory.userlib.v1';
 const THEME_KEY = 'egis.factory.appearance';
+const GUIDE_KEY = 'egis.factory.guide.v1';
 const DB_NAME = 'egis-factory';
 const STORE = 'models';
 
@@ -89,6 +90,35 @@ export function loadAppearance() {
 export function saveAppearance(value) {
   try {
     localStorage.setItem(THEME_KEY, value);
+  } catch { /* 무시 */ }
+}
+
+/**
+ * 따라 하기 안내가 어디까지 왔는가 — 'welcome' · 'steps' · null(닫힘).
+ * ---------------------------------------------------------------------------
+ *  환영 창은 **처음 여는 브라우저에만** 띄운다. 두 번째부터도 뜨면 성가시다.
+ *  체크리스트는 닫기 전까지 남는다 — 따라 하는 도중에 새로고침했다고 안내가
+ *  사라지면, 그때가 하필 제일 아쉬운 순간이다.
+ *
+ *  **도면이 아니라 이 브라우저의 습관**이라 레이아웃과 따로 둔다. 도면을
+ *  불러오거나 초기화해도 안내는 그대로다.
+ *
+ *  단계별 진행도는 저장하지 않는다. 그건 도면을 보면 알 수 있고(바닥이 있는가,
+ *  설비가 있는가), 따로 적어 두면 도면과 어긋날 수 있다.
+ */
+export function loadGuidePhase() {
+  try {
+    const v = localStorage.getItem(GUIDE_KEY);
+    if (v === null) return 'welcome';          // 이 브라우저에서 처음 연다
+    return v === 'steps' ? 'steps' : null;     // 그 밖('done')은 닫아 둔 것
+  } catch {
+    return null;
+  }
+}
+
+export function saveGuidePhase(phase) {
+  try {
+    localStorage.setItem(GUIDE_KEY, phase === 'steps' ? 'steps' : 'done');
   } catch { /* 무시 */ }
 }
 

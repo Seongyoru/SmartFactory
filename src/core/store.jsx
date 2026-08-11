@@ -34,9 +34,11 @@ import {
   getModelBuffer,
   layoutSnapshot,
   loadAppearance,
+  loadGuidePhase,
   loadLayout,
   loadUserLibrary,
   saveAppearance,
+  saveGuidePhase,
   saveLayout,
   saveUserLibrary,
 } from './persistence.js';
@@ -180,6 +182,18 @@ const initialState = {
    *  도면이 아니라 "지금 무엇을 하는 중인가" 라서 되돌리기·저장에는 넣지 않는다.
    */
   editShape: null,
+
+  /**
+   * 따라 하기 안내 — null(닫힘) · 'welcome'(환영 창) · 'steps'(체크리스트).
+   * -------------------------------------------------------------------------
+   *  이 편집기는 **바닥을 먼저 그려야** 설비를 놓을 수 있다. 처음 여는 사람이
+   *  기계부터 고르면 아무 데도 놓이지 않는데, 화면만 봐서는 왜 안 되는지 알
+   *  길이 없다 — 순서를 먼저 알려 주는 편이 안내문 열 줄보다 낫다.
+   *
+   *  도면이 아니라 지금 무엇을 하는 중인가라서 되돌리기·저장에는 넣지 않는다.
+   *  어디까지 왔는지만 이 브라우저에 남긴다(persistence 의 loadGuidePhase).
+   */
+  guide: loadGuidePhase(),
 
   selected: null,       // { kind:'equip'|'link'|'cart'|'area'|'wall'|'pillar'|'zone', uid, edge? }
   connectFrom: null,    // 포트 참조 { uid, portId }
@@ -1150,6 +1164,14 @@ export function EditorProvider({ children }) {
     document.documentElement.dataset.theme = state.appearance;
     saveAppearance(state.appearance);
   }, [state.appearance]);
+
+  /* ---- 따라 하기: 어디까지 왔는지 이 브라우저에 남긴다 -------------------
+   *  'welcome' 일 때는 저장하지 않는다. 아직 아무것도 고르지 않은 상태라,
+   *  띄워 놓은 채 새로고침했다고 환영 창을 영영 못 보게 되면 곤란하다.
+   *  여는 길이 여럿(환영 창 · 툴바)이라 저장은 이 한 곳에서만 한다. */
+  useEffect(() => {
+    if (state.guide !== 'welcome') saveGuidePhase(state.guide);
+  }, [state.guide]);
 
   /* ---- 조회 헬퍼 -------------------------------------------------------- */
   const itemOf = useCallback((id) => state.library.find((i) => i.id === id) ?? null, [state.library]);
