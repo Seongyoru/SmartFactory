@@ -7,7 +7,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, RotateCw, Trash2 } from 'lucide-
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
-import { cartPath, cartStations, stationStyle } from '../core/cart.js';
+import { cartPath, cartStations, nextRole, stationStyle } from '../core/cart.js';
 import { clearStock, setStock, useLots, useShipped, useStock } from '../core/simStore.js';
 import { PAYLOAD_ITEMS, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
@@ -593,9 +593,18 @@ function CartPanel({ cart }) {
   const item = itemOf(cart.itemId);
   const path = useMemo(() => cartPath(cart), [cart]);
   const stations = useMemo(
-    () => (path ? cartStations(path, state.placed, itemOf, { loadOnly: isTruck(item) }) : []),
-    [path, state.placed, itemOf, version, item],
+    () => (path ? cartStations(path, state.placed, itemOf, { loadOnly: isTruck(item), roles: cart.roles }) : []),
+    [path, state.placed, itemOf, version, item, cart.roles],
   );
+
+  /** 역 하나의 역할을 자동 → 싣기 → 내리기 → 자동 으로 돌린다 */
+  const cycleRole = (key) => {
+    const next = { ...(cart.roles ?? {}) };
+    const now = nextRole(next[key]);
+    if (now) next[key] = now;
+    else delete next[key];
+    dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { roles: next } });
+  };
 
   const slider = (label, key, min, max, step, unit, fallback) => (
     <label className="mt-2 block">
@@ -730,30 +739,81 @@ function CartPanel({ cart }) {
         )}
       </Section>
 
+      {/* 무엇을 나르는 카트인가.
+          선반에는 여러 종류가 섞여 쌓인다. 정해 두지 않으면 위에 있던 것이
+          잡히는 대로 실리므로, 특정 물건만 옮기려면 여기서 고른다. */}
+      {!truck && (
+        <Section title="가져올 물건">
+          <div className="flex flex-wrap gap-1">
+            <Btn active={!cart.pickKind} onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: null } })}>
+              가리지 않음
+            </Btn>
+            {Object.entries(PAYLOAD_ITEMS).map(([key, it]) => (
+              <Btn
+                key={key}
+                active={cart.pickKind === key}
+                onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: key } })}
+              >
+                <i className="inline-block h-2 w-2 rounded-[2px]" style={{ background: it.color }} />
+                {it.name}
+              </Btn>
+            ))}
+          </div>
+          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+            {cart.pickKind
+              ? `섞여 쌓인 더미에서 ${PAYLOAD_ITEMS[cart.pickKind]?.name ?? cart.pickKind} 만 골라 옵니다. 다른 것을 만드는 설비 앞은 그냥 지나갑니다.`
+              : '위에 있는 것부터 잡히는 대로 싣습니다.'}
+          </p>
+        </Section>
+      )}
+
       <Section title={`정차역 ${stations.length}개`}>
         {stations.length === 0 && (
           <p className="text-[10.5px] leading-relaxed text-ink4">
-            경로가 설비 포트 옆(3.5m 이내)을 지나가면 자동으로 역이 됩니다. 유출부면 싣고,
-            유입부면 내립니다.
+            경로가 설비 포트나 선반 앞(1m 이내)을 지나가면 자동으로 역이 됩니다.
+            유출부면 싣고, 유입부면 내립니다.
           </p>
         )}
         <ul className="space-y-1">
           {stations.map((st, i) => {
             const style = stationStyle(st.kind);
             const qty = st.kind === 'load' ? ` ${st.count}개` : st.kind === 'shelf-out' ? ` ${st.dispatch}개` : '';
+            /* 역할을 고를 수 있는 것은 선반뿐이다(cart.js 의 canRole).
+               적치대는 방향이 하나고, 설비 포트는 유입·유출이 형상으로 정해져
+               있으며, 트럭은 애초에 싣기만 한다. */
+            const pickable = !truck && st.canRole;
             return (
-              <li key={i} className="flex items-center justify-between text-[11px]">
-                <span className="flex items-center gap-1.5 text-ink2">
-                  <i className="inline-block h-1.5 w-1.5 rounded-full" style={{ background: style.color }} />
-                  {st.name}
+              <li key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                <span className="flex min-w-0 items-center gap-1.5 text-ink2">
+                  <i className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: style.color }} />
+                  <span className="truncate">{st.name}</span>
                 </span>
-                <span className="tabular-nums text-ink4">
-                  {style.label}{qty} · {st.s.toFixed(1)}m
-                </span>
+                {pickable ? (
+                  <button
+                    onClick={() => cycleRole(st.key)}
+                    title="눌러서 자동 → 싣기 → 내리기"
+                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10.5px] tabular-nums ${
+                      st.role ? 'bg-sky-500/15 text-sky-500' : 'bg-kbd text-ink4'
+                    }`}
+                  >
+                    {st.role ? style.label : `자동 · ${style.label}`}{qty} · {st.s.toFixed(1)}m
+                  </button>
+                ) : (
+                  <span className="shrink-0 tabular-nums text-ink4">
+                    {style.label}{qty} · {st.s.toFixed(1)}m
+                  </span>
+                )}
               </li>
             );
           })}
         </ul>
+        {stations.some((st) => st.canRole) && !truck && (
+          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+            선반의 역할을 눌러 <b className="text-ink2">싣기 / 내리기</b>를 직접 정할 수 있습니다.
+            정하지 않으면(자동) 경로가 더 가까이 지나간 쪽 구역을 따릅니다 — 그 경우
+            앞면의 왼쪽 반·오른쪽 반을 찾아다니느라 동선이 늘어납니다.
+          </p>
+        )}
       </Section>
 
       <Section title="경로 편집">

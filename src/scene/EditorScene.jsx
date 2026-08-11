@@ -687,8 +687,9 @@ function SceneContent() {
       carts
         .map((c) => {
           const path = cartPath(c);
-          /* 트럭은 싣기만 한다 — 방향이 처음부터 정해진 차량이다 */
-          const opt = { loadOnly: isTruck(itemOf(c.itemId)) };
+          /* 트럭은 싣기만 한다 — 방향이 처음부터 정해진 차량이다.
+             선반에서 싣을지 내릴지는 카트가 역마다 정해 둔 값을 따른다. */
+          const opt = { loadOnly: isTruck(itemOf(c.itemId)), roles: c.roles };
           return path ? { cart: c, path, stations: cartStations(path, placed, itemOf, opt) } : null;
         })
         .filter(Boolean),

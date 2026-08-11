@@ -175,7 +175,10 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
                수 있고, 한 번에 실어 낼 양은 차의 성질이기 때문이다.
                지정이 없으면 선반이 권하는 양을 따른다(기존 카트 동작). */
             const want = cart.loadCount ?? a.dispatch ?? 0;
-            const got = takeLots(a.uid, want);     // 무엇을 집었는지까지 그대로 온다
+            /* 무엇을 가져올지 정해 두었으면 **그 종류만** 골라 온다.
+               선반에는 여러 종류가 섞여 쌓이므로, 정해 두지 않으면 위에 있던
+               것이 잡히는 대로 실린다 — 필요한 것만 나르려면 골라야 한다. */
+            const got = takeLots(a.uid, want, cart.pickKind ?? null);
             if (got.length > 0) {
               setCarried(got.length);
               setCarriedKinds(got);
@@ -184,7 +187,9 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
             }
           }
         } else if (a.kind === 'load') {
-          if (a.count > 0) {
+          /* 설비에서 싣는 것도 마찬가지다 — "이 종류만 나른다" 고 정해 둔
+             카트는 다른 것을 만드는 설비 앞을 그냥 지나간다. */
+          if (a.count > 0 && (!cart.pickKind || (a.payloadKind ?? 'OBJ') === cart.pickKind)) {
             setCarried(a.count);
             setCarriedKinds(Array.from({ length: a.count }, () => a.payloadKind ?? 'OBJ'));
             sourceRef.current = a.uid;

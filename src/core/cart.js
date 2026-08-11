@@ -90,11 +90,40 @@ function closestOnPath(path, [x, z], step = 0.25) {
 }
 
 /**
- * 경로 위의 정차역 목록.
- *  { s, kind:'load'|'unload', uid, portId, count }
- *  count 는 그 설비가 한 번에 내보내는 수량이다(적재 시에만 의미).
+ * 선반에서 이 카트가 무엇을 할지 — 카트가 역마다 직접 정한 값.
+ * ---------------------------------------------------------------------------
+ *  선반은 앞면이 반반으로 입고 구역·출고 구역으로 갈려 있다. 처음에는 그것만으로
+ *  역할을 정했다 — 경로가 어느 쪽 반을 지나느냐로 싣기와 내리기가 갈렸다.
+ *
+ *  그런데 그 규칙은 **경로를 구역에 맞춰 그리게 만든다.** 한 선반에 내려놓고
+ *  다른 선반에서 실으려면 카트가 매번 선반의 왼쪽 반과 오른쪽 반을 찾아
+ *  지그재그로 돌아야 한다 — 짐을 옮기는 데 쓰이지 않는 동선이 그만큼 늘어난다.
+ *
+ *  역할은 선반의 성질이 아니라 **이 카트가 그 선반에서 하는 일**이다. 같은
+ *  선반이라도 A 카트는 채우고 B 카트는 비워 갈 수 있다. 그래서 카트가 역마다
+ *  들고 있게 했다.
+ *
+ *      cart.roles = { [선반 uid]: 'load' | 'unload' }
+ *
+ *  적어 두지 않은 역은 예전 규칙(가까운 쪽 구역) 그대로다 — 이미 그린 도면이
+ *  갑자기 다르게 움직이면 안 된다.
  */
-export function cartStations(path, placedList, itemOf, { loadOnly = false } = {}) {
+export const STATION_ROLE = { LOAD: 'load', UNLOAD: 'unload' };
+
+/** 역 하나의 역할을 다음 상태로 넘긴다 (자동 → 싣기 → 내리기 → 자동) */
+export function nextRole(role) {
+  if (!role) return STATION_ROLE.LOAD;
+  return role === STATION_ROLE.LOAD ? STATION_ROLE.UNLOAD : null;
+}
+
+/**
+ * 경로 위의 정차역 목록.
+ *  { s, kind:'load'|'unload'|'shelf-in'|'shelf-out', uid, portId, count }
+ *  count 는 그 설비가 한 번에 내보내는 수량이다(적재 시에만 의미).
+ *
+ *  @param roles 선반에서의 역할을 카트가 직접 정한 값 (위 참고)
+ */
+export function cartStations(path, placedList, itemOf, { loadOnly = false, roles = null } = {}) {
   if (!path) return [];
   const out = [];
   for (const port of allPorts(placedList, itemOf)) {
@@ -133,14 +162,22 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false } = {}
     });
   }
 
-  /* 선반 — 입고 구역과 출고 구역을 따로 잡는다.
-     구역마다 앞뒤 양면을 훑어 경로에 가장 가까운 지점을 역으로 삼는다. */
+  /**
+   * 선반 — **앞면 전체가 하나의 역**이다.
+   * -------------------------------------------------------------------------
+   *  앞뒤 양면의 구역을 전부 훑어 경로가 가장 가까이 지나는 한 지점을 역으로
+   *  삼는다. 한 선반이 한 경로에 대해 역할을 둘 가질 수는 없다 — 경로 끝이
+   *  선반 옆에서 맴돌면 실었다 내렸다를 반복하게 되기 때문이다.
+   *
+   *  역할은 카트가 정한다(roles). 정한 것이 없으면 예전 규칙대로 **더 가까이
+   *  지나간 쪽 구역**을 따른다.
+   */
   for (const p of placedList) {
     const item = itemOf(p.itemId);
     if (!isShelf(item)) continue;
     const spec = item.modelKey ? getSpec(item.modelKey) : null;
 
-    const best = {};   // kind → { s, dist }
+    let near = null;   // { s, dist, zone } — 구역을 가리지 않은 최단 접근
     for (const z of shelfZones(p, spec)) {
       const dir = rotateXZ(z.dir, p.rot);
       const samples = Math.max(2, Math.ceil(z.w) + 1);
@@ -156,25 +193,26 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false } = {}
         const vz = at[2] - at2[1];
         const len = Math.hypot(vx, vz);
         if (len > 1e-3 && (vx * dir[0] + vz * dir[1]) / len < FRONT_COS) continue;
-        if (!best[z.kind] || hit.dist < best[z.kind].dist) best[z.kind] = { s: hit.s, dist: hit.dist };
+        if (!near || hit.dist < near.dist) near = { s: hit.s, dist: hit.dist, zone: z.kind };
       }
     }
+    if (!near) continue;
 
-    /* 한 선반은 한 카트 경로에 대해 **역할 하나**만 갖는다.
-       ---------------------------------------------------------------------
-       경로 끝이 선반 옆에서 맴돌면 입고 구역과 출고 구역이 몇 미터 사이로
-       둘 다 잡혀서, 같은 선반에서 실었다 내렸다를 반복하게 된다.
-       경로가 더 가까이 지나가는 쪽 하나만 남긴다 — 그래야 "이 선반은 이 카트에게
-       싣는 곳" 이라는 게 도면에서 한눈에 정해진다. */
-    const kinds = Object.keys(best);
-    if (!kinds.length) continue;
-    const kind = kinds.reduce((a, b) => (best[b].dist < best[a].dist ? b : a));
-    const hit = best[kind];
+    const role = roles?.[p.uid] ?? null;
+    const kind = role
+      ? (role === STATION_ROLE.LOAD ? 'shelf-out' : 'shelf-in')
+      : (near.zone === ZONE.IN ? 'shelf-in' : 'shelf-out');
 
     out.push({
-      s: hit.s,
-      dist: hit.dist,
-      kind: kind === ZONE.IN ? 'shelf-in' : 'shelf-out',
+      s: near.s,
+      dist: near.dist,
+      kind,
+      /** 카트가 직접 정한 값인가 (인스펙터가 「자동」과 구분해 보여 준다) */
+      role,
+      /** 역할을 고를 수 있는 역인가 — 선반뿐이다.
+          적치대는 벨트로 들어와 카트로 나가는 것이 정의라 방향이 하나고,
+          설비 포트는 유입·유출이 형상으로 정해져 있다. */
+      canRole: true,
       uid: p.uid,
       key: p.uid,
       name: p.name ?? p.uid,

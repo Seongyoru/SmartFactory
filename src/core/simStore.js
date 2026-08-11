@@ -87,12 +87,35 @@ export function addLots(uid, kindList, capacity = Infinity) {
  *  위(마지막)에서부터 꺼낸다. 아래에서 빼면 쌓여 있던 것이 아래로 주저앉는
  *  그림이 되는데, 실제로 물건을 집어 가는 순서와도 맞지 않는다.
  */
-export function takeLots(uid, amount) {
+export function takeLots(uid, amount, kind = null) {
   const cur = getLots(uid);
-  const n = Math.max(0, Math.min(cur.length, Math.round(amount)));
-  if (!n) return [];
-  const taken = cur.slice(cur.length - n);
-  commit(uid, cur.slice(0, cur.length - n));
+  const want = Math.max(0, Math.round(amount));
+  if (!want || !cur.length) return [];
+
+  if (!kind) {
+    const n = Math.min(cur.length, want);
+    const taken = cur.slice(cur.length - n);
+    commit(uid, cur.slice(0, cur.length - n));
+    return taken;
+  }
+
+  /**
+   * 골라서 집어 가기.
+   * -------------------------------------------------------------------------
+   *  섞여 쌓인 더미에서 한 종류만 가져간다. **위에서부터** 훑어 원하는 것만
+   *  빼고 나머지는 순서 그대로 둔다 — 위에서부터인 이유는 종류를 안 가릴 때와
+   *  같다(집는 순서가 그렇다). 사이에서 빠진 자리는 위의 것이 내려앉는다.
+   *
+   *  더미 전체를 뒤져야 하지만 한 선반의 자리 수는 수십 개라 값이 싸다.
+   */
+  const taken = [];
+  const left = [];
+  for (let i = cur.length - 1; i >= 0; i--) {
+    if (taken.length < want && cur[i] === kind) taken.push(cur[i]);
+    else left.push(cur[i]);
+  }
+  if (!taken.length) return [];
+  commit(uid, left.reverse());          // 위에서부터 훑었으니 되돌린다
   return taken;
 }
 
