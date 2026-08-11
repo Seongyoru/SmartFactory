@@ -22,8 +22,20 @@ import { stillageCapacity } from './stillage.js';
 import { rotateXZ } from './grid.js';
 import { getSpec } from './modelStore.js';
 
-/** 경로에서 이 거리 안으로 지나가는 포트를 역으로 삼는다(m) */
-export const STATION_DIST = 3.5;
+/**
+ * 역으로 인정하는 거리 — 경로가 **설비의 면에서** 이만큼 안으로 지나가야 한다(m).
+ * ---------------------------------------------------------------------------
+ *  3.5m 였다. 그 정도면 카트가 통로 건너편을 지나가도 역이 되어, 옆 통로를 스치는
+ *  경로 하나가 선반 여러 장을 한꺼번에 물었다. 실제로 짐을 주고받으려면 카트가
+ *  그 앞에 바짝 붙어야 하므로 1m 로 줄인다 — 카트 폭이 1.4m 쯤이니, 경로가 면에서
+ *  1m 면 차체는 사실상 면에 닿아 지나간다.
+ *
+ *  기준이 **면**이라는 점이 중요하다. 설비 포트와 선반의 입출고 구역은 좌표
+ *  자체가 면 위에 있어 그냥 재면 되지만, 적치대는 중심 좌표만 있으므로 상판의
+ *  반너비를 빼고 잰다(아래). 안 그러면 같은 1m 가 적치대에서만 "중심에서 1m"
+ *  = 면에서 0.25m 가 되어 사실상 아무 경로도 안 걸린다.
+ */
+export const STATION_DIST = 1.0;
 
 /**
  * 역의 표시 규칙 — 색과 이름의 유일한 출처.
@@ -176,9 +188,15 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false } = {}
      선반처럼 입고/출고로 나누지 않는다. 벨트로 들어오고 카트로 나가는 것이
      이 물건의 정의라, 방향이 하나로 정해져 있기 때문이다. */
   for (const p of placedList) {
-    if (!isStillage(itemOf(p.itemId))) continue;
+    const item = itemOf(p.itemId);
+    if (!isStillage(item)) continue;
+    /* 적치대만 좌표가 **중심**이다(포트도 구역도 없다). 다른 것들과 같은 잣대로
+       재려면 상판의 반너비를 빼서 면에서 잰 거리로 바꿔야 한다. 상판이
+       정사각형(1.5 × 1.5)이라 방향과 무관하게 반너비 하나면 된다. */
+    const size = item.modelKey ? getSpec(item.modelKey)?.bbox?.size : null;
+    const half = Math.max(size?.[0] ?? 1.5, size?.[2] ?? 1.5) / 2;
     const hit = closestOnPath(path, p.pos);
-    if (hit.dist > STATION_DIST) continue;
+    if (hit.dist - half > STATION_DIST) continue;
     out.push({
       s: hit.s,
       dist: hit.dist,
