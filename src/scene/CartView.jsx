@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
-import { loadRoom, stationStyle, stepCart } from '../core/cart.js';
+import { forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
 import { addLots, addShipped, takeLots } from '../core/simStore.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
@@ -79,6 +79,8 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
   const dirRef = useRef(cart.reverse ? -1 : 1);
   const pauseRef = useRef(0);
   const lastKeyRef = useRef(null);
+  /** 그 기억을 남긴 자리 — 충분히 멀어지면 잊는다 (cart.js 의 forgetStation) */
+  const lastSRef = useRef(null);
   /** 지금 싣고 있는 짐을 어디서 받았는가 — 같은 곳에 도로 내려놓지 않기 위해 */
   const sourceRef = useRef(null);
   const [carried, setCarried] = useState(0);
@@ -155,6 +157,14 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
     if (!g || !path) return;
 
     if (running) {
+      /* 방금 주고받은 역에서 충분히 멀어졌으면 그 기억을 푼다.
+         안 그러면 짐이 남은 채 한 바퀴를 돌 때 그 역이 통째로 걸러져,
+         자리가 났는데도 서지 않고 지나간다(cart.js 의 forgetStation). */
+      lastKeyRef.current = forgetStation(
+        lastKeyRef.current, lastSRef.current, sRef.current, path.length, cart.closed,
+      );
+      if (!lastKeyRef.current) lastSRef.current = null;
+
       const next = stepCart(
         { s: sRef.current, dir: dirRef.current, pause: pauseRef.current, lastKey: lastKeyRef.current },
         {
@@ -173,6 +183,7 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
         setCarriedKinds([]);
         sourceRef.current = null;
         lastKeyRef.current = null;
+        lastSRef.current = null;
       }
       sRef.current = next.s;
       dirRef.current = next.dir;
@@ -238,8 +249,12 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
           if (carried > 0) { setCarried(0); setCarriedKinds([]); sourceRef.current = null; acted = true; }
         }
 
-        if (acted) lastKeyRef.current = a.key ?? a.uid;
-        else pauseRef.current = 0;      // 아무 일도 없었으면 서 있을 이유도 없다
+        if (acted) {
+          lastKeyRef.current = a.key ?? a.uid;
+          lastSRef.current = sRef.current;
+        } else {
+          pauseRef.current = 0;         // 아무 일도 없었으면 서 있을 이유도 없다
+        }
       }
     }
 
@@ -262,6 +277,7 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
       setCarriedKinds([]);
       sourceRef.current = null;
       lastKeyRef.current = null;      // 밖에 다녀왔으니 다시 실을 수 있다
+      lastSRef.current = null;
     }
     /* 모델의 진행축을 이동 방향에 맞춘다.
        tx·tz 에 이미 진행 방향(d)이 곱해져 있으므로, 거꾸로 달리면 모델도 저절로

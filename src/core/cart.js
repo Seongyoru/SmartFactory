@@ -85,6 +85,37 @@ export function loadRoom(carried, capacity, topUp, want) {
   return carried === 0 ? Math.max(0, want ?? 0) : 0;
 }
 
+/**
+ * 방금 주고받은 역을 언제까지 건너뛸 것인가.
+ * ---------------------------------------------------------------------------
+ *  역에서 주고받고 나면 그 역을 **한 번은** 건너뛰어야 한다. 짐을 주고받은 자리에
+ *  선 채로 왕복 경로의 끝을 만나 곧바로 되돌아오면, 같은 역이 그 자리에서 다시
+ *  걸려 무한히 되풀이되기 때문이다.
+ *
+ *  ── 그런데 "다음에 다른 데서 뭔가 할 때까지" 는 너무 길었다 ────────────────
+ *  예전에는 **다른 역에서 실제로 주고받아야만** 이 기억이 풀렸다. 그래서 이런
+ *  교착이 생겼다.
+ *
+ *    1. 하역역 B 에 자리가 조금밖에 없어 **일부만** 내린다 (기억 = B, 짐이 남음)
+ *    2. 적재역 A 로 간다 — 카트는 비어야 싣는데 짐이 남아 있어 아무 일도 없다
+ *       (기억은 여전히 B)
+ *    3. B 로 돌아온다 — **기억이 B 라서 통째로 걸러진다.** 그 사이 B 에 자리가
+ *       났어도 서지 않고 그냥 지나간다
+ *    4. 2 와 3 이 영원히 되풀이된다
+ *
+ *  기억을 풀어 주는 조건이 "다른 역에서의 성공" 이 아니라 **그 역에서 충분히
+ *  멀어졌는가** 여야 한다. 멀어졌다면 그것은 새로 들르는 것이지, 방금 그 자리에
+ *  머무르는 것이 아니다.
+ */
+export const STATION_RESET_DIST = 1.5;
+
+export function forgetStation(lastKey, lastS, s, length, closed) {
+  if (!lastKey || lastS == null) return lastKey ?? null;
+  const d = Math.abs(s - lastS);
+  const away = closed && length > 0 ? Math.min(d, length - d) : d;
+  return away > STATION_RESET_DIST ? null : lastKey;
+}
+
 export function cartPath(cart) {
   if (!cart?.points || cart.points.length < 2) return null;
   return buildFreePath(cart.points, {
@@ -365,8 +396,13 @@ export function stepCart(st, { length, closed, oneWay, speed, dwell }, stations,
   const hit = crossed.filter((x) => (x.key ?? x.uid) !== st.lastKey);
   if (!hit.length) return { s: s1, dir, pause: 0, arrived: null };
 
-  /* 한 프레임에 여러 역을 지났다면 마지막 것만 처리한다.
+  /* 한 프레임에 여러 역을 지났다면 **가장 마지막에 지난** 역을 처리한다.
+     stations 는 s 오름차순이라, 정방향이면 목록의 끝이 마지막에 지난 역이고
+     거꾸로 달리면 목록의 앞이 그렇다 — 방향을 안 보면 반대쪽을 집는다.
+     (그 사이의 역은 이 프레임에서 놓친다. 한 프레임 이동 거리는 speed × 0.1 이
+      상한이라 역이 그보다 촘촘할 때만 생기는 일이다.)
+
      자재가 실제로 오갔는지(수용량·재고에 달렸다)는 여기서 알 수 없으므로
      역만 알려 주고, 수량 계산과 lastKey 갱신은 호출부가 맡는다. */
-  return { s: s1, dir, pause: dwell, arrived: hit[hit.length - 1] };
+  return { s: s1, dir, pause: dwell, arrived: st.dir >= 0 ? hit[hit.length - 1] : hit[0] };
 }
