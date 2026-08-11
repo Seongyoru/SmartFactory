@@ -335,15 +335,18 @@ export function stepCart(st, { length, closed, oneWay, speed, dwell }, stations,
   let dir = st.dir;
 
   if (closed) {
+    /* 고리 — 어느 방향으로 돌든 감긴다 (dir 이 −1 이면 반대로 돈다) */
     s1 = ((s1 % L) + L) % L;
-  } else if (s1 > L && oneWay) {
-    /* 편도 주행(트럭) — 끝에 닿으면 사라지고 시작점에서 새 차가 나온다.
+  } else if (oneWay && (s1 > L || s1 < 0)) {
+    /* 편도 주행(트럭) — 끝에 닿으면 사라지고 **반대쪽 끝**에서 새 차가 나온다.
        왕복으로 되돌아오면 빈 트럭이 공장 안을 거슬러 올라오는 그림이 되는데,
        출하 차량의 흐름은 한 방향이라 그쪽이 실제와 맞지 않는다.
-       끝점은 정확히 밟고 나서 처음으로 보낸다 — 끝에 있는 정차역을 놓치지
-       않기 위해서다(아래 왕복 처리와 같은 이유). */
-    if (st.s < L) { s1 = L; }
-    else { s1 = 0; return { s: 0, dir: 1, pause: 0, arrived: null, recycled: true }; }
+       끝점은 정확히 밟고 나서 보낸다 — 끝에 있는 정차역을 놓치지 않기
+       위해서다(아래 왕복 처리와 같은 이유).
+       거꾸로 달리는 차(dir < 0)는 0 에서 사라져 L 에서 다시 나온다. */
+    const end = dir0 > 0 ? L : 0;
+    if (st.s !== end) { s1 = end; }
+    else return { s: dir0 > 0 ? 0 : L, dir: dir0, pause: 0, arrived: null, recycled: true };
   } else if (s1 > L) {
     /* 끝점을 **정확히 밟고** 다음 프레임에 되돌아간다.
        튕겨 나온 위치로 바로 접어 버리면 경로 맨 끝(s = 0 또는 L)에 있는

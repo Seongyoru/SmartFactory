@@ -68,7 +68,15 @@ function StationMarks({ path, stations }) {
 function CartUnit({ cart, spec, path, stations, running, selected, startS, shipOutside, floor, gates, oneWay, onPointerDown }) {
   const groupRef = useRef(null);
   const sRef = useRef(startS);
-  const dirRef = useRef(1);
+  /**
+   * 어느 쪽으로 달리는가 (+1 정방향 · −1 역방향).
+   * -------------------------------------------------------------------------
+   *  `reverse` 는 원래 **모델만 180° 돌려** 놓는 값이었다. 차가 뒤로 가는 것처럼
+   *  보이지만 실제로는 그대로 앞으로 갔고, 정차역을 만나는 순서도 그대로였다 —
+   *  보이는 것과 도는 것이 달랐다. 이제 **진행 방향 자체**를 뒤집는다.
+   *  모델 방향은 진행 방향에서 나오므로(아래 rotation.y) 저절로 따라온다.
+   */
+  const dirRef = useRef(cart.reverse ? -1 : 1);
   const pauseRef = useRef(0);
   const lastKeyRef = useRef(null);
   /** 지금 싣고 있는 짐을 어디서 받았는가 — 같은 곳에 도로 내려놓지 않기 위해 */
@@ -81,6 +89,10 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
 
   // 대수가 바뀌면 출발 지점을 다시 나눠 갖는다
   useEffect(() => { sRef.current = startS; }, [startS]);
+  /* 방향을 뒤집으면 곧바로 반영한다 — 다음 바퀴를 기다리지 않는다.
+     (고리는 제자리에서 돌아서고, 끝이 있는 경로는 startS 가 반대쪽 끝으로
+      바뀌므로 위의 효과가 자리도 함께 옮긴다) */
+  useEffect(() => { dirRef.current = cart.reverse ? -1 : 1; }, [cart.reverse]);
 
   /* 본체와 적재물을 분리한다 — 적재물은 실은 개수만큼 복제해 쌓는다.
      clone() 은 지오메트리·머티리얼을 공유하므로 여러 대·여러 단이어도 가볍다. */
@@ -251,8 +263,10 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
       sourceRef.current = null;
       lastKeyRef.current = null;      // 밖에 다녀왔으니 다시 실을 수 있다
     }
-    // 모델의 진행축을 이동 방향에 맞춘다
-    g.rotation.y = (axis === 'z' ? Math.atan2(tx, tz) : Math.atan2(-tz, tx)) + (cart.reverse ? Math.PI : 0);
+    /* 모델의 진행축을 이동 방향에 맞춘다.
+       tx·tz 에 이미 진행 방향(d)이 곱해져 있으므로, 거꾸로 달리면 모델도 저절로
+       그쪽을 본다 — 방향과 모델이 따로 놀 수 없다. */
+    g.rotation.y = axis === 'z' ? Math.atan2(tx, tz) : Math.atan2(-tz, tx);
   });
 
   return (
@@ -350,8 +364,14 @@ export default function CartView({
           running={running}
           selected={selected}
           /* 출발 지점을 경로 길이만큼 고르게 나눈다 — 여러 대가 한 점에서
-             출발하면 겹쳐 보이고, 역에서도 동시에 서 버린다 */
-          startS={(k / count) * path.length}
+             출발하면 겹쳐 보이고, 역에서도 동시에 서 버린다.
+             거꾸로 달리는 차는 **반대쪽 끝**에서 출발한다. 안 그러면 시작점(0)에
+             서서 곧바로 경로 밖으로 나가려다 되돌아서므로, 방향을 뒤집은 것이
+             아무 일도 아닌 것이 된다. 고리는 끝이 없으므로 그대로 둔다 —
+             제자리에서 반대로 돌기 시작하면 그만이다. */
+          startS={cart.reverse && !cart.closed
+            ? path.length - (k / count) * path.length
+            : (k / count) * path.length}
           shipOutside={shipOutside}
           floor={floor}
           gates={gates}

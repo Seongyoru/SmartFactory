@@ -731,9 +731,20 @@ function CartPanel({ cart }) {
             active={cart.reverse}
             onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { reverse: !cart.reverse } })}
           >
-            앞뒤 반전
+            <RotateCw size={13} /> 주행 방향 반전
           </Btn>
         </div>
+        {/* 방향은 경유점을 찍은 순서로 정해진다 — 그 순서는 도면에 안 보이므로
+            지금 어느 쪽으로 도는지를 글로 적어 준다 */}
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+          {cart.closed
+            ? cart.reverse
+              ? '경유점을 찍은 순서의 반대로 돕니다.'
+              : '경유점을 찍은 순서대로 돕니다.'
+            : cart.reverse
+              ? '경로의 끝에서 출발해 시작점 쪽으로 달립니다.'
+              : '경로의 시작점에서 출발합니다.'}
+        </p>
         {!state.running && (
           <p className="mt-2 text-[10.5px] text-amber-600">툴바의 ▶ 를 눌러야 움직입니다.</p>
         )}
