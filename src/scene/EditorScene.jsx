@@ -67,7 +67,15 @@ import { subscribeFocus } from '../core/focusStore.js';
 import { allPorts, autoLayer, layerLift, linkPath, nearestPort } from '../core/link.js';
 import { buildConnectorPath, buildFreePath } from '../core/routing.js';
 import { rotateXZ } from '../core/grid.js';
-import { PORT_KIND, incompatibleReason, portsCompatible, quantizeDir } from '../core/ports.js';
+import {
+  PORT_KIND,
+  PORT_ZONE_DEPTH,
+  PORT_ZONE_OUT,
+  PORT_ZONE_WIDTH,
+  incompatibleReason,
+  portsCompatible,
+  quantizeDir,
+} from '../core/ports.js';
 import PlacedModel, { FootprintOutline, SelectionCage } from './PlacedModel.jsx';
 import ConnectorView from './ConnectorView.jsx';
 import PortMarkers from './PortMarkers.jsx';
@@ -90,10 +98,6 @@ const CLOSE_DIST = 1.2;
 const BRANCH_SNAP_DIST = 1.0;
 /** 배관·전선이 설비에 붙는 것으로 보는 여유 폭(m) */
 const ANCHOR_MARGIN = 0.8;
-/** 비어 있는 설비 포트 앞에 까는 바닥 표시 규격(m) */
-const PORT_ZONE_OUT = 0.9;
-const PORT_ZONE_WIDTH = 1.6;
-const PORT_ZONE_DEPTH = 1.4;
 
 /** 모델 캐시가 갱신될 때(로드 완료) 다시 그리기 위한 버전 카운터 */
 function useModelsVersion() {

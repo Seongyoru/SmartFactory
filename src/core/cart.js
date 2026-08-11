@@ -15,7 +15,7 @@
 
 import { buildFreePath } from './routing.js';
 import { allPorts } from './link.js';
-import { PORT_KIND } from './ports.js';
+import { PORT_KIND, PORT_ZONE_REACH } from './ports.js';
 import { isShelf, isStillage, payloadKeyOf } from '../data/library.js';
 import { ZONE, shelfCapacity, shelfZones } from './shelf.js';
 import { stillageCapacity } from './stillage.js';
@@ -36,6 +36,19 @@ import { getSpec } from './modelStore.js';
  *  = 면에서 0.25m 가 되어 사실상 아무 경로도 안 걸린다.
  */
 export const STATION_DIST = 1.0;
+
+/**
+ * 적치대만 더 넉넉하게.
+ * ---------------------------------------------------------------------------
+ *  선반은 앞면이 길게 뻗어 있어 카트가 그 앞을 스치듯 지나간다. 적치대는 1.5m
+ *  짜리 상자 하나뿐이라 같은 1m 를 주면 **바닥에 깔린 초록 띠(포트 구역)보다도
+ *  안쪽**으로 들어가야 잡힌다 — 눈에 보이는 자리를 지나가는데도 서지 않으니,
+ *  도면이 거짓말을 하는 셈이다.
+ *
+ *  그래서 그 띠의 바깥 끝(포트에서 `PORT_ZONE_REACH` = 1.6m)까지를 기준으로 삼고
+ *  조금 여유를 둔다. 보이는 만큼 잡힌다.
+ */
+export const STILLAGE_DIST = PORT_ZONE_REACH + 0.4;
 
 /**
  * 역의 표시 규칙 — 색과 이름의 유일한 출처.
@@ -285,7 +298,7 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false, roles
     const size = item.modelKey ? getSpec(item.modelKey)?.bbox?.size : null;
     const half = Math.max(size?.[0] ?? 1.5, size?.[2] ?? 1.5) / 2;
     const hit = closestOnPath(path, p.pos);
-    if (hit.dist - half > STATION_DIST) continue;
+    if (hit.dist - half > STILLAGE_DIST) continue;
     out.push({
       s: hit.s,
       dist: hit.dist,

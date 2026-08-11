@@ -35,13 +35,15 @@ import { Btn } from './common.jsx';
 /**
  * 단계.
  *  done 은 **도면을 보고** 판정한다 — "눌렀는가" 가 아니라 "이루어졌는가" 다.
- *  spot 은 지금 눌러야 할 곳. 앞의 것부터 찾아 화면에 있는 첫 번째를 가리킨다
- *  (탭을 이미 열었으면 탭 대신 그 안의 도구를 가리킨다).
+ *
+ *  spot 은 지금 눌러야 할 곳을 **손이 가는 순서대로** 적는다. 화면에 있는 첫
+ *  번째를 가리키므로, 탭을 누르면 표시가 저절로 그 안의 항목으로 옮겨 간다 —
+ *  탭만 계속 가리키고 있으면 "탭은 열었는데 이제 뭘?" 에서 다시 막힌다.
  */
 const STEPS = [
   {
     title: '바닥 그리기',
-    spot: ['[data-guide="tool-area"]', '[data-guide="tab-build"]'],
+    spot: () => ['[data-guide="tool-area"]', '[data-guide="tab-build"]'],
     done: (f) => f.areas > 0,
     body: () => (
       <>
@@ -53,7 +55,7 @@ const STEPS = [
   },
   {
     title: '설비 놓기',
-    spot: ['[data-guide="tab-equipment"]'],
+    spot: () => ['[data-guide="item-MACHINE_1"]', '[data-guide="tab-equipment"]'],
     done: (f) => f.equip > 0,
     body: () => (
       <>
@@ -65,7 +67,7 @@ const STEPS = [
   },
   {
     title: '적치대 놓기',
-    spot: ['[data-guide="tab-logistics"]'],
+    spot: () => ['[data-guide="item-STILLAGE"]', '[data-guide="tab-logistics"]'],
     done: (f) => f.stillage > 0,
     body: () => (
       <>
@@ -78,7 +80,7 @@ const STEPS = [
   },
   {
     title: '컨베이어로 잇기',
-    spot: ['[data-guide="tab-connector"]'],
+    spot: () => ['[data-guide="item-CONVEYOR"]', '[data-guide="tab-connector"]'],
     done: (f) => f.beltToStillage,
     body: (f) => (
       <>
@@ -99,7 +101,7 @@ const STEPS = [
   },
   {
     title: '선반 놓기',
-    spot: ['[data-guide="tab-logistics"]'],
+    spot: () => ['[data-guide="item-SHELF"]', '[data-guide="tab-logistics"]'],
     done: (f) => f.shelf > 0,
     body: () => (
       <>
@@ -111,7 +113,7 @@ const STEPS = [
   },
   {
     title: '카트 경로 그리기',
-    spot: ['[data-guide="tab-logistics"]'],
+    spot: () => ['[data-guide="item-CART"]', '[data-guide="tab-logistics"]'],
     done: (f) => f.cartLinked > 0,
     body: (f) => (
       <>
@@ -143,13 +145,18 @@ const STEPS = [
   },
   {
     title: '밖으로 내보내기',
-    spot: ['[data-guide="tool-opening"]', '[data-guide="tab-build"]'],
+    spot: (f) => (f.openings === 0
+      ? ['[data-guide="tool-opening"]', '[data-guide="tab-build"]']
+      : ['[data-guide="item-TRUCK"]', '[data-guide="tab-logistics"]']),
     done: (f) => f.shipped > 0,
     body: () => (
       <>
-        <b className="text-ink2">작업영역 → 개구부</b>로 벽에 출입구를 뚫고,
-        <b className="text-ink2"> 운송적재</b>의 트럭 경로를 선반 앞에서 그 문 밖까지 그리세요.
-        <br />트럭이 문을 지나 나가면 실은 만큼 <b className="text-ink2">왼쪽 위</b>에 쌓입니다.
+        <b className="text-ink2">작업영역 → 개구부</b>로 벽에 출입구를 뚫은 다음,
+        <b className="text-ink2"> 운송적재</b>의 <b className="text-ink2">출하 트럭</b>을 고르세요.
+        <br />경로는 <b className="text-ink2">건물 밖에서 시작해</b> 문으로 들어와 선반 앞을
+        지나고, <b className="text-ink2">다시 문 밖으로</b> 나가게 찍습니다.
+        <br />트럭은 문을 지나 밖으로 나가는 순간 출하합니다 — 안에서만 도는 경로면 실은
+        채로 계속 돌기만 합니다. 나간 만큼 <b className="text-ink2">왼쪽 위</b>에 쌓입니다.
       </>
     ),
   },
@@ -169,11 +176,15 @@ const STEPS = [
  */
 function Spot({ selectors }) {
   const [box, setBox] = useState(null);
+  /* 단계마다 목록을 새로 만들어 넘기므로 배열 자체를 의존성으로 삼으면 매 렌더
+     타이머가 새로 걸린다. 내용이 같으면 같은 것으로 본다. */
+  const key = selectors.join('|');
 
   useEffect(() => {
-    if (!selectors?.length) { setBox(null); return undefined; }
+    const list = key.split('|').filter(Boolean);
+    if (!list.length) { setBox(null); return undefined; }
     const measure = () => {
-      const el = selectors.map((s) => document.querySelector(s)).find(Boolean);
+      const el = list.map((s) => document.querySelector(s)).find(Boolean);
       const r = el?.getBoundingClientRect();
       const next = r && r.width > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
       setBox((prev) => {
@@ -186,7 +197,7 @@ function Spot({ selectors }) {
     const t = setInterval(measure, 300);
     window.addEventListener('resize', measure);
     return () => { clearInterval(t); window.removeEventListener('resize', measure); };
-  }, [selectors]);
+  }, [key]);
 
   if (!box) return null;
   return (
@@ -231,8 +242,8 @@ function Welcome({ onStart, onSkip }) {
             자재가 흐르는 길을 그대로 따라갑니다.
           </p>
           <p className="rounded-lg bg-raise px-3 py-2 text-center text-[11px] leading-relaxed text-ink2 ring-1 ring-edge">
-            바닥 → 설비 → <b className="text-ink">적치대</b> → 컨베이어 → <b className="text-ink">선반</b>
-            <br />→ 카트 경로 → 출하
+            작업영역 → 설비 → 컨베이어 → <b className="text-ink">적치대</b>
+            <br />→ 카트 경로 → <b className="text-ink">선반</b> → 출하
           </p>
 
           <p className="text-[11px] leading-relaxed text-ink4">
@@ -254,7 +265,7 @@ function Welcome({ onStart, onSkip }) {
 
 /* ── 체크리스트 ─────────────────────────────────────────────────────────── */
 
-function Checklist({ facts, onClose }) {
+function Checklist({ facts, canClose, onClose }) {
   const [folded, setFolded] = useState(false);
   const done = STEPS.map((s) => s.done(facts));
   const count = done.filter(Boolean).length;
@@ -263,9 +274,31 @@ function Checklist({ facts, onClose }) {
   const current = done.findIndex((d) => !d);
   const step = current >= 0 ? STEPS[current] : null;
 
+  /* 3D 를 한 번 보기 전에는 닫지 못한다.
+     탑뷰만 보고 끄면 이 편집기가 **도면이자 3D 모형**이라는 것을 모른 채 끝난다.
+     한 번 보고 나면 계속 열려 있고, 탑뷰로 돌아가도 다시 잠기지 않는다. */
+  const closeBtn = (label) => (
+    <button
+      onClick={canClose ? onClose : undefined}
+      disabled={!canClose}
+      title={canClose ? '닫기' : '3D 로 한 번 본 뒤에 닫을 수 있습니다 (Tab 또는 툴바의 3D · 확인)'}
+      className={
+        label
+          ? `rounded-md px-2.5 py-1.5 text-xs font-medium ${
+            canClose ? 'bg-sky-500 text-white' : 'cursor-not-allowed bg-kbd text-ink4'
+          }`
+          : `rounded p-0.5 ${
+            canClose ? 'text-ink4 hover:bg-raiseh hover:text-ink2' : 'cursor-not-allowed text-ink4/40'
+          }`
+      }
+    >
+      {label ?? <X size={13} />}
+    </button>
+  );
+
   return (
     <>
-      {!folded && step && <Spot selectors={step.spot} />}
+      {!folded && step && <Spot selectors={step.spot(facts)} />}
 
       <div className="absolute bottom-3 left-3 z-10 w-[286px] overflow-hidden rounded-lg border border-line bg-float shadow-lg backdrop-blur">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2">
@@ -280,9 +313,7 @@ function Checklist({ facts, onClose }) {
           >
             {folded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
-          <button onClick={onClose} title="닫기" className="rounded p-0.5 text-ink4 hover:bg-raiseh hover:text-ink2">
-            <X size={13} />
-          </button>
+          {closeBtn(null)}
         </div>
 
         {/* 진행 막대 — 숫자보다 먼저 눈에 들어온다 */}
@@ -325,12 +356,9 @@ function Checklist({ facts, onClose }) {
 
             {allDone && (
               <div className="mt-2 rounded-md bg-emerald-500/10 px-2.5 py-2 text-[11px] leading-relaxed text-ink2 ring-1 ring-emerald-500/25">
-                전부 마쳤습니다. <kbd className="rounded bg-kbd px-1">Tab</kbd> 으로 3D 에서 보고,
-                이제 도면을 늘려 가며 어디가 막히는지 지켜보세요 — 적치대가 차면 그 앞 공정이
-                줄줄이 섭니다.
-                <div className="mt-2">
-                  <Btn active onClick={onClose}>닫기</Btn>
-                </div>
+                전부 마쳤습니다. 이제 도면을 늘려 가며 어디가 막히는지 지켜보세요 —
+                적치대가 차면 그 앞 공정이 줄줄이 섭니다.
+                <div className="mt-2">{closeBtn('닫기')}</div>
               </div>
             )}
           </div>
@@ -389,12 +417,13 @@ export default function Tutorial() {
       areas: state.areas.length,
       equip, stillage, shelf, beltToStillage,
       links: state.links.length,
+      openings: state.openings.length,
       carts, cartWithStations, cartLinked,
       shipped,
       view: state.view,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.areas, state.placed, state.links, state.carts, state.view, itemOf, shipped, version]);
+  }, [state.areas, state.placed, state.links, state.carts, state.openings, state.view, itemOf, shipped, version]);
 
   /* 어디까지 왔는지는 store 가 이 브라우저에 남긴다(EditorProvider 의 효과).
      여기서 저장하지 않는 이유: 툴바에서 열고 닫는 길도 있어서, 저장을 부르는
@@ -402,7 +431,14 @@ export default function Tutorial() {
   const set = (guide) => dispatch({ type: 'SET', patch: { guide } });
   const close = () => set(null);
 
+  /* 3D 를 한 번이라도 봤는가 — 보고 나면 탑뷰로 돌아와도 다시 잠기지 않는다.
+     "지금 3D 인가" 로 두면 도면을 그리러 탑뷰로 온 순간 다시 못 닫게 된다. */
+  const [seenIso, setSeenIso] = useState(state.view === VIEW.ISO);
+  useEffect(() => {
+    if (state.view === VIEW.ISO) setSeenIso(true);
+  }, [state.view]);
+
   if (state.guide === 'welcome') return <Welcome onStart={() => set('steps')} onSkip={close} />;
-  if (state.guide === 'steps') return <Checklist facts={facts} onClose={close} />;
+  if (state.guide === 'steps') return <Checklist facts={facts} canClose={seenIso} onClose={close} />;
   return null;
 }

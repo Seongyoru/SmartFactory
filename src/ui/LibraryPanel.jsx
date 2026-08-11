@@ -68,6 +68,7 @@ function ItemCard({ item, active, onPick, onRemove }) {
   return (
     <div
       onClick={onPick}
+      data-guide={`item-${item.id}`}
       className={`cursor-grab-item group relative rounded-lg border px-3 py-2.5 transition-colors ${
         active
           ? 'border-sky-500/70 bg-sky-500/10'

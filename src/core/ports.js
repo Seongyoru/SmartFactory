@@ -499,3 +499,20 @@ export function worldPorts(placed, spec) {
   });
 }
 
+
+/* --------------------------------------------------------------------------
+ * 비어 있는 포트 앞의 바닥 표시 (초록=유입 · 주황=유출)
+ * --------------------------------------------------------------------------
+ *  "여기로 자재가 드나든다" 를 도면에 남기는 띠다. 그리는 곳은 씬이지만 규격은
+ *  여기에 둔다 — **카트가 적치대를 정차역으로 잡는 거리**가 이 띠에 맞춰져 있어서,
+ *  한쪽만 바꾸면 보이는 것과 도는 것이 어긋나기 때문이다(cart.js 의 STILLAGE_DIST).
+ *
+ *  포트에서 바깥으로 OUT 만큼 나간 자리를 중심으로 깊이 DEPTH 만큼 깔린다.
+ *  따라서 띠의 바깥 끝은 포트에서 OUT + DEPTH/2 만큼 떨어져 있다.
+ */
+export const PORT_ZONE_OUT = 0.9;
+export const PORT_ZONE_WIDTH = 1.6;
+export const PORT_ZONE_DEPTH = 1.4;
+
+/** 포트에서 잰 띠의 바깥 끝까지 거리 */
+export const PORT_ZONE_REACH = PORT_ZONE_OUT + PORT_ZONE_DEPTH / 2;
