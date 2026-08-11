@@ -13,7 +13,8 @@
  */
 
 import { getSpec } from './modelStore.js';
-import { worldPorts } from './ports.js';
+import { PORT_KIND, worldPorts } from './ports.js';
+import { isStillage } from '../data/library.js';
 import { buildConnectorPath } from './routing.js';
 import { rotateXZ } from './grid.js';
 
@@ -21,7 +22,14 @@ import { rotateXZ } from './grid.js';
 export function portsOf(placed, item) {
   const spec = item?.modelKey ? getSpec(item.modelKey) : null;
   if (!spec) return [];
-  return worldPorts(placed, spec);
+  const ports = worldPorts(placed, spec);
+
+  /* 스틸리지는 **받기만 하는** 물건이다.
+     모델에 IN/OUT 이 정의돼 있지 않으면 포트가 '양방향' 으로 자동 생성되는데,
+     그대로 두면 스틸리지에서 다시 컨베이어를 뽑을 수 있게 된다. 공정의 끝이라는
+     성격은 모델 파일이 아니라 이 물건의 정의에서 나오므로 여기서 못 박는다. */
+  if (isStillage(item)) return ports.map((p) => ({ ...p, kind: PORT_KIND.IN }));
+  return ports;
 }
 
 /** 도면 전체의 포트 목록 (연결 대상 후보) */

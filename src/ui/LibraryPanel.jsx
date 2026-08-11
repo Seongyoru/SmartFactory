@@ -15,7 +15,22 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Box, Cable, Columns3, Layers, PenTool, Plus, Square, SquareDashed, Trash2, Truck, Building2, Frame } from 'lucide-react';
+import {
+  Box,
+  Building2,
+  Cable,
+  Columns3,
+  Container,
+  DoorOpen,
+  Frame,
+  Layers,
+  PenTool,
+  Plus,
+  Square,
+  SquareDashed,
+  Trash2,
+  Truck,
+} from 'lucide-react';
 import { CATEGORY, KIND } from '../data/library.js';
 import { SHAPE, TOOL, useEditor } from '../core/store.jsx';
 import { deleteModelBuffer } from '../core/persistence.js';
@@ -38,6 +53,7 @@ const BUILD_TOOLS = [
   { tool: TOOL.AREA, label: '영역', Icon: Frame, shaped: true, desc: '바닥을 그리면 바깥으로 벽이 선다' },
   { tool: TOOL.WALL, label: '벽', Icon: SquareDashed, desc: '두 점을 찍어 내벽을 세운다' },
   { tool: TOOL.PILLAR, label: '기둥', Icon: Columns3, desc: '누른 자리에 사각 기둥 하나' },
+  { tool: TOOL.OPENING, label: '개구부', Icon: DoorOpen, desc: '벽을 클릭 — 트럭이 드나드는 출입구' },
   { tool: TOOL.ZONE, label: '구역', Icon: Square, shaped: true, desc: '바닥 위에만 · 이름이 바닥에 찍힌다' },
 ];
 
@@ -45,7 +61,9 @@ function ItemCard({ item, active, onPick, onRemove }) {
   const spec = item.modelKey ? getSpec(item.modelKey) : null;
   const size = spec?.bbox.size;
   const isConn = item.category === CATEGORY.CONNECTOR;
-  const Icon = item.kind === KIND.SHELF ? Layers : item.kind === KIND.CART ? Truck : isConn ? Cable : Box;
+  const Icon = item.kind === KIND.SHELF ? Layers
+    : item.kind === KIND.TRUCK ? Container
+      : item.kind === KIND.CART ? Truck : isConn ? Cable : Box;
 
   return (
     <div
@@ -167,6 +185,29 @@ function BuildTools() {
             onChange={(v) => setB({ pillarHeight: v })}
           />
           <ColorField label="색" value={b.pillarColor} onChange={(v) => setB({ pillarColor: v })} />
+        </div>
+      )}
+
+      {active?.tool === TOOL.OPENING && (
+        <div className="rounded-lg border border-line bg-raise p-2">
+          <p className="mb-1 text-[10.5px] text-ink4">새 개구부 규격</p>
+          <Slider
+            label="폭" min={0.3} max={20} step={0.1}
+            value={b.openingWidth} text={`${b.openingWidth.toFixed(2)} m`}
+            onChange={(v) => setB({ openingWidth: v })}
+          />
+          <Slider
+            label="높이" min={0.3} max={12} step={0.1}
+            value={b.openingHeight} text={`${b.openingHeight.toFixed(2)} m`}
+            onChange={(v) => setB({ openingHeight: v })}
+          />
+          {/* 밑턱이 0 이면 바닥까지 트인 출입구, 올리면 창이 된다 */}
+          <Slider
+            label="밑턱" min={0} max={4} step={0.05}
+            value={b.openingSill}
+            text={b.openingSill > 0 ? `${b.openingSill.toFixed(2)} m · 창` : '0 · 출입구'}
+            onChange={(v) => setB({ openingSill: v })}
+          />
         </div>
       )}
 

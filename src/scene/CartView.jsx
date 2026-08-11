@@ -18,7 +18,9 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { stationStyle, stepCart } from '../core/cart.js';
-import { addStock, takeStock } from '../core/simStore.js';
+import { addLots, addShipped, takeLots } from '../core/simStore.js';
+import { usePayloadSpecs } from '../core/payload.js';
+import { inGate, pointInMP } from '../core/area.js';
 
 const CART_COLOR = '#a78bfa';
 
@@ -62,7 +64,7 @@ function StationMarks({ path, stations }) {
  * 카트 한 대
  * ======================================================================== */
 
-function CartUnit({ cart, spec, path, stations, running, selected, startS, onPointerDown }) {
+function CartUnit({ cart, spec, path, stations, running, selected, startS, shipOutside, floor, gates, oneWay, onPointerDown }) {
   const groupRef = useRef(null);
   const sRef = useRef(startS);
   const dirRef = useRef(1);
@@ -71,6 +73,10 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
   /** 지금 싣고 있는 짐을 어디서 받았는가 — 같은 곳에 도로 내려놓지 않기 위해 */
   const sourceRef = useRef(null);
   const [carried, setCarried] = useState(0);
+  /** 무엇을 싣고 있는가 — 실은 곳에서 따라오고, 내릴 때 그대로 넘긴다 */
+  /** 싣고 있는 물건들의 종류 (아래에서부터). 섞어 실으면 섞인 채로 간다 */
+  const [carriedKinds, setCarriedKinds] = useState([]);
+  const specOf = usePayloadSpecs();
 
   // 대수가 바뀌면 출발 지점을 다시 나눠 갖는다
   useEffect(() => { sRef.current = startS; }, [startS]);
@@ -88,15 +94,28 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
     return { body, payload };
   }, [spec]);
 
+  /**
+   * 싣고 있는 물건.
+   * -------------------------------------------------------------------------
+   *  카트 GLB 안에도 적재물 노드가 하나 들어 있지만, 그것만 쓰면 **무엇을 실었든
+   *  늘 같은 물건**이 올라간다. 노란 물건을 실어도 회색이 얹히는 식이다.
+   *  그래서 노드는 **놓일 자리**(짐칸 위치와 한 단 높이)로만 쓰고, 형상은 실제로
+   *  실은 반송물 모델에서 가져온다. 아직 못 읽었으면 원래 노드로 돌아간다.
+   */
   const stack = useMemo(() => {
     if (!parts?.payload || carried <= 0) return [];
     const h = spec?.payload?.height ?? 0.3;
-    return Array.from({ length: carried }, (_, i) => {
-      const o = parts.payload.clone(true);
-      o.position.y += i * h;
-      return o;
-    });
-  }, [parts, carried, spec]);
+    const anchor = parts.payload.position;
+    const out = [];
+    for (let i = 0; i < carried; i++) {
+      const s = specOf(carriedKinds[i]);
+      const o = s ? cloneScene(s) : parts.payload.clone(true);
+      if (s) o.position.set(anchor.x, anchor.y + i * h, anchor.z);
+      else o.position.y += i * h;
+      out.push(o);
+    }
+    return out;
+  }, [parts, carried, carriedKinds, spec, specOf]);
 
   const axis = spec?.connector?.axis ?? 'z';
 
@@ -110,12 +129,20 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
         {
           length: path.length,
           closed: cart.closed,
+          oneWay,
           speed: cart.speed ?? 1.4,
           dwell: cart.dwell ?? 1.2,
         },
         stations,
         dt,
       );
+      if (next.recycled) {
+        /* 새 차가 나온 것이므로 이전 차의 짐과 기억은 남지 않는다 */
+        if (carried > 0) setCarried(0);
+        setCarriedKinds([]);
+        sourceRef.current = null;
+        lastKeyRef.current = null;
+      }
       sRef.current = next.s;
       dirRef.current = next.dir;
       pauseRef.current = next.pause;
@@ -132,10 +159,11 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
              1번 선반에 내리면 아무 일도 안 한 셈이고, 왕복 경로에서는 그게
              무한히 반복된다. 어디서 실었는지 기억해 두고 그 선반은 건너뛴다. */
           if (carried > 0 && sourceRef.current !== a.uid) {
-            const moved = addStock(a.uid, carried, a.capacity);
+            const moved = addLots(a.uid, carriedKinds, a.capacity);
             if (moved > 0) {
               const left = carried - moved;
               setCarried(left);
+              setCarriedKinds(carriedKinds.slice(moved));   // 못 내린 것은 그대로 싣고 간다
               if (left === 0) sourceRef.current = null;
               acted = true;
             }
@@ -143,13 +171,27 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
         } else if (a.kind === 'shelf-out') {
           // 싣기 — 비어 있을 때만
           if (carried === 0) {
-            const took = takeStock(a.uid, a.dispatch ?? 0);
-            if (took > 0) { setCarried(took); sourceRef.current = a.uid; acted = true; }
+            /* 몇 개를 싣고 나갈지는 **차량이** 정한다 — 선반은 얼마든지 내줄
+               수 있고, 한 번에 실어 낼 양은 차의 성질이기 때문이다.
+               지정이 없으면 선반이 권하는 양을 따른다(기존 카트 동작). */
+            const want = cart.loadCount ?? a.dispatch ?? 0;
+            const got = takeLots(a.uid, want);     // 무엇을 집었는지까지 그대로 온다
+            if (got.length > 0) {
+              setCarried(got.length);
+              setCarriedKinds(got);
+              sourceRef.current = a.uid;
+              acted = true;
+            }
           }
         } else if (a.kind === 'load') {
-          if (a.count > 0) { setCarried(a.count); sourceRef.current = a.uid; acted = true; }
+          if (a.count > 0) {
+            setCarried(a.count);
+            setCarriedKinds(Array.from({ length: a.count }, () => a.payloadKind ?? 'OBJ'));
+            sourceRef.current = a.uid;
+            acted = true;
+          }
         } else if (a.kind === 'unload') {
-          if (carried > 0) { setCarried(0); sourceRef.current = null; acted = true; }
+          if (carried > 0) { setCarried(0); setCarriedKinds([]); sourceRef.current = null; acted = true; }
         }
 
         if (acted) lastKeyRef.current = a.key ?? a.uid;
@@ -162,25 +204,42 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, onPoi
     const tx = f.tan[0] * d;
     const tz = f.tan[1] * d;
     g.position.set(f.pos[0], f.pos[1] + (cart.y ?? 0), f.pos[2]);
+
+    /* 트럭이 개구부를 지나 건물 밖으로 나가면 싣고 있던 것은 출하된 것이다.
+       ---------------------------------------------------------------------
+       출하 지점을 따로 배선하지 않는다 — "문으로 나갔다" 는 사실 자체가 출하다.
+       다만 **문으로** 나가야 한다. 벽을 뚫고 나간 자리에서는 아무 일도 일어나지
+       않아, 도면이 틀렸다는 것이 짐을 실은 채 도는 트럭으로 드러난다. */
+    const outside = floor && !pointInMP(floor, [f.pos[0], f.pos[2]]);
+    if (running && shipOutside && carried > 0 && outside && inGate(gates, [f.pos[0], f.pos[2]])) {
+      addShipped(carried);
+      setCarried(0);
+      setCarriedKinds([]);
+      sourceRef.current = null;
+      lastKeyRef.current = null;      // 밖에 다녀왔으니 다시 실을 수 있다
+    }
     // 모델의 진행축을 이동 방향에 맞춘다
     g.rotation.y = (axis === 'z' ? Math.atan2(tx, tz) : Math.atan2(-tz, tx)) + (cart.reverse ? Math.PI : 0);
   });
 
   return (
     <group ref={groupRef} onPointerDown={onPointerDown}>
-      {parts ? (
-        <>
-          <primitive object={parts.body} />
-          {stack.map((o, i) => (
-            <primitive key={i} object={o} />
-          ))}
-        </>
-      ) : (
-        <mesh position={[0, 0.5, 0]}>
-          <boxGeometry args={[1.4, 1, 2.1]} />
-          <meshBasicMaterial color={CART_COLOR} wireframe />
-        </mesh>
-      )}
+      <group>
+        {parts ? (
+          <>
+            <primitive object={parts.body} />
+            {stack.map((o, i) => (
+              <primitive key={i} object={o} />
+            ))}
+          </>
+        ) : (
+          <mesh position={[0, 0.5, 0]}>
+            <boxGeometry args={[1.4, 1, 2.1]} />
+            <meshBasicMaterial color={CART_COLOR} wireframe />
+          </mesh>
+        )}
+      </group>
+
       {selected && (
         <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={6}>
           <ringGeometry args={[1.15, 1.35, 24]} />
@@ -202,6 +261,10 @@ export default function CartView({
   stations,
   selected = false,
   running = true,
+  /** 트럭인가 — 건물 밖으로 나가면 짐을 출하로 넘긴다 */
+  shipOutside = false,
+  floor = null,
+  gates = [],
   onPointerDown,
 }) {
   const spec = useModelSpec(item);
@@ -226,6 +289,10 @@ export default function CartView({
           /* 출발 지점을 경로 길이만큼 고르게 나눈다 — 여러 대가 한 점에서
              출발하면 겹쳐 보이고, 역에서도 동시에 서 버린다 */
           startS={(k / count) * path.length}
+          shipOutside={shipOutside}
+          floor={floor}
+          gates={gates}
+          oneWay={shipOutside && !cart.closed}
           onPointerDown={onPointerDown}
         />
       ))}

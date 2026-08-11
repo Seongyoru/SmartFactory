@@ -12,25 +12,26 @@
  */
 
 import React, { useEffect } from 'react';
-import { Ban, Building2, Cable, Crosshair, MousePointer2, Eraser, Truck, Box as BoxIcon } from 'lucide-react';
+import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2, Truck } from 'lucide-react';
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { loadModel } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
-import { BUILTIN_LIBRARY, PAYLOAD_ITEM, isShelf, isUtility } from './data/library.js';
+import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
 import LibraryPanel from './ui/LibraryPanel.jsx';
 import Toolbar from './ui/Toolbar.jsx';
 import Inspector from './ui/Inspector.jsx';
 import ZoneLayers from './ui/ZoneLayers.jsx';
+import ErrorBoundary from './ui/ErrorBoundary.jsx';
 
 /* 기본 제공 모델은 앱이 뜨자마자 받아 둔다 — 라이브러리 카드에 치수를 띄우고,
    첫 배치 때 고스트가 늦게 나타나는 것을 막기 위해. */
 function usePreloadBuiltins() {
   useEffect(() => {
-    [...BUILTIN_LIBRARY, PAYLOAD_ITEM]
+    [...BUILTIN_LIBRARY, ...Object.values(PAYLOAD_ITEMS)]
       .filter((i) => i.url)
-      .forEach((i) => loadModel(i.modelKey, { url: i.url, axis: i.axis }).catch(() => {}));
+      .forEach((i) => loadModel(i.modelKey, { url: i.url, axis: i.axis, merge: i.merge }).catch(() => {}));
   }, []);
 }
 
@@ -40,6 +41,39 @@ function useShortcuts() {
     const onKey = (e) => {
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      /* 되돌리기 — 글자 입력 중에는 위에서 이미 빠져나가므로 이름 필드의
+         네이티브 실행 취소를 가로채지 않는다.
+         한글 자판에서도 Ctrl 조합은 대개 라틴 문자로 오지만, 안 그런 경우를
+         대비해 같은 자리의 글쇠(ㅋ · ㅛ)도 함께 받는다. */
+      if (e.ctrlKey || e.metaKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'z' || k === 'ㅋ') {
+          e.preventDefault();
+          dispatch({ type: e.shiftKey ? 'REDO' : 'UNDO' });
+          return;
+        }
+        if (k === 'y' || k === 'ㅛ') {
+          e.preventDefault();
+          dispatch({ type: 'REDO' });
+          return;
+        }
+        /* 복사·붙여넣기 — 설비/선반/기둥만, 그리고 **한 종류만**.
+           붙여넣기는 곧바로 만들지 않고 손에 든 상태로 넘어간다. 어디에 놓일지
+           보고 정하는 편이, 원본 옆 어딘가에 생긴 것을 다시 끌어 옮기는 것보다
+           낫다. 무엇을 복사했는지는 클립보드가 기억한다. */
+        if (k === 'c' || k === 'ㅊ') {
+          e.preventDefault();
+          dispatch({ type: 'COPY' });
+          return;
+        }
+        if (k === 'v' || k === 'ㅍ') {
+          e.preventDefault();
+          if (state.clipboard) dispatch({ type: 'SET_TOOL', tool: TOOL.PASTE });
+          else dispatch({ type: 'SET', patch: { hint: '복사해 둔 것이 없습니다' } });
+          return;
+        }
+      }
 
       switch (e.key) {
         case 'r':
@@ -76,7 +110,10 @@ function useShortcuts() {
           if (state.tool === TOOL.PATH) dispatch({ type: 'PATH_FINISH', closed: e.shiftKey });
           break;
         case 'Escape':
-          if (state.polyDraft?.points.length || state.wallDraft) dispatch({ type: 'POLY_CANCEL' });
+          /* 꼭짓점 편집이 먼저다 — 편집 중에 Esc 가 도구까지 바꿔 버리면
+             "고치던 것만 그만두기" 를 할 수 없다 */
+          if (state.editShape) dispatch({ type: 'EDIT_SHAPE', target: null });
+          else if (state.polyDraft?.points.length || state.wallDraft) dispatch({ type: 'POLY_CANCEL' });
           else if (state.pathDraft?.points.length) dispatch({ type: 'PATH_CANCEL' });
           else if (state.connectFrom) dispatch({ type: 'CANCEL_CONNECT' });
           else dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT, itemId: null });
@@ -139,6 +176,12 @@ function ModeBanner() {
   const info =
     isBuildTool(tool)
       ? { Icon: Building2, color: 'text-emerald-600 ring-emerald-500/40', text: buildText() }
+    : tool === TOOL.PASTE
+      ? {
+          Icon: BoxIcon,
+          color: 'text-cyan-600 ring-cyan-500/40',
+          text: `복사한 ${state.clipboard?.items.length ?? 0}개 — 놓을 자리를 클릭하세요`,
+        }
     : tool === TOOL.PLACE
       ? {
           Icon: BoxIcon,
@@ -192,6 +235,34 @@ function ModeBanner() {
   );
 }
 
+/**
+ * 3D 뷰 옵션 — 캔버스 오른쪽 위.
+ *  돌하우스(앞 벽 감추기)는 내부를 보려고 켜 두지만, 건물의 겉모습을 확인해야
+ *  할 때도 있다. 툴바가 아니라 캔버스 위에 두는 이유는 이 값이 **지금 보고 있는
+ *  화면에만** 영향을 주기 때문이다 — 도면 자체는 달라지지 않는다.
+ *  탑뷰에서는 애초에 벽이 감춰지지 않으므로 버튼도 나오지 않는다.
+ */
+function ViewOptions() {
+  const { state, dispatch } = useEditor();
+  if (state.view !== VIEW.ISO) return null;
+  const on = state.dollhouse;
+
+  return (
+    <div className="absolute right-3 top-3 z-10">
+      <button
+        onClick={() => dispatch({ type: 'SET', patch: { dollhouse: !on } })}
+        title={on ? '벽을 모두 세워서 본다' : '보는 쪽 벽을 감춘다'}
+        className={`flex items-center gap-1.5 rounded-full bg-float px-3 py-1.5 text-[11.5px] font-medium ring-1 backdrop-blur transition-colors ${
+          on ? 'text-sky-500 ring-sky-500/40' : 'text-ink2 ring-edge hover:text-ink'
+        }`}
+      >
+        {on ? <EyeOff size={13} /> : <Eye size={13} />}
+        {on ? '앞 벽 감춤' : '벽 모두 표시'}
+      </button>
+    </div>
+  );
+}
+
 function StatusBar() {
   const { state } = useEditor();
   const cursor = useCursor();
@@ -228,8 +299,12 @@ function Shell() {
       <div className="flex min-h-0 flex-1">
         <LibraryPanel />
         <main className="relative min-w-0 flex-1">
-          <EditorScene />
+          {/* 씬에서 오류가 나도 화면이 통째로 하얘지지 않도록 */}
+          <ErrorBoundary>
+            <EditorScene />
+          </ErrorBoundary>
           <ModeBanner />
+          <ViewOptions />
           <ZoneLayers />
         </main>
         <Inspector />

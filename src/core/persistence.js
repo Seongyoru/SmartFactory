@@ -31,6 +31,7 @@ export const layoutSnapshot = (state) => ({
   walls: state.walls,
   pillars: state.pillars,
   zones: state.zones,
+  openings: state.openings,
   seq: state.seq,
 });
 

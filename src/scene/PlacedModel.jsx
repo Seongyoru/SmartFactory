@@ -15,6 +15,9 @@ import { footprintOf, rotToRad } from '../core/grid.js';
 /* 테마가 없을 때(고스트 미리보기 밖 등) 쓰는 기본값 */
 const DEFAULT_COLORS = { select: '#38bdf8', ghostOk: '#22d3ee', ghostBad: '#f43f5e', fillOpacity: 0.22 };
 
+/** 멈춘 설비 표시색 — 라인 정지는 언제나 같은 붉은색으로 읽히게 한다 */
+const HALT_COLOR = '#ef4444';
+
 /* 바닥에 그리는 풋프린트 외곽선 — 탑뷰에서 "몇 칸을 먹는지" 보여 준다 */
 export function FootprintOutline({ rect, color = DEFAULT_COLORS.select, y = 0.02, dashed = false }) {
   const geom = useMemo(() => {
@@ -122,6 +125,8 @@ export default function PlacedModel({
   ghost = false,
   valid = true,
   dimmed = false,
+  /** 종점이 가득 차서 라인이 멈췄는가 */
+  halted = false,
   colors = DEFAULT_COLORS,
   onPointerDown,
   onClick,
@@ -136,7 +141,26 @@ export default function PlacedModel({
 
   const object = useMemo(() => {
     if (!spec) return null;
-    const obj = cloneScene(spec, { cloneMaterials: ghost || dimmed });
+    const obj = cloneScene(spec, { cloneMaterials: ghost || dimmed || halted });
+
+    /* 라인이 서면 설비도 선다.
+       ---------------------------------------------------------------------
+       멈춘 이유(종점이 가득 참)는 스틸리지 쪽에 표시되지만, 도면에서 먼저
+       눈에 띄는 것은 "저 설비가 안 돈다" 쪽이다. 붉게 물들여 어느 설비까지
+       영향을 받았는지 한눈에 따라갈 수 있게 한다. */
+    if (halted && !ghost) {
+      const red = new THREE.Color(HALT_COLOR);
+      obj.traverse((n) => {
+        if (!n.isMesh || !n.material) return;
+        if ('emissive' in n.material) {
+          n.material.emissive = red;
+          n.material.emissiveIntensity = 0.55;
+        } else {
+          n.material.color = red;
+        }
+      });
+    }
+
     if (ghost || dimmed) {
       const tint = new THREE.Color(ghost ? (valid ? okColor : badColor) : '#ffffff');
       obj.traverse((n) => {
@@ -153,7 +177,7 @@ export default function PlacedModel({
       });
     }
     return obj;
-  }, [spec, ghost, dimmed, valid, okColor, badColor]);
+  }, [spec, ghost, dimmed, halted, valid, okColor, badColor]);
 
   const rect = useMemo(
     () => (spec ? footprintOf(placed, spec) : null),
@@ -176,7 +200,10 @@ export default function PlacedModel({
         rotation={[0, rotToRad(placed.rot), 0]}
         {...handlers}
       >
-        {object ? <primitive object={object} /> : <Placeholder color={ghost ? GHOST_OK : '#475569'} />}
+        {/* 모델을 아직 못 읽었으면 자리표시. 예전에는 여기서 정의된 적 없는
+            이름(GHOST_OK)을 쓰고 있어서, **로드 전에 고스트를 그리는 순간**
+            ReferenceError 로 씬 전체가 죽었다. 큰 모델을 고르면 바로 재현된다. */}
+        {object ? <primitive object={object} /> : <Placeholder color={ghost ? okColor : '#475569'} />}
       </group>
 
       {rect && ghost && (

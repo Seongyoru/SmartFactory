@@ -27,7 +27,7 @@ export function IconBtn({ active, title, children, ...rest }) {
     <button
       type="button"
       title={title}
-      className={`grid h-8 w-8 place-items-center rounded-md transition-colors ${
+      className={`grid h-8 w-8 place-items-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         active ? 'bg-sky-500 text-white' : 'bg-raise text-ink2 hover:bg-raiseh ring-1 ring-edge'
       }`}
       {...rest}

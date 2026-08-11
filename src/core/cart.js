@@ -16,8 +16,9 @@
 import { buildFreePath } from './routing.js';
 import { allPorts } from './link.js';
 import { PORT_KIND } from './ports.js';
-import { isShelf } from '../data/library.js';
+import { isShelf, isStillage, payloadKeyOf } from '../data/library.js';
 import { ZONE, shelfCapacity, shelfZones } from './shelf.js';
+import { stillageCapacity } from './stillage.js';
 import { rotateXZ } from './grid.js';
 import { getSpec } from './modelStore.js';
 
@@ -81,11 +82,15 @@ function closestOnPath(path, [x, z], step = 0.25) {
  *  { s, kind:'load'|'unload', uid, portId, count }
  *  count 는 그 설비가 한 번에 내보내는 수량이다(적재 시에만 의미).
  */
-export function cartStations(path, placedList, itemOf) {
+export function cartStations(path, placedList, itemOf, { loadOnly = false } = {}) {
   if (!path) return [];
   const out = [];
   for (const port of allPorts(placedList, itemOf)) {
     if (port.kind !== PORT_KIND.IN && port.kind !== PORT_KIND.OUT) continue;
+    /* 적치대는 아래에서 따로 다룬다 — 포트는 벨트를 받는 입구지만, 카트에게는
+       **싣는 곳**이다. 포트 종류(유입)를 그대로 따르면 카트가 거기에 자재를
+       내려놓게 되는데, 적치대에서 물자가 빠지는 길은 카트뿐이라 정반대다. */
+    if (isStillage(itemOf(placedList.find((p) => p.uid === port.uid)?.itemId))) continue;
     const { s, dist } = closestOnPath(path, [port.world[0], port.world[2]]);
     if (dist > STATION_DIST) continue;
 
@@ -111,6 +116,8 @@ export function cartStations(path, placedList, itemOf) {
       key: `${port.uid}:${port.id}`,
       name: owner?.name ?? port.uid,
       count: Math.max(0, owner?.outputCount ?? 3),
+      /* 이 설비가 만드는 물건 — 카트가 실으면 그대로 따라가서 선반에 쌓인다 */
+      payloadKind: payloadKeyOf(itemOf(owner?.itemId)),
     });
   }
 
@@ -165,7 +172,44 @@ export function cartStations(path, placedList, itemOf) {
     });
   }
 
-  return out.sort((a, b) => a.s - b.s);
+  /* 적치대 — 카트에게는 **싣는 곳** 하나뿐이다.
+     선반처럼 입고/출고로 나누지 않는다. 벨트로 들어오고 카트로 나가는 것이
+     이 물건의 정의라, 방향이 하나로 정해져 있기 때문이다. */
+  for (const p of placedList) {
+    if (!isStillage(itemOf(p.itemId))) continue;
+    const hit = closestOnPath(path, p.pos);
+    if (hit.dist > STATION_DIST) continue;
+    out.push({
+      s: hit.s,
+      dist: hit.dist,
+      kind: 'shelf-out',                       // 싣기 — 재고에서 꺼내 온다
+      uid: p.uid,
+      key: p.uid,
+      name: p.name ?? p.uid,
+      capacity: stillageCapacity(p),
+      dispatch: Math.max(0, p.dispatchCount ?? 3),
+    });
+  }
+
+  /**
+   * 출하 차량은 **싣기만** 한다.
+   * ---------------------------------------------------------------------------
+   *  트럭이 하는 일은 공장 안의 물건을 밖으로 내보내는 것 하나뿐이라, 방향이
+   *  처음부터 정해져 있다. 그래서 경로가 선반의 입고 구역(초록) 쪽을 지나가도
+   *  거기서 내리는 것이 아니라 **실어서** 나간다 — 어느 쪽 면을 지나느냐로
+   *  역할이 갈리는 것은 공장 안을 오가는 카트의 규칙이다.
+   *
+   *  설비 유입부는 아예 뺀다. 거기에는 실을 것이 없다(자재가 들어가는 입구다).
+   *  카트라면 내려놓을 자리지만 트럭에게는 아무것도 아니어서, 남겨 두면 트럭이
+   *  이유 없이 멈춰 서기만 한다.
+   */
+  const list = loadOnly
+    ? out
+        .filter((st) => st.kind !== 'unload')
+        .map((st) => (st.kind === 'shelf-in' ? { ...st, kind: 'shelf-out' } : st))
+    : out;
+
+  return list.sort((a, b) => a.s - b.s);
 }
 
 /**
@@ -202,7 +246,7 @@ export function crossedStations(stations, s0, s1, dir) {
  *  "지나가기만 하고 아무 일도 없었던" 경우는 들른 것으로 치지 않는다.
  *  빈 카트가 입고 구역을 지났다는 이유로 바로 옆 출고 구역이 막히면 곤란하다.
  */
-export function stepCart(st, { length, closed, speed, dwell }, stations, dt) {
+export function stepCart(st, { length, closed, oneWay, speed, dwell }, stations, dt) {
   const L = length;
   if (!(L > 0.01)) return { s: st.s, dir: st.dir, pause: st.pause, arrived: null };
 
@@ -216,6 +260,14 @@ export function stepCart(st, { length, closed, speed, dwell }, stations, dt) {
 
   if (closed) {
     s1 = ((s1 % L) + L) % L;
+  } else if (s1 > L && oneWay) {
+    /* 편도 주행(트럭) — 끝에 닿으면 사라지고 시작점에서 새 차가 나온다.
+       왕복으로 되돌아오면 빈 트럭이 공장 안을 거슬러 올라오는 그림이 되는데,
+       출하 차량의 흐름은 한 방향이라 그쪽이 실제와 맞지 않는다.
+       끝점은 정확히 밟고 나서 처음으로 보낸다 — 끝에 있는 정차역을 놓치지
+       않기 위해서다(아래 왕복 처리와 같은 이유). */
+    if (st.s < L) { s1 = L; }
+    else { s1 = 0; return { s: 0, dir: 1, pause: 0, arrived: null, recycled: true }; }
   } else if (s1 > L) {
     /* 끝점을 **정확히 밟고** 다음 프레임에 되돌아간다.
        튕겨 나온 위치로 바로 접어 버리면 경로 맨 끝(s = 0 또는 L)에 있는

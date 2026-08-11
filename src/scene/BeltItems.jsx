@@ -28,9 +28,16 @@ import { PAYLOAD_ITEM } from '../data/library.js';
 /** 한 벨트에 올릴 수 있는 최대 개수 — 짧은 간격으로 긴 벨트를 채울 때의 안전선 */
 const MAX_ITEMS = 60;
 
-export default function BeltItems({ path, speed = 0.6, gap = 3, layers = 1, running = true }) {
-  const spec = useModelSpec(PAYLOAD_ITEM);
+/**
+ * @param payload 이 벨트에 흐르는 반송물. 설비마다 만들어 내는 물건이 다르므로
+ *                무엇이 흐를지는 **내보내는 설비**가 정한다(library 의 payload).
+ */
+export default function BeltItems({ path, speed = 0.6, gap = 3, layers = 1, running = true, onArrive = null, payload = PAYLOAD_ITEM }) {
+  const spec = useModelSpec(payload);
   const offsetRef = useRef(0);
+  /* 콜백은 매 렌더 새로 오므로 ref 로 잡아 둔다 — useFrame 을 다시 걸지 않기 위해 */
+  const arriveRef = useRef(onArrive);
+  arriveRef.current = onArrive;
   const slotsRef = useRef([]);
 
   const step = Math.max(0.4, gap);
@@ -68,7 +75,29 @@ export default function BeltItems({ path, speed = 0.6, gap = 3, layers = 1, runn
     const L = path.length;
 
     if (running && speed > 0) {
-      offsetRef.current = (offsetRef.current + speed * Math.min(dt, 0.1)) % step;
+      const prev = offsetRef.current;
+      const next = prev + speed * Math.min(dt, 0.1);
+
+      /**
+       * 물건이 벨트 끝을 넘어가는 순간을 잡는다.
+       * -----------------------------------------------------------------------
+       *  물건들은 s = offset + k·간격 에 놓이고, s > L 이 되면 사라진다.
+       *  k 번째가 사라지는 것은 offset 이 L − k·간격 을 지날 때인데, offset 은
+       *  [0, 간격) 을 돌므로 그 값은 딱 하나 — **L 을 간격으로 나눈 나머지** 다.
+       *
+       *  예전에는 offset 이 **한 바퀴 돌 때**(0 으로 되돌아갈 때) 도착으로 쳤다.
+       *  개수는 맞지만 시점이 다르다. 두 값은 벨트 길이가 간격의 배수일 때만
+       *  같아서, 보통은 최대 한 주기만큼 어긋난 채로 쌓였다 — 화면에서 물건이
+       *  끝에 닿기 전에 적치대가 늘거나, 닿고 한참 뒤에 느는 것으로 보인다.
+       *
+       *  나눗셈 몫의 차로 세면 한 프레임에 여러 개가 지나가도(빠른 벨트·긴 dt)
+       *  빠뜨리지 않는다.
+       */
+      const r = L % step;
+      const passed = Math.floor((next - r) / step) - Math.floor((prev - r) / step);
+      if (passed > 0) arriveRef.current?.(passed * Math.max(1, layers));
+
+      offsetRef.current = next % step;
     }
 
     for (let k = 0; k < list.length; k++) {

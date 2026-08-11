@@ -19,8 +19,9 @@
 
 import React, { useEffect, useMemo } from 'react';
 import { cloneScene, useModelMissing, useModelSpec } from '../core/modelStore.js';
-import { PAYLOAD_ITEM } from '../data/library.js';
-import { clampStock, useStock } from '../core/simStore.js';
+
+import { clampStock, useLots, useStock } from '../core/simStore.js';
+import { usePayloadSpecs } from '../core/payload.js';
 import { rotToRad } from '../core/grid.js';
 import {
   FALLBACK,
@@ -151,19 +152,25 @@ function ProceduralRack({ placed, ghost }) {
  * 적재된 자재
  * ------------------------------------------------------------------------ */
 function StoredItems({ placed, spec, count }) {
-  const objSpec = useModelSpec(PAYLOAD_ITEM);
+  /* 자리마다 무엇이 놓였는지는 재고가 기억한다 — 카트가 섞어 부리면
+     섞인 채로 쌓여야 한다(하나로 뭉뚱그리면 전체 색이 한꺼번에 바뀐다). */
+  const lots = useLots(placed.uid);
+  const specOf = usePayloadSpecs();
   /* 적재수는 shelf.js 에 등록된 자재 폭 하나로만 계산한다. 여기서 따로 재면
      인스펙터가 적은 개수와 실제로 그리는 개수가 어긋난다(34 vs 35). */
   const width = payloadWidth();
 
   const items = useMemo(() => {
-    if (!objSpec || count <= 0) return [];
+    if (count <= 0) return [];
     const cap = shelfCapacity(placed, spec);
-    return Array.from({ length: Math.min(count, cap) }, (_, i) => ({
-      obj: cloneScene(objSpec),
-      pos: slotPosition(i, placed, spec),
-    }));
-  }, [objSpec, count, placed.bays, placed.levels, placed.bayLength, placed.levelGap, placed.perLevel, spec, width]);
+    const out = [];
+    for (let i = 0; i < Math.min(count, cap); i++) {
+      const s = specOf(lots[i]);
+      if (!s) continue;                        // 아직 못 읽은 모델은 건너뛴다
+      out.push({ obj: cloneScene(s), pos: slotPosition(i, placed, spec) });
+    }
+    return out;
+  }, [lots, specOf, count, placed.bays, placed.levels, placed.bayLength, placed.levelGap, placed.perLevel, spec, width]);
 
   return (
     <group>

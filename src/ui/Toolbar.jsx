@@ -14,10 +14,12 @@ import {
   MousePointer2,
   Pause,
   Play,
+  Redo2,
   RotateCw,
   Save,
   Sun,
   Trash2,
+  Undo2,
   Upload,
 } from 'lucide-react';
 import { TOOL, VIEW, useEditor } from '../core/store.jsx';
@@ -93,6 +95,26 @@ export default function Toolbar() {
           }
         >
           <RotateCw size={14} />
+        </IconBtn>
+      </div>
+
+      <div className="mx-1 h-6 w-px bg-kbd" />
+
+      {/* 되돌리기 — 남은 칸 수를 툴팁에 적어 "몇 번 더 갈 수 있는지" 를 보여 준다 */}
+      <div className="flex items-center gap-1">
+        <IconBtn
+          title={`되돌리기 (Ctrl+Z)${state.past.length ? ` · ${state.past.length}단계` : ''}`}
+          disabled={!state.past.length}
+          onClick={() => dispatch({ type: 'UNDO' })}
+        >
+          <Undo2 size={14} />
+        </IconBtn>
+        <IconBtn
+          title={`다시 실행 (Ctrl+Y)${state.future.length ? ` · ${state.future.length}단계` : ''}`}
+          disabled={!state.future.length}
+          onClick={() => dispatch({ type: 'REDO' })}
+        >
+          <Redo2 size={14} />
         </IconBtn>
       </div>
 
