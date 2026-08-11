@@ -4,12 +4,12 @@
 
 import React, { useMemo } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, RotateCw, Trash2 } from 'lucide-react';
-import { useEditor } from '../core/store.jsx';
+import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import { cartPath, cartStations, stationStyle } from '../core/cart.js';
-import { clearStock, setStock, useStock } from '../core/simStore.js';
-import { isShelf } from '../data/library.js';
+import { clearStock, setStock, useLots, useShipped, useStock } from '../core/simStore.js';
+import { PAYLOAD_ITEMS, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
   MAX_BAYS,
   MAX_BAY_LENGTH,
@@ -34,7 +34,20 @@ import {
 import { footprintOf } from '../core/grid.js';
 import { shelfBBox } from '../core/shelf.js';
 import { ALIGN, AXIS, alignMoves, distributeMoves, gapOf } from '../core/align.js';
-import { FLOOR_COLOR, edgeSpec, inZone, mpArea, mpEdges, wallBox } from '../core/area.js';
+import { MAX_CAPACITY, MIN_CAPACITY, stillageCapacity, stillageGrid } from '../core/stillage.js';
+import { PILLAR_DEFAULTS, WALL_DEFAULTS } from '../core/area.js';
+import {
+  FLOOR_COLOR,
+  MIN_OPENING,
+  edgeSpec,
+  inZone,
+  mpArea,
+  mpEdges,
+  mpVertices,
+  openingsOn,
+  wallBox,
+  wallLines,
+} from '../core/area.js';
 import { focusOn } from '../core/focusStore.js';
 import { sliceCountFor, tileCount } from '../scene/connectorGeometry.js';
 import { Btn, ColorField, Field, Row, Section, Slider } from './common.jsx';
@@ -46,6 +59,52 @@ function useModelsVersion() {
 }
 
 const ROT_LABEL = ['0°', '90°', '180°', '270°'];
+
+/**
+ * 쌓여 있는 것의 내역 — 종류별로 몇 개인가.
+ * ---------------------------------------------------------------------------
+ *  자리마다 다른 물건이 섞여 쌓이므로 총 개수만으로는 무엇이 들어 있는지 알 수
+ *  없다. 색 견본을 함께 찍어 화면에서 본 것과 목록을 바로 이을 수 있게 한다.
+ *  (한 종류만 있으면 굳이 나누어 보여 주지 않는다 — 총 개수로 충분하다)
+ */
+function StockBreakdown({ uid }) {
+  const lots = useLots(uid);
+
+  const rows = useMemo(() => {
+    const count = new Map();
+    for (const k of lots) count.set(k, (count.get(k) ?? 0) + 1);
+    return [...count.entries()]
+      .map(([key, n]) => ({ key, n, item: PAYLOAD_ITEMS[key] }))
+      .sort((a, b) => b.n - a.n);
+  }, [lots]);
+
+  if (rows.length < 2) return null;
+
+  return (
+    <div className="mt-2">
+      <p className="mb-1 text-[10.5px] text-ink4">내역</p>
+      <ul className="space-y-0.5">
+        {rows.map(({ key, n, item }) => (
+          <li key={key} className="flex items-center justify-between gap-2 text-[11px]">
+            <span className="flex min-w-0 items-center gap-1.5 text-ink2">
+              <span
+                className="h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-edge"
+                style={{ background: item?.color ?? '#94a3b8' }}
+              />
+              <span className="truncate">{item?.name ?? key}</span>
+            </span>
+            <b className="shrink-0 tabular-nums text-ink">
+              {n} 개
+              <span className="ml-1 font-normal text-ink4">
+                {Math.round((n / lots.length) * 100)}%
+              </span>
+            </b>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function EquipmentPanel({ placed }) {
   const { state, dispatch, itemOf } = useEditor();
@@ -479,6 +538,8 @@ function ShelfPanel({ placed }) {
             />
           </div>
         </div>
+        <StockBreakdown uid={placed.uid} />
+
         <div className="mt-2 flex gap-2">
           <Btn onClick={() => setStock(placed.uid, capacity)}>가득 채우기</Btn>
           <Btn onClick={() => clearStock(placed.uid)}>비우기</Btn>
@@ -532,8 +593,8 @@ function CartPanel({ cart }) {
   const item = itemOf(cart.itemId);
   const path = useMemo(() => cartPath(cart), [cart]);
   const stations = useMemo(
-    () => (path ? cartStations(path, state.placed, itemOf) : []),
-    [path, state.placed, itemOf, version],
+    () => (path ? cartStations(path, state.placed, itemOf, { loadOnly: isTruck(item) }) : []),
+    [path, state.placed, itemOf, version, item],
   );
 
   const slider = (label, key, min, max, step, unit, fallback) => (
@@ -556,9 +617,11 @@ function CartPanel({ cart }) {
     </label>
   );
 
+  const truck = isTruck(item);
+
   return (
     <>
-      <Section title="카트">
+      <Section title={truck ? '트럭' : '카트'}>
         <Field
           label="이름"
           value={cart.name}
@@ -569,6 +632,50 @@ function CartPanel({ cart }) {
         <Row label="경로 길이">{path ? `${path.length.toFixed(2)} m` : '—'}</Row>
         <Row label="경유점">{cart.points.length} 개</Row>
         <Row label="주행 방식">{cart.closed ? '고리 (계속 순환)' : '왕복'}</Row>
+      </Section>
+
+      {/* 한 번에 몇 개를 실을지는 **차가** 정한다 — 선반·적치대는 얼마든지 내줄
+          수 있고, 한 번에 실어 낼 양은 차의 성질이기 때문이다.
+          트럭은 한 번에 많이 싣고 나가는 물건이라 단위와 폭을 다르게 잡는다. */}
+      <Section title={truck ? '출하' : '적재'}>
+        <Slider
+          label="한 번에 싣는 양"
+          min={truck ? 10 : 1}
+          max={truck ? 200 : 20}
+          step={truck ? 10 : 1}
+          value={cart.loadCount ?? (truck ? 10 : 3)}
+          text={
+            cart.loadCount != null
+              ? `${cart.loadCount} 개`
+              : `${truck ? 10 : 3} 개 · 보낸 곳 설정 따름`
+          }
+          onChange={(v) => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { loadCount: v } })}
+        />
+
+        {/* 지정하지 않으면 선반·적치대가 권하는 양(그쪽의 "실어 보낼 수량")을
+            따른다. 한 번 정하고 나면 되돌릴 길이 있어야 한다. */}
+        {cart.loadCount != null && (
+          <div className="mt-2">
+            <Btn onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { loadCount: undefined } })}>
+              보낸 곳 설정 따르기
+            </Btn>
+          </div>
+        )}
+
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+          {truck ? (
+            <>
+              선반·적치대 옆을 지나면 싣고,
+              <b className="text-ink3"> 개구부를 지나 건물 밖</b>으로 나가는 순간 출하로 집계됩니다.
+              경로 끝을 벽 바깥까지 그려 주세요 — 출하 지점을 따로 지정할 필요는 없습니다.
+            </>
+          ) : (
+            <>
+              <b className="text-ink3">비어 있을 때만</b> 싣습니다. 받는 곳의 수용량이 모자라면
+              못 내린 만큼은 그대로 싣고 다음 자리로 갑니다.
+            </>
+          )}
+        </p>
       </Section>
 
       <Section title="배치 대수">
@@ -670,6 +777,57 @@ function CartPanel({ cart }) {
 
 const WALL_RANGE = { thickness: [0.05, 1.5, 0.05], height: [0.3, 12, 0.1] };
 
+/**
+ * 이 벽 하나에 뚫린 개구부 목록.
+ * ---------------------------------------------------------------------------
+ *  개구부는 벽에서 **빠진 자리**라 3D 에서 집을 덩어리가 없다. 바닥의 주황
+ *  문지방 띠를 눌러도 되지만, 벽을 고르면 그 벽의 구멍이 함께 나오는 편이
+ *  찾기 쉽다 — 문을 손보는 일은 대개 그 벽을 손보는 일과 같이 온다.
+ *
+ *  @param line { a, b, spec } — 벽의 기준선. 어느 개구부가 이 벽에 얹혔는지는
+ *              좌표로 판정하므로, 벽이 조금 움직여도 목록이 따라온다.
+ */
+function OpeningList({ line }) {
+  const { state, dispatch } = useEditor();
+  const list = useMemo(
+    () => state.openings.filter((o) => openingsOn(line, [o]).length),
+    [state.openings, line],
+  );
+
+  return (
+    <Section title={`개구부 (${list.length})`}>
+      {list.length === 0 ? (
+        <p className="py-1 text-[11px] leading-relaxed text-ink4">
+          이 벽에는 없습니다. 작업영역 탭의 <b className="text-ink3">개구부</b> 도구로
+          벽을 클릭해 뚫으세요.
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {list.map((o) => (
+            <li key={o.uid}>
+              <button
+                onClick={() => {
+                  dispatch({ type: 'SELECT', selected: { kind: 'opening', uid: o.uid } });
+                  focusOn(o.at);
+                }}
+                className="flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left text-[11px] text-ink2 hover:bg-raiseh"
+              >
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-sky-400" />
+                  <span className="truncate">{o.name}</span>
+                </span>
+                <span className="shrink-0 tabular-nums text-[10px] text-ink4">
+                  {o.width.toFixed(1)} × {o.height.toFixed(1)} m
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
 /** 두께·높이·색 — 영역 전체에도, 면 하나에도, 내벽에도 똑같이 쓰인다 */
 function WallFields({ spec, onChange }) {
   return (
@@ -696,6 +854,59 @@ function WallFields({ spec, onChange }) {
  *  이름까지 바뀌면 안 되므로, 면을 고른 상태에서는 영역의 이름·바닥 색을
  *  아예 보여 주지 않고 그 면의 것만 다룬다.
  */
+/**
+ * 꼭짓점 편집 — 켜고 끄는 스위치.
+ * ---------------------------------------------------------------------------
+ *  고르기만 하면 손잡이가 나오게 두었더니, 바닥을 누를 때마다 꼭짓점이 우수수
+ *  뜨고 그 손잡이가 벽 클릭과 자리를 다퉜다(벽을 고르려던 손이 꼭짓점을 잡는다).
+ *  **고치겠다고 말했을 때만** 손잡이를 낸다.
+ *
+ *  손잡이는 탑뷰(도면)에서만 뜨므로, 3D 로 보던 중에 눌렀다면 탑뷰로 함께
+ *  넘긴다 — 버튼을 눌렀는데 아무 일도 안 일어나는 것처럼 보이면 안 된다.
+ */
+function ShapeEditSection({ kind, uid }) {
+  const { state, dispatch } = useEditor();
+  const on = state.editShape?.kind === kind && state.editShape.uid === uid;
+  const what = kind === 'zone' ? '구역' : '영역';
+
+  const toggle = () => {
+    if (on) return dispatch({ type: 'EDIT_SHAPE', target: null });
+    if (state.view !== VIEW.TOP) dispatch({ type: 'SET', patch: { view: VIEW.TOP } });
+    dispatch({ type: 'EDIT_SHAPE', target: { kind, uid } });
+  };
+
+  return (
+    <Section
+      title="모양 고치기"
+      right={
+        <button
+          onClick={toggle}
+          className={`rounded px-1.5 py-0.5 text-[10.5px] ${on ? 'bg-sky-500/15 text-sky-500' : 'bg-kbd text-ink4'}`}
+        >
+          {on ? '끝내기 (Esc)' : '꼭짓점 편집'}
+        </button>
+      }
+    >
+      {on ? (
+        <p className="text-[10.5px] leading-relaxed text-ink4">
+          · 진한 점(●)을 <b className="text-ink2">끌어</b> 옮깁니다
+          <br />· 변 가운데의 흐린 점을 끌면 그 자리에 꼭짓점이 <b className="text-ink2">생깁니다</b>
+          <br />· <b className="text-ink2">Alt+클릭</b> 으로 지웁니다 (세 점은 남습니다)
+          <br />
+          {kind === 'zone'
+            ? '구역은 바닥 밖으로 나갈 수 없습니다.'
+            : '설비·기둥이 밖으로 나가게 되는 자리로는 줄일 수 없습니다.'}
+          <br />편집하는 동안 건물은 클릭을 받지 않습니다.
+        </p>
+      ) : (
+        <p className="text-[10.5px] leading-relaxed text-ink4">
+          그린 뒤에 {what}의 모양을 고칩니다. 켜면 탑뷰에서 꼭짓점마다 손잡이가 붙습니다.
+        </p>
+      )}
+    </Section>
+  );
+}
+
 function AreaPanel({ area, edge }) {
   const { state, dispatch } = useEditor();
   const edges = useMemo(() => mpEdges(area.mp), [area.mp]);
@@ -703,7 +914,10 @@ function AreaPanel({ area, edge }) {
 
   const toArea = () => dispatch({ type: 'SELECT', selected: { kind: 'area', uid: area.uid } });
 
-  /* ---- 벽 한 장 ------------------------------------------------------- */
+  /* ---- 벽 한 장 -------------------------------------------------------
+   *  개구부 목록은 **그 개구부가 뚫린 벽**에 붙는다. 영역(바닥)에 몰아 두면
+   *  문이 여럿일 때 어느 벽의 문인지 알 수 없고, 벽을 고쳐야 할 때 두 곳을
+   *  오가게 된다. 벽을 고르면 그 벽에 난 구멍이 함께 보이는 편이 자연스럽다. */
   if (picked) {
     const spec = edgeSpec(area, edge);
     const o = area.edges?.[edge] ?? {};
@@ -728,6 +942,8 @@ function AreaPanel({ area, edge }) {
           <Row label="소속 영역">{area.name}</Row>
           <Row label="길이">{picked.len.toFixed(2)} m</Row>
         </Section>
+
+        <OpeningList line={{ a: picked.a, b: picked.b, spec }} />
 
         <Section title="규격">
           <WallFields
@@ -761,6 +977,7 @@ function AreaPanel({ area, edge }) {
         />
         <Row label="바닥 넓이">{mpArea(area.mp).toFixed(1)} ㎡</Row>
         <Row label="벽 면 수">{edges.length} 면</Row>
+        <Row label="꼭짓점">{mpVertices(area.mp).length} 개</Row>
         <Row label="바닥 색">
           <span className="inline-flex items-center gap-1.5">
             <span className="h-3 w-5 rounded-sm border border-edge" style={{ background: FLOOR_COLOR }} />
@@ -769,16 +986,13 @@ function AreaPanel({ area, edge }) {
         </Row>
       </Section>
 
-      <Section title="벽 기본값 (전체)">
-        <WallFields
-          spec={edgeSpec(area, null)}
-          onChange={(patch) => dispatch({ type: 'UPDATE_AREA', uid: area.uid, patch })}
-        />
-        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-          벽을 직접 클릭하면 그 면만 따로 이름·두께·높이·색을 정할 수 있습니다.
-        </p>
-      </Section>
+      <ShapeEditSection kind="area" uid={area.uid} />
 
+      {/* 벽 규격은 여기서 다루지 않는다.
+          바닥과 벽은 서로 다른 대상이고, 벽은 면마다 값이 다를 수 있다.
+          한 장만 고치려면 그 벽을 클릭하고, 여러 장을 맞추려면 Ctrl+클릭이나
+          마키로 골라 "규격 일괄" 을 쓴다 — 고칠 대상을 눈으로 고르는 쪽이
+          "영역 전체" 라는 보이지 않는 범위보다 확실하다. */}
       <Section title="벽 면">
         <ul className="space-y-1">
           {edges.map((e, i) => (
@@ -824,6 +1038,9 @@ function WallPanel({ wall }) {
           놓을 때와 같이 다른 벽 끝·영역 경계에 달라붙습니다.
         </p>
       </Section>
+
+      <OpeningList line={{ a: wall.a, b: wall.b, spec: wall }} />
+
       <Section title="규격">
         <WallFields spec={wall} onChange={(patch) => dispatch({ type: 'UPDATE_WALL', uid: wall.uid, patch })} />
       </Section>
@@ -873,6 +1090,172 @@ function PillarPanel({ pillar }) {
 }
 
 /**
+ * 스틸리지 패널.
+ *  선반과 달리 규격을 늘리지 않는다 — 한 공정의 끝이라 크기는 고정이고,
+ *  정하는 것은 **얼마나 쌓이면 라인을 세울 것인가** 하나다.
+ */
+function StillagePanel({ placed }) {
+  const { dispatch, itemOf } = useEditor();
+  const version = useModelsVersion();
+  const item = itemOf(placed.itemId);
+  const spec = item?.modelKey ? getSpec(item.modelKey) : null;
+  const stock = useStock(placed.uid);
+  const capacity = stillageCapacity(placed);
+  const grid = stillageGrid(spec?.bbox?.size);
+  const full = stock >= capacity;
+  /* 빈 차가 오면 실어 보낼 수량. cart.js 의 정차역이 읽는 값과 같은 기본값(3)을
+     쓴다 — 여기서 다른 값을 보여 주면 화면과 동작이 어긋난다. */
+  const dispatchCount = Math.min(placed.dispatchCount ?? 3, capacity);
+  const set = (patch) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch });
+
+  return (
+    <>
+      <Section title="스틸리지 (적치대)">
+        <Field
+          label="이름"
+          value={placed.name}
+          onChange={(e) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { name: e.target.value } })}
+        />
+        <Row label="위치 X / Z">{placed.pos[0].toFixed(2)} , {placed.pos[1].toFixed(2)} m</Row>
+        <Row label="회전">{ROT_LABEL[placed.rot]}</Row>
+        <Row label="한 층 적재수">{grid.nx} × {grid.nz} = {grid.perLevel} 개</Row>
+      </Section>
+
+      <Section title="적재">
+        <Slider
+          label="최대 적재량" min={MIN_CAPACITY} max={MAX_CAPACITY} step={1} value={capacity}
+          text={`${capacity} 개`}
+          onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { capacity: v } })}
+        />
+        <div className="mb-1 mt-1 flex items-center justify-between text-[11px]">
+          <span className="text-ink4">현재 적재</span>
+          <b className={`tabular-nums ${full ? 'text-red-500' : 'text-ink'}`}>
+            {Math.min(stock, capacity)} / {capacity}
+          </b>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded bg-kbd">
+          <div
+            className={`h-full transition-[width] ${full ? 'bg-red-500' : 'bg-emerald-500'}`}
+            style={{ width: `${capacity ? Math.min(100, (stock / capacity) * 100) : 0}%` }}
+          />
+        </div>
+        <StockBreakdown uid={placed.uid} />
+
+        <div className="mt-2 flex gap-2">
+          <Btn onClick={() => setStock(placed.uid, capacity)}>가득 채우기</Btn>
+          <Btn onClick={() => clearStock(placed.uid)}>비우기</Btn>
+        </div>
+      </Section>
+
+      {/* 반출량 — 선반의 같은 설정과 짝을 이룬다.
+          차량이 자기 적재량을 정하지 않았을 때 따르는 값이 이것이라, 여기가
+          비어 있으면 "보낸 곳 설정 따름" 이 가리킬 곳이 없다(늘 기본 3개가 된다).
+          상한을 수용량에 맞춰 두면, 쌓인 것보다 많이 실어 가라고 적어 둘 수 없다. */}
+      <Section title="반출">
+        <Slider
+          label="빈 차에 실어 보낼 수량"
+          min={1}
+          max={Math.max(1, capacity)}
+          step={1}
+          value={dispatchCount}
+          text={`${dispatchCount} 개`}
+          onChange={(v) => set({ dispatchCount: v })}
+        />
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+          카트·트럭이 옆을 지나면 이 수량만큼 실어 갑니다. 쌓인 것이 이보다 적으면
+          있는 만큼만 갑니다. 차량 쪽에서 <b className="text-ink3">한 번에 싣는 양</b>을
+          따로 정해 두었다면 그쪽이 우선합니다.
+        </p>
+      </Section>
+
+      <Section title="흐름">
+        <p className="text-[10.5px] leading-relaxed text-ink4">
+          컨베이어로 <b className="text-ink3">들어오기만</b> 합니다 — 여기서 벨트를 다시 뽑을 수는
+          없습니다. 물자가 빠지는 길은 <b className="text-ink3">카트가 실어 가는 것</b> 하나뿐입니다.
+          {full && (
+            <>
+              {' '}지금은 <b className="text-red-500">가득 차서</b> 들어오는 벨트와 그 벨트를 먹이던
+              설비가 멈춰 있습니다.
+            </>
+          )}
+        </p>
+      </Section>
+
+      <Section title="삭제">
+        <Btn danger onClick={() => dispatch({ type: 'DELETE', kind: 'equip', uid: placed.uid })}>
+          <Trash2 size={13} /> 삭제
+        </Btn>
+      </Section>
+    </>
+  );
+}
+
+/**
+ * 개구부 패널.
+ *  개구부는 벽에 붙어 있지만 벽의 일부가 아니라 **벽에서 빠진 자리**다.
+ *  그래서 두께·색이 없고, 폭·높이·밑턱만 정한다.
+ */
+function OpeningPanel({ opening }) {
+  const { state, dispatch } = useEditor();
+  const set = (patch) => dispatch({ type: 'UPDATE_OPENING', uid: opening.uid, patch });
+
+  /* 어느 벽에 얹혔는지 — 좌표로 찾으므로 벽이 바뀌면 결과도 따라 바뀐다 */
+  const host = useMemo(() => {
+    for (const line of wallLines(state.areas, state.walls)) {
+      if (openingsOn(line, [opening]).length) {
+        const area = state.areas.find((a) => a.uid === line.areaUid);
+        const wall = state.walls.find((w) => w.uid === line.wallUid);
+        return { line, label: area ? `${area.name} 외벽` : wall?.name ?? '내벽', spec: line.spec };
+      }
+    }
+    return null;
+  }, [opening, state.areas, state.walls]);
+
+  const wallH = host?.spec?.height ?? 4;
+  const over = opening.sill + opening.height > wallH + 1e-6;
+
+  return (
+    <>
+      <Section title="개구부">
+        <Field label="이름" value={opening.name} onChange={(e) => set({ name: e.target.value })} />
+        <Row label="붙은 벽">{host ? host.label : '없음 (벽이 사라짐)'}</Row>
+        <Row label="위치 X / Z">{opening.at[0].toFixed(2)} , {opening.at[1].toFixed(2)} m</Row>
+        {host && <Row label="벽 두께 / 높이">{host.spec.thickness.toFixed(2)} / {wallH.toFixed(2)} m</Row>}
+      </Section>
+
+      <Section title="크기">
+        <Slider
+          label="폭" min={MIN_OPENING} max={20} step={0.1} value={opening.width}
+          text={`${opening.width.toFixed(2)} m`}
+          onChange={(v) => set({ width: v })}
+        />
+        <Slider
+          label="높이" min={MIN_OPENING} max={12} step={0.1} value={opening.height}
+          text={`${opening.height.toFixed(2)} m`}
+          onChange={(v) => set({ height: v })}
+        />
+        <Slider
+          label="밑턱" min={0} max={4} step={0.05} value={opening.sill ?? 0}
+          text={(opening.sill ?? 0) > 0 ? `${opening.sill.toFixed(2)} m · 창` : '0 · 출입구'}
+          onChange={(v) => set({ sill: v })}
+        />
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+          {over
+            ? '벽보다 높아 위쪽이 통째로 트입니다. 인방(문 위 벽)을 남기려면 낮추세요.'
+            : '밑턱을 0 으로 두면 바닥까지 트여 트럭이 지나갈 수 있습니다.'}
+        </p>
+      </Section>
+
+      <Section title="삭제">
+        <Btn danger onClick={() => dispatch({ type: 'DELETE', kind: 'opening', uid: opening.uid })}>
+          <Trash2 size={13} /> 개구부 삭제
+        </Btn>
+      </Section>
+    </>
+  );
+}
+
+/**
  * 구역 패널.
  *  "이 구역 안에 무엇이 있는가" 를 목록으로 보여 준다. 구역은 결국 자리를
  *  묶어 부르기 위한 것이라, 이름만 있고 내용물을 못 보면 쓸 데가 없다.
@@ -897,6 +1280,7 @@ function ZonePanel({ zone }) {
       <Section title="구역">
         <Field label="이름" value={zone.name} onChange={(e) => set({ name: e.target.value })} />
         <Row label="넓이">{mpArea(zone.mp).toFixed(1)} ㎡</Row>
+        <Row label="꼭짓점">{mpVertices(zone.mp).length} 개</Row>
         <ColorField label="색" value={zone.color} onChange={(v) => set({ color: v })} />
         <Slider
           label="투명도" min={0.05} max={0.9} step={0.05} value={zone.opacity ?? 0.28}
@@ -909,6 +1293,8 @@ function ZonePanel({ zone }) {
           onChange={(v) => set({ labelSize: v })}
         />
       </Section>
+
+      <ShapeEditSection kind="zone" uid={zone.uid} />
 
       {/* 외곽선 — 반투명 면만으로는 옆 구역과 맞닿는 자리가 흐려진다.
           굵기는 화면 픽셀이 아니라 도면상의 미터라, 확대해도 축척이 유지된다. */}
@@ -1002,14 +1388,83 @@ const ALIGN_Z = [
   { id: ALIGN.MAX, label: '아래쪽' },
 ];
 
-function MultiPanel({ kind, uids }) {
+/** 종류별 표시 이름 — 목록의 그룹 머리글 */
+const KIND_LABEL = {
+  equip: '설비',
+  pillar: '기둥',
+  wall: '내벽',
+  area: '영역 벽면',
+  opening: '개구부',
+  link: '연결장치',
+  cart: '차량',
+  zone: '구역',
+};
+
+/** 벽처럼 두께·높이·색을 함께 고칠 수 있는 것들 */
+const SPEC_KINDS = new Set(['wall', 'area', 'pillar']);
+
+function MultiPanel({ items }) {
   const { state, dispatch, itemOf } = useEditor();
   const version = useModelsVersion();
 
-  /* 고른 것들의 { uid, pos, rect } — 정렬은 전부 이 값으로만 한다 */
-  const items = useMemo(() => {
-    const set = new Set(uids);
-    if (kind === 'pillar') {
+  /* ---- 이름 붙이기 -------------------------------------------------------
+   *  목록에 uid 만 늘어놓으면 무엇을 골랐는지 알 수 없다. 각자 자기 이름을
+   *  가진 곳에서 가져오고, 이름이 없는 것(영역 벽면)은 소속과 순번으로 만든다. */
+  const named = useMemo(() => {
+    const out = [];
+    for (const it of items) {
+      if (it.kind === 'equip') {
+        const p = state.placed.find((x) => x.uid === it.uid);
+        if (p) out.push({ ...it, name: p.name, at: p.pos });
+      } else if (it.kind === 'pillar') {
+        const p = state.pillars.find((x) => x.uid === it.uid);
+        if (p) out.push({ ...it, name: p.name, at: p.pos });
+      } else if (it.kind === 'wall') {
+        const w = state.walls.find((x) => x.uid === it.uid);
+        if (w) out.push({ ...it, name: w.name, at: [(w.a[0] + w.b[0]) / 2, (w.a[1] + w.b[1]) / 2] });
+      } else if (it.kind === 'area') {
+        const a = state.areas.find((x) => x.uid === it.uid);
+        if (!a) continue;
+        const edges = mpEdges(a.mp);
+        const idx = edges.findIndex((e) => e.key === it.edge);
+        const e = edges[idx];
+        out.push({
+          ...it,
+          name: a.edges?.[it.edge]?.name ?? `${a.name} 벽 ${idx + 1}`,
+          at: e ? e.mid : null,
+        });
+      } else if (it.kind === 'opening') {
+        const o = state.openings.find((x) => x.uid === it.uid);
+        if (o) out.push({ ...it, name: o.name, at: o.at });
+      } else if (it.kind === 'link') {
+        const l = state.links.find((x) => x.uid === it.uid);
+        if (l) out.push({ ...it, name: l.name, at: null });
+      } else if (it.kind === 'cart') {
+        const c = state.carts.find((x) => x.uid === it.uid);
+        if (c) out.push({ ...it, name: c.name, at: c.points[0] });
+      }
+    }
+    return out;
+  }, [items, state]);
+
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const it of named) {
+      if (!m.has(it.kind)) m.set(it.kind, []);
+      m.get(it.kind).push(it);
+    }
+    return [...m.entries()];
+  }, [named]);
+
+  const only = groups.length === 1 ? groups[0][0] : null;
+
+  /* ---- 정렬 — 설비끼리 · 기둥끼리일 때만 ---------------------------------
+   *  섞인 선택에서는 무엇을 기준으로 줄을 맞출지 말할 수 없다. 설비는 모델
+   *  바운딩 박스가, 기둥은 설정값이 크기의 근거라 잣대 자체가 다르다. */
+  const alignItems = useMemo(() => {
+    if (only !== 'equip' && only !== 'pillar') return [];
+    const set = new Set(named.map((i) => i.uid));
+    if (only === 'pillar') {
       return state.pillars.filter((p) => set.has(p.uid)).map((p) => {
         const [w, d] = p.size;
         return {
@@ -1026,23 +1481,58 @@ function MultiPanel({ kind, uids }) {
         const bbox = isShelf(it)
           ? shelfBBox(p, it.modelKey ? getSpec(it.modelKey) : null)
           : it?.modelKey ? getSpec(it.modelKey)?.bbox : null;
-        if (!bbox) return null;
-        return { uid: p.uid, pos: p.pos, rect: footprintOf({ ...p, bboxOverride: bbox }, null) };
+        return bbox ? { uid: p.uid, pos: p.pos, rect: footprintOf({ ...p, bboxOverride: bbox }, null) } : null;
       })
       .filter(Boolean);
-  }, [kind, uids, state.pillars, state.placed, itemOf, version]);
+  }, [only, named, state.pillars, state.placed, itemOf, version]);
 
   const bounds = useMemo(() => {
-    if (!items.length) return null;
+    if (!alignItems.length) return null;
     return {
-      minX: Math.min(...items.map((i) => i.rect.minX)),
-      maxX: Math.max(...items.map((i) => i.rect.maxX)),
-      minZ: Math.min(...items.map((i) => i.rect.minZ)),
-      maxZ: Math.max(...items.map((i) => i.rect.maxZ)),
+      minX: Math.min(...alignItems.map((i) => i.rect.minX)),
+      maxX: Math.max(...alignItems.map((i) => i.rect.maxX)),
+      minZ: Math.min(...alignItems.map((i) => i.rect.minZ)),
+      maxZ: Math.max(...alignItems.map((i) => i.rect.maxZ)),
     };
-  }, [items]);
+  }, [alignItems]);
 
-  const apply = (moves) => { if (moves.length) dispatch({ type: 'MOVE_MANY', kind, moves }); };
+  const apply = (moves) => {
+    if (moves.length) dispatch({ type: 'MOVE_MANY', kind: only, moves });
+  };
+
+  /* ---- 규격 일괄 수정 ----------------------------------------------------
+   *  두께가 제각각인 벽을 골라 두께를 바꾸면 **전부 같은 값**이 된다. 이 기능을
+   *  쓰는 상황이 거의 언제나 "저것들 두께 좀 맞춰 줘" 이기 때문이다. */
+  const specItems = named.filter((i) => SPEC_KINDS.has(i.kind));
+  const hasWall = specItems.some((i) => i.kind === 'wall' || i.kind === 'area');
+  const hasPillar = specItems.some((i) => i.kind === 'pillar');
+  const patchSpec = (patch) => dispatch({ type: 'PATCH_MANY', items: specItems, patch });
+
+  /* 슬라이더가 어디에 서 있어야 하는가.
+     값이 제각각일 수 있으므로 **첫 항목의 현재 값**을 보여 준다. 기본값에
+     고정해 두면 손잡이가 움직일 때마다 제자리로 튕겨 나가서 조작이 안 된다. */
+  const specNow = useMemo(() => {
+    const first = specItems[0];
+    const fallback = {
+      thickness: WALL_DEFAULTS.thickness,
+      height: WALL_DEFAULTS.height,
+      color: WALL_DEFAULTS.color,
+      w: PILLAR_DEFAULTS.size[0],
+      d: PILLAR_DEFAULTS.size[1],
+    };
+    if (!first) return fallback;
+    if (first.kind === 'pillar') {
+      const p = state.pillars.find((x) => x.uid === first.uid);
+      return { ...fallback, height: p?.height ?? 4, color: p?.color ?? WALL_DEFAULTS.color, w: p?.size?.[0] ?? 0.6, d: p?.size?.[1] ?? 0.6 };
+    }
+    if (first.kind === 'wall') {
+      const w = state.walls.find((x) => x.uid === first.uid);
+      return { ...fallback, thickness: w?.thickness ?? 0.3, height: w?.height ?? 4, color: w?.color ?? WALL_DEFAULTS.color };
+    }
+    const a = state.areas.find((x) => x.uid === first.uid);
+    const s = edgeSpec(a, first.edge);
+    return { ...fallback, ...s };
+  }, [specItems, state.pillars, state.walls, state.areas]);
 
   const Tile = ({ onClick, disabled, children }) => (
     <button
@@ -1054,80 +1544,171 @@ function MultiPanel({ kind, uids }) {
     </button>
   );
 
-  const label = kind === 'pillar' ? '기둥' : '설비';
-  /* 폈을 때 생길 틈을 미리 보여 준다. 음수면 자리가 모자라 서로 겹친다는 뜻이라,
-     누르기 전에 알 수 있어야 한다. */
-  const gapX = items.length >= 3 ? gapOf(items, AXIS.X) : null;
-  const gapZ = items.length >= 3 ? gapOf(items, AXIS.Z) : null;
+  const gapX = alignItems.length >= 3 ? gapOf(alignItems, AXIS.X) : null;
+  const gapZ = alignItems.length >= 3 ? gapOf(alignItems, AXIS.Z) : null;
 
   return (
     <>
-      <Section title={`${label} ${items.length}개 선택`}>
-        {bounds && (
-          <>
-            <Row label="전체 크기">
-              {(bounds.maxX - bounds.minX).toFixed(2)} × {(bounds.maxZ - bounds.minZ).toFixed(2)} m
-            </Row>
-            <Row label="중심">
-              {((bounds.minX + bounds.maxX) / 2).toFixed(2)} , {((bounds.minZ + bounds.maxZ) / 2).toFixed(2)}
-            </Row>
-          </>
-        )}
-        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-          <kbd className="rounded bg-kbd px-1 text-ink2">Ctrl</kbd>+클릭으로 더하고 빼며,
-          빈 바닥을 끌면 사각형 안의 것이 한 번에 잡힙니다. 하나를 끌면 묶음이 함께 움직입니다.
+      <Section title={`${named.length}개 선택`}>
+        <p className="text-[10.5px] leading-relaxed text-ink4">
+          빈 바닥을 끌면 사각형 안의 것이 종류를 가리지 않고 잡힙니다(바닥·구역 제외).
+          <kbd className="mx-1 rounded bg-kbd px-1 text-ink2">Ctrl</kbd>+클릭으로 더하고 뺍니다.
+          그룹 이름을 누르면 그 종류만 남습니다.
         </p>
       </Section>
 
-      <Section title="정렬 (가로)">
-        <div className="grid grid-cols-3 gap-1.5">
-          {ALIGN_X.map((m) => (
-            <Tile key={m.id} onClick={() => apply(alignMoves(items, AXIS.X, m.id))} disabled={items.length < 2}>
-              {m.label}
-            </Tile>
-          ))}
-        </div>
-      </Section>
+      {/* 무엇이 골라졌는지 — 종류로 묶고, 이름을 눌러 하나만 골라낼 수 있다 */}
+      {groups.map(([kind, list]) => (
+        <Section
+          key={kind}
+          title={`${KIND_LABEL[kind] ?? kind} (${list.length})`}
+          right={
+            groups.length > 1 && (
+              <button
+                className="text-[11px] text-sky-500 hover:underline"
+                onClick={() => dispatch({ type: 'SELECT_FILTER', kind })}
+              >
+                이것만
+              </button>
+            )
+          }
+        >
+          <ul className="space-y-0.5">
+            {list.map((it) => (
+              <li key={`${it.kind}${it.uid}${it.edge ?? ''}`}>
+                <button
+                  onClick={() => {
+                    dispatch({ type: 'SELECT', selected: { kind: it.kind, uid: it.uid, edge: it.edge } });
+                    if (it.at) focusOn(it.at);
+                  }}
+                  className="w-full truncate rounded-md px-1.5 py-1 text-left text-[11px] text-ink2 hover:bg-raiseh"
+                >
+                  {it.name ?? it.uid}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ))}
 
-      <Section title="정렬 (세로)">
-        <div className="grid grid-cols-3 gap-1.5">
-          {ALIGN_Z.map((m) => (
-            <Tile key={m.id} onClick={() => apply(alignMoves(items, AXIS.Z, m.id))} disabled={items.length < 2}>
-              {m.label}
-            </Tile>
-          ))}
-        </div>
-      </Section>
+      {/* 벽·기둥 규격 — 섞여 있어도 공통 항목은 함께 고칠 수 있다 */}
+      {specItems.length > 1 && (
+        <Section title={`규격 일괄 (${specItems.length})`}>
+          {hasWall && (
+            <Slider
+              label="두께" min={0.05} max={1.5} step={0.05} value={specNow.thickness}
+              text={specNow.thickness.toFixed(2) + ' m 로 맞춤'}
+              onChange={(v) => patchSpec({ thickness: v })}
+            />
+          )}
+          {hasPillar && (
+            <>
+              <Slider
+                label="기둥 가로" min={0.1} max={3} step={0.05} value={specNow.w}
+                text={`${specNow.w.toFixed(2)} m 로 맞춤`}
+                onChange={(v) => patchSpec({ sizeX: v })}
+              />
+              <Slider
+                label="기둥 세로" min={0.1} max={3} step={0.05} value={specNow.d}
+                text={`${specNow.d.toFixed(2)} m 로 맞춤`}
+                onChange={(v) => patchSpec({ sizeZ: v })}
+              />
+            </>
+          )}
+          <Slider
+            label="높이" min={0.3} max={12} step={0.1} value={specNow.height}
+            text={specNow.height.toFixed(2) + ' m 로 맞춤'}
+            onChange={(v) => patchSpec({ height: v })}
+          />
+          <ColorField label="색" value={specNow.color} onChange={(v) => patchSpec({ color: v })} />
+          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+            슬라이더를 움직이면 고른 것들이 <b className="text-ink3">전부 그 값</b>이 됩니다.
+            (각자의 현재 값이 달라도 하나로 맞춰집니다)
+          </p>
+        </Section>
+      )}
 
-      <Section title="등간격">
-        <div className="grid grid-cols-2 gap-1.5">
-          <Tile onClick={() => apply(distributeMoves(items, AXIS.X))} disabled={items.length < 3}>
-            가로 등간격
-          </Tile>
-          <Tile onClick={() => apply(distributeMoves(items, AXIS.Z))} disabled={items.length < 3}>
-            세로 등간격
-          </Tile>
-        </div>
-        {items.length >= 3 && (
-          <div className="mt-1.5">
-            <Row label="펴면 생기는 틈">
-              가로 {gapX.toFixed(2)} · 세로 {gapZ.toFixed(2)} m
-            </Row>
-          </div>
-        )}
-        <p className="mt-1 text-[10.5px] leading-relaxed text-ink4">
-          {items.length < 3
-            ? '등간격은 3개 이상부터 쓸 수 있습니다.'
-            : gapX < 0 || gapZ < 0
-              ? '틈이 음수인 방향은 자리가 모자라 서로 겹칩니다. 먼저 벌려 놓으세요.'
-              : '양 끝은 그대로 두고 사이의 빈틈을 똑같이 벌립니다. 크기가 다른 설비도 고르게 보입니다.'}
-        </p>
-      </Section>
+      {/* 정렬 — 같은 종류(설비 또는 기둥)만 골랐을 때 */}
+      {alignItems.length >= 2 ? (
+        <>
+          {bounds && (
+            <Section title="선택 범위">
+              <Row label="전체 크기">
+                {(bounds.maxX - bounds.minX).toFixed(2)} × {(bounds.maxZ - bounds.minZ).toFixed(2)} m
+              </Row>
+            </Section>
+          )}
+
+          <Section title="정렬 (가로)">
+            <div className="grid grid-cols-3 gap-1.5">
+              {ALIGN_X.map((m) => (
+                <Tile key={m.id} onClick={() => apply(alignMoves(alignItems, AXIS.X, m.id))}>
+                  {m.label}
+                </Tile>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="정렬 (세로)">
+            <div className="grid grid-cols-3 gap-1.5">
+              {ALIGN_Z.map((m) => (
+                <Tile key={m.id} onClick={() => apply(alignMoves(alignItems, AXIS.Z, m.id))}>
+                  {m.label}
+                </Tile>
+              ))}
+            </div>
+          </Section>
+
+          <Section title="등간격">
+            <div className="grid grid-cols-2 gap-1.5">
+              <Tile onClick={() => apply(distributeMoves(alignItems, AXIS.X))} disabled={alignItems.length < 3}>
+                가로 등간격
+              </Tile>
+              <Tile onClick={() => apply(distributeMoves(alignItems, AXIS.Z))} disabled={alignItems.length < 3}>
+                세로 등간격
+              </Tile>
+            </div>
+            {alignItems.length >= 3 && (
+              <Row label="펴면 생기는 틈">
+                가로 {gapX.toFixed(2)} · 세로 {gapZ.toFixed(2)} m
+              </Row>
+            )}
+          </Section>
+        </>
+      ) : (
+        <Section title="정렬">
+          <p className="text-[10.5px] leading-relaxed text-ink4">
+            정렬은 <b className="text-ink3">설비끼리</b> 또는 <b className="text-ink3">기둥끼리</b>
+            골랐을 때만 쓸 수 있습니다. 크기의 근거가 서로 달라(모델 vs 설정값) 섞이면 무엇에
+            줄을 맞출지 정할 수 없기 때문입니다. 위의 <b className="text-ink3">이것만</b>으로
+            한 종류만 남겨 보세요.
+          </p>
+        </Section>
+      )}
 
       <Section title="삭제">
-        <Btn danger onClick={() => dispatch({ type: 'DELETE', kind, uids })}>
-          <Trash2 size={13} /> {items.length}개 삭제
-        </Btn>
+        <div className="flex flex-wrap gap-2">
+          {/* 영역 벽면은 뺀다 — 벽면 하나를 지운다는 것은 곧 그 영역을 통째로
+              지우는 일이라, 버튼 문구("영역 벽면 1개")와 실제 결과가 어긋난다.
+              영역을 지우려면 바닥을 골라야 한다. */}
+          {groups
+            .filter(([kind]) => kind !== 'area')
+            .map(([kind, list]) => (
+              <Btn
+                key={kind}
+                danger
+                onClick={() => dispatch({ type: 'DELETE', kind, uids: list.map((i) => i.uid) })}
+              >
+                <Trash2 size={13} /> {KIND_LABEL[kind] ?? kind} {list.length}개
+              </Btn>
+            ))}
+        </div>
+        {groups.some(([kind]) => kind === 'area') && (
+          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+            영역 벽면은 테두리에서 만들어지므로 따로 지울 수 없습니다. 없애려면 영역의
+            모양을 바꾸세요.
+          </p>
+        )}
       </Section>
     </>
   );
@@ -1136,6 +1717,7 @@ function MultiPanel({ kind, uids }) {
 function Summary() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
+  const shipped = useShipped();
 
   const total = useMemo(
     () =>
@@ -1155,6 +1737,9 @@ function Summary() {
           {state.carts.reduce((n, c) => n + (c.count ?? 1), 0)} 대 / 경로 {state.carts.length}
         </Row>
         <Row label="총 연장 길이">{total.toFixed(2)} m</Row>
+        <Row label="건물">영역 {state.areas.length} · 개구부 {state.openings.length}</Row>
+        {/* 트럭이 개구부로 실어 낸 누계 — 도면이 실제로 물건을 내보내는지 확인용 */}
+        <Row label="출하 누계">{shipped} 개</Row>
       </Section>
 
       <Section title="조작">
@@ -1186,19 +1771,25 @@ export default function Inspector() {
   const wall = sel?.kind === 'wall' ? state.walls.find((w) => w.uid === sel.uid) : null;
   const pillar = sel?.kind === 'pillar' ? state.pillars.find((p) => p.uid === sel.uid) : null;
   const zone = sel?.kind === 'zone' ? state.zones.find((z) => z.uid === sel.uid) : null;
-  const shelf = placed && isShelf(state.library.find((i) => i.id === placed.itemId)) ? placed : null;
+  const opening = sel?.kind === 'opening' ? state.openings.find((o) => o.uid === sel.uid) : null;
+  const placedItem = placed ? state.library.find((i) => i.id === placed.itemId) : null;
+  const shelf = placed && isShelf(placedItem) ? placed : null;
+  const stillage = placed && isStillage(placedItem) ? placed : null;
 
-  /* 여러 개를 골랐으면 개별 상세 대신 정렬 도구를 보여 준다 */
-  const multi = (sel?.uids?.length ?? 0) > 1 ? sel : null;
+  /* 여러 개를 골랐으면 개별 상세 대신 목록·정렬 도구를 보여 준다 */
+  const selected = selItems(sel);
+  const multi = selected.length > 1 ? selected : null;
 
   return (
     <aside className="w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel">
-      {multi ? <MultiPanel kind={multi.kind} uids={multi.uids} />
+      {multi ? <MultiPanel items={multi} />
         : area ? <AreaPanel area={area} edge={sel.edge} />
         : wall ? <WallPanel wall={wall} />
           : pillar ? <PillarPanel pillar={pillar} />
             : zone ? <ZonePanel zone={zone} />
-              : shelf ? <ShelfPanel placed={shelf} />
+              : opening ? <OpeningPanel opening={opening} />
+              : stillage ? <StillagePanel placed={stillage} />
+                : shelf ? <ShelfPanel placed={shelf} />
                 : placed ? <EquipmentPanel placed={placed} />
                   : link ? <LinkPanel link={link} />
                     : cart ? <CartPanel cart={cart} />

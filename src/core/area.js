@@ -74,6 +74,22 @@ export const WALL_SNAP_DIST = 0.8;
 /** 최소 크기 — 이보다 작게 끌면 실수로 본다 */
 export const MIN_AREA_SIDE = 0.5;
 
+/**
+ * 개구부(출입구·게이트).
+ * ---------------------------------------------------------------------------
+ *  벽에 뚫는 구멍이다. 트럭이 드나드는 게이트가 주 용도라 기본값을 크게 잡았다.
+ *  sill(밑턱)을 올리면 창이 되고, 0 이면 바닥까지 트인 출입구가 된다.
+ *
+ *  어느 벽에 붙었는지를 **벽 이름(key)으로 기억하지 않는다.** 영역 모양이 바뀌면
+ *  변이 통째로 다시 만들어져 이름이 날아가기 때문이다. 대신 월드 좌표 한 점만
+ *  들고 있다가, 그릴 때 그 점이 얹힌 벽을 찾는다 — 벽이 조금 움직여도 따라오고,
+ *  벽이 사라지면 조용히 안 그려진다.
+ */
+export const OPENING_DEFAULTS = { width: 4.0, height: 4.0, sill: 0 };
+export const MIN_OPENING = 0.3;
+/** 개구부가 이 벽에 얹혔다고 보는 수직 거리 여유(m) */
+export const OPENING_ATTACH_TOL = 1.2;
+
 /* ── 다각형 기본기 ──────────────────────────────────────────────────────── */
 
 const R = (v) => Math.round(v * 1e4) / 1e4;
@@ -237,6 +253,185 @@ function scanX(mp, z, b) {
   return best && best.len > step ? [best.x, z] : null;
 }
 
+/* ── 꼭짓점 편집 ────────────────────────────────────────────────────────── */
+
+/**
+ * 그려 놓은 면의 모양 고치기.
+ * ---------------------------------------------------------------------------
+ *  영역·구역은 한 번 그리면 끝이었다. 벽 한 장을 3m 물리려고 도형을 통째로
+ *  다시 그리는 것은 도면 작업이라 할 수 없다. 그래서 **꼭짓점 자체를 손잡이로**
+ *  내어 준다 — 끌어 옮기고, 변의 중점을 끌면 그 자리에 꼭짓점이 생기고,
+ *  Alt+클릭으로 지운다(경로 편집 손잡이와 같은 규칙이다).
+ *
+ *  ── 주소 ──────────────────────────────────────────────────────────────────
+ *  MultiPolygon 안의 한 점을 가리키려면 세 숫자가 필요하다.
+ *
+ *      addr = { poly, ring, i }      조각 · 고리(0=바깥, 그 밖은 구멍) · 몇 번째
+ *
+ *  i 는 **닫는 중복점을 뺀** 목록에서 센다. 저장된 고리는 첫 점 == 끝 점이라
+ *  그대로 세면 같은 자리에 손잡이가 둘 생기고, 그 둘을 따로 끌면 고리가 찢어진다.
+ *
+ *  ── 끄는 동안에는 정리하지 않는다 ─────────────────────────────────────────
+ *  union 을 한 번 통과시키면 스스로 교차한 자리가 풀리지만, 고리가 통째로 다시
+ *  만들어져 **꼭짓점 순서가 바뀐다.** 끄는 중에 그러면 잡고 있던 점이 손에서
+ *  빠져나가 엉뚱한 점이 따라온다. 그래서 정리는 손을 뗄 때(normalizeMP) 한 번만.
+ */
+
+const samePt = (p, q) => p[0] === q[0] && p[1] === q[1];
+
+/** 닫는 중복점을 뗀 목록 */
+function openRing(ring) {
+  const r = (ring ?? []).slice();
+  while (r.length > 1 && samePt(r[0], r[r.length - 1])) r.pop();
+  return r;
+}
+
+/** 고리 위를 한 바퀴 도는 인덱스 접근 */
+const atWrap = (v, i) => v[((i % v.length) + v.length) % v.length];
+
+/** 끌 수 있는 꼭짓점 전부 — [{ poly, ring, i, at, hole }] */
+export function mpVertices(mp) {
+  const out = [];
+  (mp ?? []).forEach((poly, p) => {
+    poly.forEach((ring, r) => {
+      openRing(ring).forEach((at, i) => out.push({ poly: p, ring: r, i, at, hole: r > 0 }));
+    });
+  });
+  return out;
+}
+
+/**
+ * 변의 중점 — 여기를 끌면 그 자리에 꼭짓점이 새로 생긴다.
+ *  i 는 **새 점이 들어갈 자리**다(변 i-1 → i 사이). 마지막 변에서는 목록 끝에
+ *  붙으므로 i === 길이가 되고, 그대로 splice 에 넣으면 맞다.
+ */
+export function mpMidpoints(mp) {
+  const out = [];
+  (mp ?? []).forEach((poly, p) => {
+    poly.forEach((ring, r) => {
+      const v = openRing(ring);
+      v.forEach((a, i) => {
+        const b = atWrap(v, i + 1);
+        out.push({ poly: p, ring: r, i: i + 1, at: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], hole: r > 0 });
+      });
+    });
+  });
+  return out;
+}
+
+/** 이 꼭짓점과 양옆 — 편집이 실제로 건드리는 범위를 재는 데 쓴다 */
+export function vertexNeighbors(mp, addr) {
+  const v = openRing(mp?.[addr.poly]?.[addr.ring]);
+  if (!v.length || addr.i >= v.length) return null;
+  return { at: v[addr.i], prev: atWrap(v, addr.i - 1), next: atWrap(v, addr.i + 1) };
+}
+
+/** 고리 하나만 바꾼다. 삼각형 미만이 되면 거절(null) */
+function editRing(mp, addr, fn) {
+  const ring = mp?.[addr.poly]?.[addr.ring];
+  if (!ring) return null;
+  const v = fn(openRing(ring));
+  if (!v || v.length < 3) return null;
+  return mp.map((poly, p) =>
+    p !== addr.poly ? poly : poly.map((r0, r) => (r !== addr.ring ? r0 : closeRing(v))),
+  );
+}
+
+/**
+ * 꼭짓점 옮기기.
+ *  옆 꼭짓점과 같은 자리로는 못 간다 — 길이 0 인 변이 생기면 그 변의 바깥
+ *  방향을 정할 수 없어(mpEdges 가 건너뛴다) 벽 한 장이 소리 없이 사라진다.
+ */
+export function moveVertex(mp, addr, pt) {
+  const p = [clean(pt[0]), clean(pt[1])];
+  return editRing(mp, addr, (v) => {
+    if (addr.i >= v.length) return null;
+    if (samePt(p, atWrap(v, addr.i - 1)) || samePt(p, atWrap(v, addr.i + 1))) return null;
+    const n = v.slice();
+    n[addr.i] = p;
+    return n;
+  });
+}
+
+export function insertVertex(mp, addr, pt) {
+  const p = [clean(pt[0]), clean(pt[1])];
+  return editRing(mp, addr, (v) => {
+    if (samePt(p, atWrap(v, addr.i - 1)) || samePt(p, atWrap(v, addr.i))) return null;
+    const n = v.slice();
+    n.splice(addr.i, 0, p);
+    return n;
+  });
+}
+
+/** 꼭짓점 지우기 — 세 점은 남긴다(면이 아니게 된다) */
+export function removeVertex(mp, addr) {
+  return editRing(mp, addr, (v) => (v.length <= 3 ? null : v.filter((_, i) => i !== addr.i)));
+}
+
+/**
+ * 편집이 끝난 도형 정리 — 스스로 교차한 자리를 풀고 겹친 조각을 합친다.
+ *  꼭짓점을 옆 변 너머로 끌면 8자로 접힌 고리가 나올 수 있다. 그대로 두면
+ *  넓이도 벽의 바깥 방향도 뒤집힌 채로 남으므로, 손을 뗄 때 한 번 통과시킨다.
+ */
+export function normalizeMP(mp) {
+  if (!mp?.length) return null;
+  try {
+    const out = polygonClipping.union(mp);
+    return out.length ? out : null;
+  } catch {
+    return mp;
+  }
+}
+
+/**
+ * 꼭짓점을 건드린 뒤 면별 설정을 새 이름으로 옮긴다.
+ * ---------------------------------------------------------------------------
+ *  면마다 따로 준 두께·높이·색·이름은 변의 key(= 두 끝점 좌표)에 매달려 있다.
+ *  코너를 조금 미는 것만으로 그 이름이 바뀌므로, 옮겨 주지 않으면 설정이 조용히
+ *  기본값으로 돌아간다 — 사용자가 한 일을 편집기가 지우는 셈이다.
+ *
+ *  key 가 **좌표에서 나온다**는 점이 여기서 도움이 된다. 건드린 꼭짓점에 붙은
+ *  두 변만 이름이 바뀌고 나머지는 그대로이므로, 옮길 것도 그 둘뿐이다.
+ *
+ *    move   : (앞─점) · (점─뒤) 두 변이 각각 새 이름을 얻는다
+ *    insert : 갈라진 변의 설정을 **두 토막 모두** 물려받는다 (한 장이던 벽을
+ *             꺾은 것이지, 그중 하나만 원래 벽인 것은 아니다)
+ *    remove : 두 변이 하나로 합쳐진다 — 어느 쪽 설정을 물려줄지 말할 수 없어
+ *             둘 다 버리고 영역 기본값으로 돌린다
+ */
+export function remapEdgeSpecs(edges, oldRing, newRing, op, i) {
+  const src = edges ?? {};
+  const vo = openRing(oldRing);
+  const vn = openRing(newRing);
+  if (!vo.length) return src;
+
+  const before = [edgeKey(atWrap(vo, i - 1), atWrap(vo, i)), edgeKey(atWrap(vo, i), atWrap(vo, i + 1))];
+  let moves = [];
+  if (op === 'move') {
+    moves = [
+      [before[0], edgeKey(atWrap(vn, i - 1), atWrap(vn, i))],
+      [before[1], edgeKey(atWrap(vn, i), atWrap(vn, i + 1))],
+    ];
+  } else if (op === 'insert') {
+    /* 갈라진 변은 (앞 ─ 새 점) 하나뿐이다. i 는 새 점이 들어간 자리다. */
+    const from = edgeKey(atWrap(vo, i - 1), atWrap(vo, i));
+    moves = [
+      [from, edgeKey(atWrap(vn, i - 1), atWrap(vn, i))],
+      [from, edgeKey(atWrap(vn, i), atWrap(vn, i + 1))],
+    ];
+  } else {
+    moves = [[before[0], null], [before[1], null]];
+  }
+
+  /* 값을 먼저 집어 두고 옛 이름을 지운 뒤 새 이름에 놓는다 — 순서를 바꾸면
+     이름이 그대로인 경우(움직이지 않은 축)에 방금 놓은 것을 지운다. */
+  const carried = moves.filter(([from, to]) => to && src[from]).map(([from, to]) => [to, src[from]]);
+  const out = { ...src };
+  for (const [from] of moves) delete out[from];
+  for (const [to, spec] of carried) out[to] = { ...(out[to] ?? {}), ...spec };
+  return out;
+}
+
 /* ── 변(벽이 설 자리) ───────────────────────────────────────────────────── */
 
 /**
@@ -309,16 +504,39 @@ export function mpEdges(mp) {
 /**
  * 코너에서 벽을 얼마나 늘일 것인가.
  * ---------------------------------------------------------------------------
- *  벽은 경계선에서 **바깥으로 두께의 반** 만큼 밀어 세운다. 그래서 90° 코너의
- *  귀퉁이(두께 × 두께 칸)를 채우려면 각 벽이 꼭짓점 너머로 **이웃의 두께만큼**
- *  더 나가야 한다. 반만 늘이면 볼록한 모서리는 우연히 메워지지만 오목한
- *  모서리(ㄱ자 안쪽)에는 정확히 반 칸짜리 구멍이 남는다 — 그 구멍이 도면에서
- *  "벽이 안 붙은" 것처럼 보이던 것이다.
+ *  벽은 경계선에서 **바깥으로 두께의 반** 만큼 밀어 세운다.
+ *
+ *  ── 볼록한 코너 (건물 바깥 모서리) ─────────────────────────────────────────
+ *  귀퉁이(두께 × 두께 칸)가 비므로, 각 벽이 꼭짓점 너머로 **이웃의 두께만큼**
+ *  더 나가야 두 벽의 바깥면이 만난다. 반만 늘이면 반 칸짜리 구멍이 남는다.
+ *
+ *  ── 오목한 코너 (ㄱ자 안쪽) ────────────────────────────────────────────────
+ *  여기서는 **늘이면 안 된다.** 두 벽이 이미 귀퉁이 칸을 서로 덮고 있어서 뺄
+ *  것이 없는데, 그 위에 더 늘이면 그 부분이 **방 안쪽으로 튀어나온 돌기**가
+ *  된다. 도면에서 모서리마다 十자 모양 혹이 붙어 보이던 것이 이것이다.
+ *
+ *  ── 어느 쪽인지 판정 ──────────────────────────────────────────────────────
+ *  고리의 회전 방향(CW/CCW)으로 가리지 않는다. 대신 **늘어날 자리 자체가 방
+ *  안인지** 직접 재 본다. 안이면 늘이지 않는다. 바깥 방향을 정할 때와 같은
+ *  방식(규약이 아니라 사실을 보는 것)이라, 구멍 고리나 펜으로 그린 비스듬한
+ *  도형에서도 똑같이 맞는다.
  */
-export function edgeExtension(area, edge) {
+function extensionAt(mp, edge, toward, ext, thickness) {
+  if (!(ext > 0)) return 0;
+  const v = toward > 0 ? edge.b : edge.a;
+  const dx = Math.sin(edge.angle) * toward;
+  const dz = Math.cos(edge.angle) * toward;
+  /* 늘어난 토막의 한가운데 — 꼭짓점 너머로 절반, 바깥으로 두께의 절반 */
+  const px = v[0] + dx * (ext / 2) + edge.nx * (thickness / 2);
+  const pz = v[1] + dz * (ext / 2) + edge.nz * (thickness / 2);
+  return pointInMP(mp, [px, pz]) ? 0 : ext;
+}
+
+export function edgeExtension(mp, area, edge) {
+  const t = edgeSpec(area, edge.key).thickness;
   return {
-    atA: edgeSpec(area, edge.prev?.key).thickness,
-    atB: edgeSpec(area, edge.next?.key).thickness,
+    atA: extensionAt(mp, edge, -1, edgeSpec(area, edge.prev?.key).thickness, t),
+    atB: extensionAt(mp, edge, +1, edgeSpec(area, edge.next?.key).thickness, t),
   };
 }
 
@@ -349,13 +567,24 @@ export function edgeSpec(area, key) {
  */
 export function snapWallPoint(pt, { walls = [], areas = [] } = {}, dist = WALL_SNAP_DIST) {
   let best = null;
-  /* 꼭짓점이 선분보다 먼저다 — 코너 근처에서는 "코너에 물리고 싶다" 가 보통이고,
-     선분에 붙여 버리면 몇 cm 어긋난 채 코너가 어긋나 보인다. */
+
+  /**
+   * 가까운 쪽이 이긴다. 꼭짓점에는 아주 작은 가산점만 준다.
+   * -------------------------------------------------------------------------
+   *  꼭짓점을 무조건 앞세우면, 벽 **가운데**를 겨냥해도 스냅 거리 안에 코너가
+   *  있는 한 끝점이 코너로 끌려간다. 그러면 T 자로 대려던 벽이 매번 모서리에
+   *  가서 붙어, 붙이려던 자리와 붙은 자리가 달라진다.
+   *  코너를 노렸을 때는 어차피 그쪽이 더 가까우므로, 가산점은 "거의 같은
+   *  거리일 때 코너를 고른다" 정도면 충분하다.
+   */
+  const VERTEX_BONUS = 0.12;
+
   const consider = (c, rank) => {
     const d = Math.hypot(c[0] - pt[0], c[1] - pt[1]);
     if (d > dist) return;
-    if (!best || rank < best.rank || (rank === best.rank && d < best.d)) {
-      best = { d, rank, p: [clean(c[0]), clean(c[1])] };
+    const score = rank === 0 ? d - VERTEX_BONUS : d;
+    if (!best || score < best.score) {
+      best = { d, score, p: [clean(c[0]), clean(c[1])] };
     }
   };
 
@@ -441,6 +670,92 @@ export function obstacleHitsRects(mp, rects, eps = 1e-3) {
   return false;
 }
 
+/**
+ * 내벽의 코너 채움.
+ * ---------------------------------------------------------------------------
+ *  내벽은 자기 선을 **가운데 두고** 서므로(외벽처럼 바깥으로 밀지 않는다),
+ *  두 벽이 꼭짓점에서 만나면 귀퉁이에 **네 쪽 중 한 쪽**이 빈다.
+ *
+ *      A 가 x<0 에서 와서 원점에서 끝나고, B 가 원점에서 z>0 으로 간다면
+ *      x∈(0, tB/2] · z∈[−tA/2, 0) 칸을 아무도 덮지 않는다 → 엇갈려 보인다.
+ *
+ *  그래서 각자 상대 두께의 **절반만큼** 꼭짓점 너머로 더 나간다. 외벽이 이웃
+ *  두께의 "전부" 만큼 나가는 것과 다른 이유는, 외벽은 경계선 바깥으로 이미
+ *  반 두께 밀려 있어 메워야 할 칸이 두 배 크기 때문이다.
+ *
+ *  ── 외벽에 닿는 끝 ────────────────────────────────────────────────────────
+ *  내벽 끝이 영역 경계선에 얹히면 그 자리는 **외벽의 안쪽 면**이다. 딱 붙기는
+ *  하지만 T 자 이음매가 선으로 남아 "댄 것" 처럼 보인다. 외벽 두께만큼 더
+ *  밀어 넣어 몸통에 잠기게 하면 한 덩어리로 읽힌다.
+ */
+/**
+ * 코너에서 얼마나 더 나가야 귀퉁이가 채워지는가 — **각도를 보고 정한다.**
+ * ---------------------------------------------------------------------------
+ *  두 벽이 꼭짓점에서 각 θ 로 만난다고 할 때(둘 다 꼭짓점에서 뻗어 나가는
+ *  방향으로 잰다), 상대 벽의 반두께 h 를 덮으려면
+ *
+ *      e = h / tan(θ/2)
+ *
+ *  만큼 꼭짓점 너머로 나가야 한다. θ = 90° 면 tan45° = 1 이라 e = h — 지금까지
+ *  쓰던 "상대 두께의 절반" 이 여기서 나온 특수한 경우다. 일직선(θ = 180°)이면
+ *  e = 0 이고, 예각일수록 급격히 커진다.
+ *
+ *  ── 마이터 한계 ────────────────────────────────────────────────────────────
+ *  아주 뾰족한 각에서는 e 가 발산해서 벽이 창처럼 길게 튀어나온다. 실제 도면용
+ *  스트로크 렌더러들이 그러듯 상한을 둔다. 상한에 걸리면 귀퉁이가 조금 덜
+ *  채워지지만, 화면 밖까지 뻗는 가시(spike)보다는 낫다.
+ */
+const MITER_LIMIT = 4;
+
+function jointExtension(ourDir, otherDir, halfOther, ourThickness) {
+  const dot = Math.max(-1, Math.min(1, ourDir[0] * otherDir[0] + ourDir[1] * otherDir[1]));
+  const theta = Math.acos(dot);
+  if (theta < 1e-3) return halfOther;           // 겹쳐 누움 — 더 볼 것이 없다
+  const t = Math.tan(theta / 2);
+  if (!(t > 1e-6)) return 0;                    // 일직선으로 이어짐
+  return Math.min(halfOther / t, MITER_LIMIT * ourThickness);
+}
+
+export function wallJoints(wall, { walls = [], areas = [] } = {}, eps = 0.05) {
+  const near = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= eps;
+  const dirFrom = (from, to) => {
+    const dx = to[0] - from[0];
+    const dz = to[1] - from[1];
+    const l = Math.hypot(dx, dz) || 1;
+    return [dx / l, dz / l];
+  };
+  const t0 = wall.thickness ?? WALL_DEFAULTS.thickness;
+
+  const at = (end, other) => {
+    const ourDir = dirFrom(end, other);          // 이 끝에서 벽이 뻗어 나가는 방향
+    let ext = 0;
+
+    /* 다른 내벽과 끝을 맞댄 코너 */
+    for (const w of walls) {
+      if (w.uid === wall.uid) continue;
+      const meetsA = near(end, w.a);
+      const meetsB = near(end, w.b);
+      if (!meetsA && !meetsB) continue;
+      const otherDir = meetsA ? dirFrom(w.a, w.b) : dirFrom(w.b, w.a);
+      const h = (w.thickness ?? WALL_DEFAULTS.thickness) / 2;
+      ext = Math.max(ext, jointExtension(ourDir, otherDir, h, t0));
+    }
+
+    /* 영역의 외벽에 닿은 끝 — 벽 몸통 속으로 넣는다.
+       외벽은 경계선 바깥으로 반 두께 밀려 있으므로 두께 전부만큼 들어가야
+       바깥면까지 닿는다(각도와 무관하다 — 면에 파묻는 것이라서). */
+    for (const ar of areas) {
+      for (const e of mpEdges(ar.mp)) {
+        const p = projectOn({ a: e.a, b: e.b }, end);
+        if (p && p.dist <= eps) ext = Math.max(ext, edgeSpec(ar, e.key).thickness);
+      }
+    }
+    return ext;
+  };
+
+  return { atA: at(wall.a, wall.b), atB: at(wall.b, wall.a) };
+}
+
 /** 내벽을 상자로 그리기 위한 값 */
 export function wallBox(w) {
   const dx = w.b[0] - w.a[0];
@@ -453,6 +768,227 @@ export function wallBox(w) {
     nx: len ? dz / len : 1,
     nz: len ? -dx / len : 0,
   };
+}
+
+/* ── 개구부 ────────────────────────────────────────────────────────────── */
+
+/**
+ * 도면 위의 모든 벽선 목록 — 영역 외벽 + 내벽.
+ *  개구부를 어디에 붙일지 찾을 때와, 클릭한 자리를 벽에 맞춰 앉힐 때 쓴다.
+ *  외벽의 기준선은 **영역 경계선**이다(벽은 거기서 바깥으로 밀려 서 있다).
+ */
+export function wallLines(areas = [], walls = []) {
+  const out = [];
+  for (const ar of areas) {
+    for (const e of mpEdges(ar.mp)) {
+      out.push({ kind: 'area', areaUid: ar.uid, key: e.key, a: e.a, b: e.b, spec: edgeSpec(ar, e.key) });
+    }
+  }
+  for (const w of walls) {
+    out.push({ kind: 'wall', wallUid: w.uid, key: w.uid, a: w.a, b: w.b, spec: w });
+  }
+  return out;
+}
+
+/** 선분 위로 점을 내린 결과 { u, dist, t } — u 는 a 에서 잰 길이 */
+function projectOn(line, [px, pz]) {
+  const dx = line.b[0] - line.a[0];
+  const dz = line.b[1] - line.a[1];
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-6) return null;
+  const u = ((px - line.a[0]) * dx + (pz - line.a[1]) * dz) / len;
+  const cu = Math.max(0, Math.min(len, u));
+  const qx = line.a[0] + (dx / len) * cu;
+  const qz = line.a[1] + (dz / len) * cu;
+  return { u: cu, len, dist: Math.hypot(px - qx, pz - qz), at: [clean(qx), clean(qz)] };
+}
+
+/**
+ * 클릭한 자리에서 가장 가까운 벽을 찾아 그 위에 앉힌다.
+ *  개구부는 벽에 뚫는 것이라 "벽에서 몇 cm 떨어진 개구부" 같은 것은 없다.
+ *  못 찾으면 null — 호출부가 이유를 알려 준다.
+ */
+export function snapToWall(pt, { areas = [], walls = [] } = {}, maxDist = 3) {
+  let best = null;
+  for (const line of wallLines(areas, walls)) {
+    const p = projectOn(line, pt);
+    if (!p || p.dist > maxDist) continue;
+    if (!best || p.dist < best.dist) best = { ...p, line };
+  }
+  return best;
+}
+
+/**
+ * 이 벽선에 얹힌 개구부들 — 벽을 토막 낼 때 쓴다.
+ *  u 는 벽의 a 끝에서 잰 거리다. 벽 두께의 절반에 여유를 더한 범위 안에 있는
+ *  것만 이 벽의 것으로 본다(옆 벽에 뚫은 구멍이 딸려 오면 안 된다).
+ */
+export function openingsOn(line, openings = []) {
+  const out = [];
+  for (const o of openings) {
+    const p = projectOn(line, o.at);
+    if (!p) continue;
+    const tol = (line.spec?.thickness ?? WALL_DEFAULTS.thickness) / 2 + OPENING_ATTACH_TOL;
+    if (p.dist > tol) continue;
+    /* 끝을 살짝 벗어난 것은 버린다 — 코너 너머 벽까지 뚫리는 것을 막는다 */
+    if (p.u < -o.width / 2 || p.u > p.len + o.width / 2) continue;
+    out.push({ uid: o.uid, u: p.u, width: o.width, height: o.height, sill: o.sill ?? 0 });
+  }
+  return out.sort((a, b) => a.u - b.u);
+}
+
+/**
+ * 개구부를 반영한 벽 토막 목록.
+ * ---------------------------------------------------------------------------
+ *  벽 하나를 상자 하나로 그리면 구멍을 낼 수 없다. 길이 방향으로 잘라
+ *  **기둥(구멍 사이의 벽) · 인방(구멍 위) · 밑턱(구멍 아래)** 으로 나눠 그린다.
+ *  실제 건축이 그렇게 생겼기도 하고, 상자만으로 표현할 수 있어 형상이 가볍다.
+ *
+ *  @param u0,u1  이 벽이 차지하는 길이 구간 (코너 연장을 포함한 값)
+ *  @returns [{ u0, u1, y0, y1 }]
+ */
+export function wallPieces(u0, u1, height, openings = []) {
+  const holes = openings
+    .map((o) => ({ ...o, s: o.u - o.width / 2, e: o.u + o.width / 2 }))
+    .filter((o) => o.e > u0 && o.s < u1)
+    .sort((a, b) => a.s - b.s);
+
+  if (!holes.length) return [{ u0, u1, y0: 0, y1: height }];
+
+  const out = [];
+  let cursor = u0;
+  for (const h of holes) {
+    const s = Math.max(u0, h.s);
+    const e = Math.min(u1, h.e);
+    if (s > cursor) out.push({ u0: cursor, u1: s, y0: 0, y1: height });   // 구멍 사이 벽
+
+    const top = Math.min(height, h.sill + h.height);
+    if (h.sill > 0) out.push({ u0: s, u1: e, y0: 0, y1: h.sill });        // 밑턱(창)
+    if (top < height) out.push({ u0: s, u1: e, y0: top, y1: height });    // 인방(구멍 위)
+
+    cursor = Math.max(cursor, e);
+  }
+  if (cursor < u1) out.push({ u0: cursor, u1, y0: 0, y1: height });
+  return out.filter((p) => p.u1 - p.u0 > 1e-4 && p.y1 - p.y0 > 1e-4);
+}
+
+/**
+ * 개구부를 "드나들 수 있는 문" 목록으로 편다.
+ *  트럭이 벽을 뚫고 나가지 못하게 하려면 나가는 자리가 문인지 알아야 한다.
+ *  { at:[x,z], r } — 문 중심과 그 반경(폭의 절반에 차체 여유를 더한 값).
+ */
+export function openingGates(openings = [], lines = [], margin = 1.0) {
+  const out = [];
+  for (const o of openings) {
+    for (const line of lines) {
+      const hit = openingsOn(line, [o]);
+      if (!hit.length) continue;
+      const dx = line.b[0] - line.a[0];
+      const dz = line.b[1] - line.a[1];
+      const len = Math.hypot(dx, dz) || 1;
+      out.push({
+        uid: o.uid,
+        at: [line.a[0] + (dx / len) * hit[0].u, line.a[1] + (dz / len) * hit[0].u],
+        r: o.width / 2 + margin,
+      });
+      break;
+    }
+  }
+  return out;
+}
+
+/** 이 지점이 어떤 문 안인가 */
+export const inGate = (gates, [x, z]) =>
+  gates.some((g) => Math.hypot(g.at[0] - x, g.at[1] - z) <= g.r);
+
+/**
+ * 선분이 바닥 경계를 넘는 자리들.
+ * ---------------------------------------------------------------------------
+ *  두 점을 훑으며 "안 → 밖" 또는 "밖 → 안" 으로 바뀌는 지점을 모은다.
+ *  다각형과 선분의 교점을 정확히 푸는 대신 촘촘히 찍어 보는 이유는, 바닥이
+ *  구멍 있는 다각형일 수도 있고 여러 조각일 수도 있어서 안팎 판정 자체를
+ *  이미 pointInMP 에 맡기고 있기 때문이다. 같은 잣대를 쓰는 편이 안전하다.
+ */
+export function boundaryCrossings(a, b, floor, step = 0.15) {
+  if (!floor) return [];
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const n = Math.max(1, Math.ceil(len / step));
+  const out = [];
+  let prevIn = pointInMP(floor, a);
+  let prev = a;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const p = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+    const inside = pointInMP(floor, p);
+    if (inside !== prevIn) out.push([(prev[0] + p[0]) / 2, (prev[1] + p[1]) / 2]);
+    prevIn = inside;
+    prev = p;
+  }
+  return out;
+}
+
+/**
+ * 이 선분이 **벽을 뚫고** 지나가는가.
+ * ---------------------------------------------------------------------------
+ *  경계를 넘는 것 자체는 죄가 아니다 — 문으로 넘으면 된다. 그래서 "밖에 있는가"
+ *  가 아니라 "넘는 자리가 문인가" 를 본다.
+ *
+ *  이 구분이 중요한 이유: 점 하나가 문에서 멀리 떨어졌다는 이유로 막으면,
+ *  문을 통과해 **바깥 멀리까지** 이어지는 트럭 경로를 아예 그릴 수 없다.
+ *  정작 막아야 할 것은 벽 한복판을 가로지르는 선이다.
+ */
+export function crossesWall(a, b, floor, gates = []) {
+  if (!floor) return false;
+  return boundaryCrossings(a, b, floor).some((p) => !inGate(gates, p));
+}
+
+/**
+ * 이 벽의 이 지점에 걸린 개구부.
+ * ---------------------------------------------------------------------------
+ *  개구부는 벽에서 **빠진 자리**라 집을 덩어리가 없다. 바닥에 깐 문지방 띠에
+ *  클릭을 걸어 뒀지만, 탑뷰에서는 문 위 인방(벽 조각)이 레이캐스트에 먼저
+ *  걸려 이벤트를 가져가 버린다 — 위에서 내려다보면 인방이 더 가깝기 때문이다.
+ *
+ *  그래서 **벽이 클릭을 받은 자리**를 보고, 그 자리가 문의 폭 안이면 벽 대신
+ *  문을 고른다. 보이는 대로(문을 눌렀으니 문이 잡힌다) 동작하고, 탑뷰든 3D든
+ *  같은 규칙이라는 점도 좋다.
+ */
+export function openingAtPoint(line, openings = [], pt) {
+  const p = projectOn(line, pt);
+  if (!p) return null;
+  for (const o of openingsOn(line, openings)) {
+    if (Math.abs(p.u - o.u) <= o.width / 2) return openings.find((x) => x.uid === o.uid) ?? null;
+  }
+  return null;
+}
+
+/**
+ * 개구부를 벽을 따라 옮긴다.
+ *  벽에서 떼어 낼 수는 없으므로 **선 위로 내린 값**만 받고, 문이 벽 밖으로
+ *  삐져나가지 않도록 양 끝에서 폭의 절반만큼 물려 둔다.
+ */
+export function slideOpening(line, opening, pt) {
+  const p = projectOn(line, pt);
+  if (!p) return null;
+  const half = opening.width / 2;
+  const u = Math.max(Math.min(half, p.len / 2), Math.min(p.len - half, Math.max(half, p.u)));
+  const dx = line.b[0] - line.a[0];
+  const dz = line.b[1] - line.a[1];
+  const len = Math.hypot(dx, dz) || 1;
+  return [clean(line.a[0] + (dx / len) * u), clean(line.a[1] + (dz / len) * u)];
+}
+
+/** 개구부가 바닥에서 차지하는 네모 (설비 간섭 판정·바닥 표시용) */
+export function openingFootprint(o, line) {
+  const p = projectOn(line, o.at);
+  if (!p) return null;
+  const dx = line.b[0] - line.a[0];
+  const dz = line.b[1] - line.a[1];
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len;
+  const uz = dz / len;
+  const t = (line.spec?.thickness ?? WALL_DEFAULTS.thickness);
+  return { center: p.at, ux, uz, width: o.width, depth: t, angle: Math.atan2(dx, dz) };
 }
 
 /* ── 구역 ──────────────────────────────────────────────────────────────── */

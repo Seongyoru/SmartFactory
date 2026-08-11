@@ -20,18 +20,34 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 
-import { SHAPE, TOOL, VIEW, isBuildTool, useEditor } from '../core/store.jsx';
+import { SHAPE, TOOL, VIEW, isBuildTool, selItems, selUidsOf, useEditor } from '../core/store.jsx';
 import {
   MIN_AREA_SIDE,
+  WALL_DEFAULTS,
   floorOf,
   hitsObstacle,
+  crossesWall,
+  inGate,
+  insertVertex,
+  moveVertex,
+  mpMidpoints,
+  mpVertices,
+  vertexNeighbors,
+  openingsOn,
+  slideOpening,
+  openingGates,
+  pointInMP,
   obstacleHitsRects,
   penMP,
   pillarFootprint,
   rectInFloor,
   rectMP,
+  snapToWall,
   snapWallPoint,
+  wallLines,
   wallFootprint,
+  edgeSpec,
+  mpEdges,
 } from '../core/area.js';
 import AreaView from './AreaView.jsx';
 import {
@@ -60,8 +76,11 @@ import BeltItems from './BeltItems.jsx';
 import EditHandles from './EditHandles.jsx';
 import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox } from '../core/shelf.js';
-import { isShelf, isUtility } from '../data/library.js';
+import { stillageCapacity } from '../core/stillage.js';
+import { addStock, getStock, useAllStock } from '../core/simStore.js';
+import { isShelf, isStillage, isTruck, isUtility, payloadKeyOf, payloadOf } from '../data/library.js';
 import ShelfView from './ShelfView.jsx';
+import StillageView from './StillageView.jsx';
 import ZoneMarks from './ZoneMarks.jsx';
 import { sceneTheme } from '../theme.js';
 
@@ -428,6 +447,8 @@ function BuildPreview({ tool, isTop, rect, poly, wallFrom, cursor, color }) {
 function SceneContent() {
   const { state, dispatch, itemOf, activeItem } = useEditor();
   const version = useModelsVersion();
+  /* 재고가 바뀔 때마다 "가득 찼는가" 를 다시 본다 */
+  const stockVersion = useAllStock();
   const { view, tool, gridSize, placed, links, carts, selected, connectFrom, ghostRot, pathDraft } = state;
   const theme = sceneTheme(state.appearance);
 
@@ -476,6 +497,57 @@ function SceneContent() {
 
   /* 놓을 수 있는 바닥 — 영역을 합친 다각형. 영역이 없으면 null(= 어디든 가능) */
   const floor = useMemo(() => floorOf(state.areas), [state.areas]);
+
+  /* 드나들 수 있는 문 — 트럭만, 그리고 이 자리로만 밖에 나갈 수 있다 */
+  const gates = useMemo(
+    () => openingGates(state.openings, wallLines(state.areas, state.walls)),
+    [state.openings, state.areas, state.walls],
+  );
+
+  /**
+   * 지금 골라진 uid 들 (하나만 골랐어도 배열).
+   *  여러 개를 묶어 끌 때와 정렬할 때 같은 값을 본다.
+   */
+  const selEquip = useMemo(() => new Set(selUidsOf(selected, 'equip')), [selected]);
+  const selPillar = useMemo(() => new Set(selUidsOf(selected, 'pillar')), [selected]);
+
+  /**
+   * 붙여넣기 미리보기.
+   * -------------------------------------------------------------------------
+   *  커서를 기준점 삼아 복사해 둔 것들을 늘어놓고, 그대로 놓을 수 있는지 미리
+   *  판정한다. 판정 기준은 새로 놓을 때와 **똑같다** — 바닥 안, 다른 설비와 겹치지
+   *  않기, 벽·기둥을 뚫지 않기. 붙여넣기라고 규칙이 느슨해지면 도면이 어긋난다.
+   */
+  const paste = useMemo(() => {
+    const cb = state.clipboard;
+    if (tool !== TOOL.PASTE || !cb?.items?.length || !isTop) return null;
+
+    const at = cursor;
+    const items = cb.items.map((it) => {
+      const pos = [clean(at[0] + it.dx), clean(at[1] + it.dz)];
+      if (cb.kind === 'pillar') {
+        const [w, d] = it.size;
+        return {
+          src: it,
+          pos,
+          rect: { minX: pos[0] - w / 2, maxX: pos[0] + w / 2, minZ: pos[1] - d / 2, maxZ: pos[1] + d / 2 },
+        };
+      }
+      const bbox = boxFor({ ...it, pos });
+      return { src: it, pos, rect: bbox ? footprintOf({ ...it, pos, bboxOverride: bbox }, null) : null };
+    });
+
+    const ok = items.every(({ rect }) => {
+      if (!rect) return false;
+      if (outOfBounds(rect) || !rectInFloor(rect, floor)) return false;
+      if (cb.kind === 'pillar') return !obstacleHitsRects(rectMP([rect.minX, rect.minZ], [rect.maxX, rect.maxZ]), rects.map((r) => r.rect));
+      if (rects.some((r) => rectsOverlap(rect, r.rect))) return false;
+      return !hitsObstacle(rect, { walls: state.walls, pillars: state.pillars });
+    });
+
+    return { kind: cb.kind, items, ok };
+  }, [tool, isTop, state.clipboard, cursor, boxFor, rects, floor, state.walls, state.pillars]);
+
 
   const ports = useMemo(() => allPorts(placed, itemOf), [placed, itemOf, version]);
 
@@ -552,11 +624,62 @@ function SceneContent() {
           const ep = link.from;
           if (!ep?.uid || ep.anchor || ep.link) return null;
           const owner = placed.find((x) => x.uid === ep.uid);
-          return owner ? { link, path, owner } : null;
+          if (!owner) return null;
+          /* 이 벨트가 어디로 들어가는가 — 종점이 스틸리지면 자재가 거기 쌓인다 */
+          const dest = link.to?.uid ? placed.find((x) => x.uid === link.to.uid) : null;
+          const sink = dest && isStillage(itemOf(dest.itemId)) ? dest : null;
+          return { link, path, owner, sink };
         })
         .filter(Boolean),
     [linkPaths, itemOf, placed],
   );
+
+  /**
+   * 가득 찬 스틸리지 때문에 멈춘 것들.
+   * -------------------------------------------------------------------------
+   *  라인이 서는 이유는 하나뿐이다 — 종점이 다 찼다. 그 사실을 벨트에도(멈춤),
+   *  그 벨트를 먹이던 설비에도(정지 표시) 알려야 도면만 보고 원인을 짚을 수 있다.
+   *  재고는 도면이 아니라 시뮬레이션 값이라 simStore 에서 읽는다.
+   */
+  const halted = useMemo(() => {
+    const links = new Set();
+    const equips = new Set();
+
+    /* ① 가득 찬 적치대로 들어가는 벨트와, 그 벨트를 먹이던 설비 */
+    for (const f of beltFlows) {
+      if (!f.sink) continue;
+      if (getStock(f.sink.uid) < stillageCapacity(f.sink)) continue;
+      links.add(f.link.uid);
+      equips.add(f.owner.uid);
+    }
+
+    /**
+     * ② 상류로 거슬러 올라간다.
+     * -----------------------------------------------------------------------
+     *  멈춘 설비는 더 이상 받지 못한다. 그러면 **그 설비로 들어가던 벨트**도 설
+     *  자리가 없고, 그 벨트를 먹이던 앞 설비도 함께 선다. 실제 라인에서 적치대
+     *  하나가 차면 그 앞 공정이 줄줄이 서는 것과 같다.
+     *
+     *  바로 앞 한 대만 세우면 그 뒤 설비들이 계속 자재를 밀어 넣어, 갈 곳 없는
+     *  물건이 벨트 위에 계속 흐르는 그림이 된다.
+     *
+     *  더 붙일 것이 없을 때까지 되풀이한다. 한 번 돌 때마다 최소 한 개의 벨트가
+     *  목록에 들어가므로 벨트 수만큼이면 반드시 끝난다(고리로 이어져 있어도).
+     */
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of beltFlows) {
+        if (links.has(f.link.uid)) continue;
+        const dest = f.link.to?.uid;
+        if (!dest || !equips.has(dest)) continue;
+        links.add(f.link.uid);
+        equips.add(f.owner.uid);
+        grew = true;
+      }
+    }
+    return { links, equips };
+  }, [beltFlows, stockVersion]);
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
   const cartPaths = useMemo(
@@ -564,7 +687,9 @@ function SceneContent() {
       carts
         .map((c) => {
           const path = cartPath(c);
-          return path ? { cart: c, path, stations: cartStations(path, placed, itemOf) } : null;
+          /* 트럭은 싣기만 한다 — 방향이 처음부터 정해진 차량이다 */
+          const opt = { loadOnly: isTruck(itemOf(c.itemId)) };
+          return path ? { cart: c, path, stations: cartStations(path, placed, itemOf, opt) } : null;
         })
         .filter(Boolean),
     [carts, placed, itemOf, version],
@@ -749,6 +874,59 @@ function SceneContent() {
   }, [draftPath]);
   useEffect(() => () => draftLineGeom?.dispose(), [draftLineGeom]);
 
+  /* ---- 꼭짓점 편집 ------------------------------------------------------
+   *  영역·구역의 모양을 그린 뒤에 고치는 길. 계산은 전부 area.js 에 있고,
+   *  여기서는 "그 자리로 가도 되는가" 만 판정한다.
+   * ---------------------------------------------------------------------- */
+  const shapeOf = useCallback(
+    (kind, uid) => (kind === 'zone' ? state.zones : state.areas).find((x) => x.uid === uid) ?? null,
+    [state.zones, state.areas],
+  );
+
+  /**
+   * 바닥을 줄여 그 위의 설비·기둥을 밖으로 내보내는 편집인가.
+   * -------------------------------------------------------------------------
+   *  설비를 끌 때 "작업 영역 밖으로는 못 나간다" 를 걸어 두었다. 그렇다면 반대
+   *  방향도 막혀야 한다 — 설비는 가만히 있는데 바닥이 물러나면 결과는 같다.
+   *
+   *  전부 다시 재면 프레임마다 다각형 연산이 설비 수만큼 돈다. 다행히 꼭짓점
+   *  하나를 옮길 때 안팎이 바뀌는 자리는 **(앞점 · 뒷점 · 옮기기 전후의 점)**
+   *  네 점이 만드는 상자 안뿐이다. 그 밖은 이 편집으로 바뀌지 않으므로 건너뛴다.
+   *
+   *  단, 꼭짓점을 멀리 있는 변 **너머로** 끌어 도형이 스스로 접히면 그 상자
+   *  밖에서도 안팎이 뒤집힐 수 있다. 접힌 도형은 손을 뗄 때 정리되는 임시
+   *  상태라 여기서는 쫓지 않는다 — 그 한 경우에 설비가 바닥 밖에 남을 수 있다.
+   */
+  const vertexMoveOk = useCallback(
+    (area, nextMP, addr, pt) => {
+      const nb = vertexNeighbors(area.mp, addr);
+      if (!nb) return false;
+      const nextFloor = floorOf(state.areas.map((a) => (a.uid === area.uid ? { ...a, mp: nextMP } : a)));
+      if (!nextFloor) return false;
+
+      const xs = [nb.at[0], nb.prev[0], nb.next[0], pt[0]];
+      const zs = [nb.at[1], nb.prev[1], nb.next[1], pt[1]];
+      const touched = {
+        minX: Math.min(...xs), maxX: Math.max(...xs),
+        minZ: Math.min(...zs), maxZ: Math.max(...zs),
+      };
+
+      for (const r of rects) {
+        if (rectsOverlap(r.rect, touched) && !rectInFloor(r.rect, nextFloor)) return false;
+      }
+      for (const pl of state.pillars) {
+        const [w, d] = pl.size;
+        const rect = {
+          minX: pl.pos[0] - w / 2, maxX: pl.pos[0] + w / 2,
+          minZ: pl.pos[1] - d / 2, maxZ: pl.pos[1] + d / 2,
+        };
+        if (rectsOverlap(rect, touched) && !rectInFloor(rect, nextFloor)) return false;
+      }
+      return true;
+    },
+    [state.areas, state.pillars, rects],
+  );
+
   /* ---- 포인터 ----------------------------------------------------------- */
   const onMove = useCallback(
     (p) => {
@@ -809,11 +987,53 @@ function SceneContent() {
         return;
       }
 
+      /* 영역·구역의 꼭짓점 옮기기.
+         모양이 성립하는지는 area.js 가(옆 점과 겹치지 않는가), 놓을 수 있는지는
+         여기서 본다. 어느 한쪽이라도 아니라고 하면 그 프레임을 버린다 —
+         커서만 앞서 나가고 도형은 마지막으로 성립한 자리에 남는다. */
+      if (d.kind === 'vertex') {
+        const shape = shapeOf(d.shape, d.uid);
+        if (!shape) return;
+        const mp = moveVertex(shape.mp, d.addr, snapped);
+        if (!mp) return;
+        if (d.shape === 'zone') {
+          /* 구역은 바닥 위에만 있을 수 있다. 밖으로 끌면 손을 뗄 때 잘려 나가므로
+             애초에 못 나가게 막는다 — 잘린 결과를 보고 놀라는 것보다 낫다. */
+          if (floor && !pointInMP(floor, snapped)) return;
+        } else if (!vertexMoveOk(shape, mp, d.addr, snapped)) return;
+        dispatch({ type: 'SHAPE_VERTEX', op: 'move', kind: d.shape, uid: d.uid, addr: d.addr, pt: snapped });
+        return;
+      }
+
+      /* 개구부 — 붙어 있는 벽 위로만 미끄러진다 (양 끝은 폭의 절반만큼 물림) */
+      if (d.kind === 'opening') {
+        const o = state.openings.find((x) => x.uid === d.uid);
+        if (!o) return;
+        const at = slideOpening(d.line, o, snapped);
+        if (at) dispatch({ type: 'UPDATE_OPENING', uid: d.uid, patch: { at } });
+        return;
+      }
+
       if (d.kind === 'cartpoint') {
         const cart = carts.find((c) => c.uid === d.uid);
         if (!cart) return;
         const pts = [...cart.points];
         pts[d.index] = snapped;
+
+        /* 그려 놓은 경로를 고칠 때도 그릴 때와 같은 규칙을 건다.
+           여기를 빼먹어서, 그리기는 막히는데 나중에 경유점을 끌면 벽을 뚫고
+           나가는 상태가 됐다. 옮긴 점에 붙은 **두 구간**만 다시 보면 된다. */
+        if (floor) {
+          const truck = isTruck(itemOf(cart.itemId));
+          const ok = (a, b) => !crossesWall(a, b, floor, truck ? gates : []);
+          if (!truck && !pointInMP(floor, snapped)) return;
+          const last = pts.length - 1;
+          const prev = d.index > 0 ? pts[d.index - 1] : cart.closed ? pts[last] : null;
+          const next = d.index < last ? pts[d.index + 1] : cart.closed ? pts[0] : null;
+          if (prev && !ok(prev, snapped)) return;
+          if (next && !ok(snapped, next)) return;
+        }
+
         dispatch({ type: 'UPDATE_CART', uid: d.uid, patch: { points: pts } });
         return;
       }
@@ -882,7 +1102,7 @@ function SceneContent() {
       else dispatch({ type: 'MOVE_MANY', kind: 'equip', moves });
     },
     [gridSize, isTop, dispatch, rects, specFor, state.snapEdge, links, carts, placed, boxFor, floor,
-     state.walls, state.pillars, state.areas],
+     state.walls, state.pillars, state.areas, state.openings, gates, itemOf, shapeOf, vertexMoveOk],
   );
 
   /* ---- 작업 영역: 사각형 끌어 그리기 -------------------------------------
@@ -905,7 +1125,9 @@ function SceneContent() {
       const s = [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))];
 
       if (tool === TOOL.SELECT) {
-        marqueeStart.current = { at: s, ctrl: false };
+        /* 편집 중에는 빈 바닥을 끌어도 마키로 고르지 않는다 — 꼭짓점을 겨냥하다
+           살짝 빗나간 드래그가 곧바로 "다른 것을 골랐다" 가 되어 편집이 끝난다 */
+        if (!state.editShape) marqueeStart.current = { at: s, ctrl: false };
         return;
       }
       if (tool !== TOOL.AREA && tool !== TOOL.ZONE) return;
@@ -913,16 +1135,23 @@ function SceneContent() {
       rectStart.current = s;
       setRectDraft({ start: s, cur: s });
     },
-    [isTop, tool, state.drawShape, gridSize],
+    [isTop, tool, state.drawShape, gridSize, state.editShape],
   );
 
   const onUp = useCallback((e) => {
+    const dropped = drag.current;
     drag.current = null;
 
+    /* 꼭짓점을 놓았다 — 여기서 한 번만 도형을 정리한다(접힌 고리 풀기 ·
+       구역 다시 자르기). 끄는 중에 하면 잡고 있던 점의 순서가 바뀐다. */
+    if (dropped?.kind === 'vertex') {
+      dispatch({ type: 'SHAPE_COMMIT', kind: dropped.shape, uid: dropped.uid });
+    }
+
     /* ---- 마키로 고르기 --------------------------------------------------
-     *  걸린 것이 한 종류면 그 종류를, 설비와 기둥이 섞였으면 **설비**를 고른다.
-     *  기둥은 벽처럼 배경에 가까운 물건이라 대개 설비를 고르려다 딸려 든 것이고,
-     *  종류를 섞어 고를 수는 없기 때문이다(정렬 기준이 사라진다).
+     *  사각형 안의 것을 **종류를 가리지 않고** 잡는다. 다만 바닥(영역)과 구역은
+     *  뺀다 — 둘은 화면을 통째로 덮는 배경이라, 무엇을 끌든 항상 걸려서
+     *  "전부 선택" 이 되어 버린다. 그 둘은 직접 클릭해서 고른다.
      *  Ctrl 을 누른 채 끌면 지금 고른 것에 더한다. */
     const m = marqueeStart.current;
     marqueeStart.current = null;
@@ -935,25 +1164,52 @@ function SceneContent() {
         minZ: Math.min(box.start[1], box.cur[1]),
         maxZ: Math.max(box.start[1], box.cur[1]),
       };
-      const hitEquip = rects.filter((x) => rectsOverlap(r, x.rect)).map((x) => x.uid);
-      const hitPillar = state.pillars
-        .filter((pl) => {
-          const [w, h] = pl.size;
-          return rectsOverlap(r, {
-            minX: pl.pos[0] - w / 2, maxX: pl.pos[0] + w / 2,
-            minZ: pl.pos[1] - h / 2, maxZ: pl.pos[1] + h / 2,
-          });
-        })
-        .map((pl) => pl.uid);
+      const inRect = ([x, z]) => x >= r.minX && x <= r.maxX && z >= r.minZ && z <= r.maxZ;
+      const hits = [];
 
-      const kind = hitEquip.length ? 'equip' : hitPillar.length ? 'pillar' : null;
-      const hits = kind === 'equip' ? hitEquip : hitPillar;
+      for (const x of rects) if (rectsOverlap(r, x.rect)) hits.push({ kind: 'equip', uid: x.uid });
+
+      for (const pl of state.pillars) {
+        const [w, h] = pl.size;
+        const box2 = {
+          minX: pl.pos[0] - w / 2, maxX: pl.pos[0] + w / 2,
+          minZ: pl.pos[1] - h / 2, maxZ: pl.pos[1] + h / 2,
+        };
+        if (rectsOverlap(r, box2)) hits.push({ kind: 'pillar', uid: pl.uid });
+      }
+
+      /* 벽은 기울어질 수 있으므로 실제 네모(다각형)로 잰다 */
+      for (const w of state.walls) {
+        if (obstacleHitsRects(wallFootprint(w), [r])) hits.push({ kind: 'wall', uid: w.uid });
+      }
+      for (const ar of state.areas) {
+        for (const e2 of mpEdges(ar.mp)) {
+          const spec = edgeSpec(ar, e2.key);
+          if (obstacleHitsRects(wallFootprint({ a: e2.a, b: e2.b, thickness: spec.thickness }), [r])) {
+            hits.push({ kind: 'area', uid: ar.uid, edge: e2.key });
+          }
+        }
+      }
+
+      for (const o of state.openings) if (inRect(o.at)) hits.push({ kind: 'opening', uid: o.uid });
+      for (const c of carts) if (c.points.some(inRect)) hits.push({ kind: 'cart', uid: c.uid });
+      for (const { link, path } of linkPaths) {
+        if (path.points3(0).some((p) => inRect([p[0], p[2]]))) hits.push({ kind: 'link', uid: link.uid });
+      }
+
       const add = e?.ctrlKey || e?.metaKey;
-      if (!kind) {
+      if (!hits.length) {
         if (!add) dispatch({ type: 'SELECT', selected: null });
       } else {
-        const prev = selected?.kind === kind && add ? (selected.uids ?? [selected.uid]) : [];
-        dispatch({ type: 'SELECT_MANY', kind, uids: [...new Set([...prev, ...hits])] });
+        const prev = add ? selItems(selected) : [];
+        const seen = new Set();
+        const merged = [...prev, ...hits].filter((i) => {
+          const k = `${i.kind}|${i.uid}|${i.edge ?? ''}`;
+          if (seen.has(k)) return false;
+          seen.add(k);
+          return true;
+        });
+        dispatch({ type: 'SELECT_MANY', items: merged });
       }
       return;
     }
@@ -967,7 +1223,8 @@ function SceneContent() {
 
     const mp = rectMP(s, d.cur);
     dispatch({ type: tool === TOOL.ZONE ? 'ADD_ZONE' : 'ADD_AREA', mp });
-  }, [rectDraft, tool, dispatch, marquee, rects, state.pillars, selected]);
+  }, [rectDraft, tool, dispatch, marquee, rects, selected,
+      state.pillars, state.walls, state.areas, state.openings, carts, linkPaths]);
 
   /** 펜으로 찍던 점들을 도형으로 확정한다. 도구는 그대로 두어 연속으로 그린다. */
   const finishPoly = useCallback(
@@ -995,6 +1252,16 @@ function SceneContent() {
           dispatch({ type: 'SET', patch: { hint: '설비가 있는 자리에는 세울 수 없습니다' } });
           return true;
         };
+
+        if (tool === TOOL.OPENING) {
+          const hit = snapToWall(cur, { areas: state.areas, walls: state.walls });
+          if (!hit) {
+            dispatch({ type: 'SET', patch: { hint: '벽 위를 클릭하세요 — 개구부는 벽에만 뚫을 수 있습니다' } });
+            return;
+          }
+          dispatch({ type: 'ADD_OPENING', at: hit.at });
+          return;
+        }
 
         if (tool === TOOL.PILLAR) {
           const b = state.build;
@@ -1033,6 +1300,19 @@ function SceneContent() {
         return;
       }
 
+      /* ---- 붙여넣기 -----------------------------------------------------
+       *  손에 든 것들을 커서 자리에 내려놓는다. 하나라도 놓일 수 없으면
+       *  전부 놓지 않는다 — 일부만 붙으면 복사한 배치가 깨지고, 무엇이
+       *  빠졌는지 알아채기도 어렵다. */
+      if (tool === TOOL.PASTE && isTop) {
+        if (!paste?.ok) {
+          dispatch({ type: 'SET', patch: { hint: '여기에는 놓을 수 없습니다' } });
+          return;
+        }
+        dispatch({ type: 'PASTE_AT', pos: [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))] });
+        return;
+      }
+
       if (tool === TOOL.PLACE && isTop) {
         /* 놓을 바닥이 아예 없으면 왜 안 되는지 알려 준다 — 고스트가 계속
            빨갛기만 하면 모델이 잘못된 줄 안다 */
@@ -1056,7 +1336,37 @@ function SceneContent() {
       /* ---- 카트 순찰 경로 그리기 --------------------------------------- */
       if (tool === TOOL.PATH && activeItem && isTop) {
         const cur = [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))];
+
         const pts = pathDraft?.points ?? [];
+
+        /* 경로가 벽을 뚫지 못하게 한다.
+           ------------------------------------------------------------------
+           보는 것은 "찍은 점이 밖인가" 가 아니라 **직전 점에서 여기까지 오는
+           동안 경계를 어디서 넘었는가** 다. 점만 보면, 문을 지나 바깥 멀리로
+           이어지는 트럭 경로를 그릴 수가 없다 — 문에서 멀어지는 순간 거부되기
+           때문이다. 정작 막아야 할 것은 벽 한복판을 가로지르는 선이다.
+
+           카트는 아예 밖으로 나가지 않으므로 넘는 것 자체가 잘못이고,
+           트럭은 문으로 넘으면 된다. */
+        if (floor) {
+          const prev = pts[pts.length - 1];
+          const truck = isTruck(activeItem);
+          if (!truck && !pointInMP(floor, cur)) {
+            dispatch({ type: 'SET', patch: { hint: '경로는 작업 영역 안에만 그릴 수 있습니다' } });
+            return;
+          }
+          if (prev && crossesWall(prev, cur, floor, truck ? gates : [])) {
+            dispatch({
+              type: 'SET',
+              patch: {
+                hint: truck
+                  ? '트럭은 개구부를 지나서만 밖으로 나갈 수 있습니다'
+                  : '경로가 벽을 지나갑니다',
+              },
+            });
+            return;
+          }
+        }
         // 첫 점을 다시 누르면 고리를 닫고 마무리한다
         if (pts.length >= 3 && Math.hypot(pts[0][0] - cur[0], pts[0][1] - cur[1]) < CLOSE_DIST) {
           dispatch({ type: 'PATH_FINISH', closed: true });
@@ -1067,6 +1377,15 @@ function SceneContent() {
       }
 
       /* ---- 배관·전선: 자재 포트와 무관하게 자기 높이에 놓는다 ---------- */
+      if (tool === TOOL.CONNECT && activeItem) {
+        /* 연결장치는 설비 사이를 잇는 것이라 건물 안에만 있어야 한다 */
+        const at = [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))];
+        if (floor && !pointInMP(floor, at)) {
+          dispatch({ type: 'SET', patch: { hint: '연결장치는 작업 영역 안에만 놓을 수 있습니다' } });
+          return;
+        }
+      }
+
       if (tool === TOOL.CONNECT && activeItem && isUtility(activeItem)) {
         const cur = [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))];
         const end = utilityEndpoint(cur);
@@ -1155,21 +1474,42 @@ function SceneContent() {
     [tool, isTop, computeGhost, activeItem, ghostRot, dispatch, connectFrom, ports, acceptPort,
      gridSize, placed, itemOf, linkPaths, state.cornerRadius, pathDraft, utilityEndpoint,
      state.drawShape, state.polyDraft, state.wallDraft, state.walls, state.areas, finishPoly, floor,
-     state.build, state.pillars],
+     state.build, state.pillars, gates, paste],
   );
 
-  /**
-   * 지금 골라진 uid 들 (하나만 골랐어도 배열).
-   *  여러 개를 묶어 끌 때와 정렬할 때 같은 값을 본다.
-   */
-  const selectedSet = useMemo(
-    () => new Set(selected?.uids ?? (selected?.uid ? [selected.uid] : [])),
-    [selected],
+  /* ---- 개구부 클릭/드래그 ------------------------------------------------
+   *  개구부는 벽에서 빠진 자리라 벽을 통해 잡힌다(AreaView 가 눌린 지점을 보고
+   *  넘겨 준다). 옮길 때도 벽에서 떼어 낼 수는 없으므로 **그 벽 위에서만**
+   *  미끄러진다 — 어느 벽의 문인가는 도면의 뜻 자체라서 드래그로 바뀌면 안 된다.
+   * ---------------------------------------------------------------------- */
+  const onOpeningDown = useCallback(
+    (opening, line, e) => {
+      if (tool !== TOOL.SELECT) return;
+      if (e.nativeEvent?.button !== 0) return;
+      e.stopPropagation();
+      pickedRef.current = true;
+
+      if (e.nativeEvent?.ctrlKey || e.nativeEvent?.metaKey) {
+        dispatch({ type: 'SELECT_TOGGLE', kind: 'opening', uid: opening.uid });
+        return;
+      }
+      dispatch({ type: 'SELECT', selected: { kind: 'opening', uid: opening.uid } });
+
+      /* 바닥 띠에서 눌렀으면 어느 벽인지 같이 오지 않는다 — 좌표로 다시 찾는다 */
+      const host = line
+        ?? wallLines(state.areas, state.walls).find((l) => openingsOn(l, [opening]).length)
+        ?? null;
+      if (isTop && host) drag.current = { kind: 'opening', uid: opening.uid, line: host };
+    },
+    [tool, isTop, dispatch, state.areas, state.walls],
   );
 
   /* ---- 기둥 클릭/드래그 -------------------------------------------------- */
   const onPillarDown = useCallback(
     (pl, e) => {
+      /* 오른쪽·휠 버튼은 화면을 돌리고 미는 데 쓴다 — 그 클릭으로 선택이
+         바뀌면 시점을 옮기다가 엉뚱한 것이 잡힌다 */
+      if (e.nativeEvent?.button !== 0) return;
       if (tool !== TOOL.SELECT && tool !== TOOL.ERASE) return;
       e.stopPropagation();
       pickedRef.current = true;
@@ -1186,21 +1526,22 @@ function SceneContent() {
       }
       /* 이미 묶어 놓은 것 중 하나를 잡았으면 묶음을 유지한 채로 끈다.
          여기서 선택을 하나로 줄이면 "여러 개 골라 놓고 옮기기" 가 불가능하다. */
-      const inGroup = selected?.kind === 'pillar' && selectedSet.has(pl.uid);
+      const inGroup = selPillar.has(pl.uid);
       if (!inGroup) dispatch({ type: 'SELECT', selected: { kind: 'pillar', uid: pl.uid, uids: [pl.uid] } });
 
       if (isTop) {
-        const group = (inGroup ? state.pillars.filter((x) => selectedSet.has(x.uid)) : [pl])
+        const group = (inGroup ? state.pillars.filter((x) => selPillar.has(x.uid)) : [pl])
           .map((x) => ({ uid: x.uid, base: [x.pos[0], x.pos[1]] }));
         drag.current = { kind: 'pillar', uid: pl.uid, off: [pl.pos[0] - e.point.x, pl.pos[1] - e.point.z], group };
       }
     },
-    [tool, isTop, dispatch, selected, selectedSet, state.pillars],
+    [tool, isTop, dispatch, selected, selPillar, state.pillars],
   );
 
   /* ---- 설비 클릭/드래그 ------------------------------------------------- */
   const onModelDown = useCallback(
     (p, e) => {
+      if (e.nativeEvent?.button !== 0) return;
       /* 카트 경로를 그리는 중에는 설비·선반을 집지 않는다.
          집어 버리면 그 위에는 경유점을 찍을 수 없어서, 정작 자재를 주고받는
          자리(설비 앞·선반 앞) 위로 경로를 그릴 수가 없다. */
@@ -1218,11 +1559,11 @@ function SceneContent() {
         dispatch({ type: 'SELECT_TOGGLE', kind: 'equip', uid: p.uid });
         return;
       }
-      const inGroup = selected?.kind === 'equip' && selectedSet.has(p.uid);
+      const inGroup = selected?.kind === 'equip' && selEquip.has(p.uid);
       if (!inGroup) dispatch({ type: 'SELECT', selected: { kind: 'equip', uid: p.uid, uids: [p.uid] } });
 
       if (isTop) {
-        const group = (inGroup ? placed.filter((x) => selectedSet.has(x.uid)) : [p])
+        const group = (inGroup ? placed.filter((x) => selEquip.has(x.uid)) : [p])
           .map((x) => ({ uid: x.uid, base: [x.pos[0], x.pos[1]] }));
         drag.current = {
           uid: p.uid,
@@ -1233,17 +1574,19 @@ function SceneContent() {
         };
       }
     },
-    [tool, isTop, dispatch, selected, selectedSet, placed],
+    [tool, isTop, dispatch, selected, selEquip, placed],
   );
 
   /* 연결도 설비와 같은 pointerdown 을 쓴다. onClick(네이티브 click)은 내
      pointerup 처리보다 늦게 도착해서 "집었다" 표시가 한 박자 밀린다. */
   const onLinkDown = useCallback(
     (l, e) => {
+      if (e.nativeEvent?.button !== 0) return;
       if (tool === TOOL.PLACE || tool === TOOL.CONNECT || tool === TOOL.PATH) return;
       e.stopPropagation();
       pickedRef.current = true;
       if (tool === TOOL.ERASE) dispatch({ type: 'DELETE', kind: 'link', uid: l.uid });
+      else if (e.nativeEvent?.ctrlKey || e.nativeEvent?.metaKey) dispatch({ type: 'SELECT_TOGGLE', kind: 'link', uid: l.uid });
       else dispatch({ type: 'SELECT', selected: { kind: 'link', uid: l.uid } });
     },
     [tool, dispatch],
@@ -1251,10 +1594,12 @@ function SceneContent() {
 
   const onCartDown = useCallback(
     (c, e) => {
+      if (e.nativeEvent?.button !== 0) return;
       if (tool === TOOL.PLACE || tool === TOOL.CONNECT || tool === TOOL.PATH) return;
       e.stopPropagation();
       pickedRef.current = true;
       if (tool === TOOL.ERASE) dispatch({ type: 'DELETE', kind: 'cart', uid: c.uid });
+      else if (e.nativeEvent?.ctrlKey || e.nativeEvent?.metaKey) dispatch({ type: 'SELECT_TOGGLE', kind: 'cart', uid: c.uid });
       else dispatch({ type: 'SELECT', selected: { kind: 'cart', uid: c.uid } });
     },
     [tool, dispatch],
@@ -1281,6 +1626,30 @@ function SceneContent() {
         color: theme.select,
         points: [{ world: [w.a[0], y, w.a[1]] }, { world: [w.b[0], y, w.b[1]] }],
         inserts: [],
+      };
+    }
+
+    /* 영역·구역 — 다각형의 꼭짓점 전부.
+       **고치겠다고 말했을 때만** 낸다(인스펙터의 「꼭짓점 편집」). 고르기만 해도
+       나오게 두었더니 바닥을 누를 때마다 손잡이가 우수수 뜨고, 그 손잡이가 벽
+       클릭과 자리를 다퉈 벽을 고르려던 손이 자꾸 꼭짓점을 잡았다. */
+    if (selected.kind === 'area' || selected.kind === 'zone') {
+      const edit = state.editShape;
+      if (edit?.kind !== selected.kind || edit.uid !== selected.uid) return null;
+      const shape = selected.kind === 'zone'
+        ? state.zones.find((z) => z.uid === selected.uid)
+        : state.areas.find((a) => a.uid === selected.uid);
+      if (!shape) return null;
+      /* 영역은 벽 위로 띄운다 — 벽 높이보다 낮으면 손잡이가 벽에 파묻힌다.
+         구역은 바닥에 깔린 것이라 살짝만 띄운다. */
+      const y = selected.kind === 'area' ? (shape.height ?? WALL_DEFAULTS.height) + 0.4 : 0.6;
+      return {
+        kind: 'shape',
+        shape: selected.kind,
+        uid: shape.uid,
+        color: selected.kind === 'area' ? '#22c55e' : (shape.outlineColor ?? shape.color),
+        points: mpVertices(shape.mp).map((v) => ({ world: [v.at[0], y, v.at[1]], addr: v })),
+        inserts: mpMidpoints(shape.mp).map((m, i) => ({ index: i, world: [m.at[0], y, m.at[1]], addr: m })),
       };
     }
 
@@ -1319,7 +1688,7 @@ function SceneContent() {
       };
     }
     return null;
-  }, [isTop, tool, selected, linkPaths, carts, theme.select, state.walls]);
+  }, [isTop, tool, selected, linkPaths, carts, theme.select, state.walls, state.areas, state.zones, state.editShape]);
 
   const grabPoint = useCallback(
     (index, e) => {
@@ -1328,6 +1697,18 @@ function SceneContent() {
       /* 벽은 끝점이 둘뿐이라 지울 수 없다 — 지우면 벽이 아니게 된다 */
       if (editTarget.kind === 'wall') {
         drag.current = { kind: 'wallpoint', uid: editTarget.uid, index };
+        return;
+      }
+
+      /* 영역·구역의 꼭짓점. Alt+클릭이면 지운다 — 세 점은 남긴다(리듀서가 막는다) */
+      if (editTarget.kind === 'shape') {
+        const addr = editTarget.points[index]?.addr;
+        if (!addr) return;
+        if (e?.nativeEvent?.altKey) {
+          dispatch({ type: 'SHAPE_VERTEX', op: 'remove', kind: editTarget.shape, uid: editTarget.uid, addr });
+          return;
+        }
+        drag.current = { kind: 'vertex', shape: editTarget.shape, uid: editTarget.uid, addr };
         return;
       }
       // Alt 를 누른 채 클릭하면 그 경유점을 지운다
@@ -1357,7 +1738,21 @@ function SceneContent() {
       pickedRef.current = true;
       if (!editTarget) return;
       const at = editTarget.inserts.find((x) => x.index === index);
+      if (!at) return;
       const pt = [clean(snap(at.world[0], gridSize)), clean(snap(at.world[2], gridSize))];
+
+      /* 영역·구역 — 변 위에 꼭짓점을 하나 끼우고 곧바로 그것을 끄는 상태로 넘어간다.
+         중점이 그리드에 붙으면서 옆 꼭짓점과 같은 자리가 될 수 있으므로, 실제로
+         끼워지는지 먼저 확인한다. 확인 없이 잡으면 그 주소에 있던 **원래 점**을
+         끌게 되어, 누른 자리가 아니라 옆 코너가 따라온다. */
+      if (editTarget.kind === 'shape') {
+        const shape = shapeOf(editTarget.shape, editTarget.uid);
+        if (!shape || !insertVertex(shape.mp, at.addr, pt)) return;
+        dispatch({ type: 'SHAPE_VERTEX', op: 'insert', kind: editTarget.shape, uid: editTarget.uid, addr: at.addr, pt });
+        drag.current = { kind: 'vertex', shape: editTarget.shape, uid: editTarget.uid, addr: at.addr };
+        return;
+      }
+
       if (editTarget.kind === 'link') {
         const link = links.find((l) => l.uid === editTarget.uid);
         const wp = [...(link?.waypoints ?? [])];
@@ -1372,7 +1767,7 @@ function SceneContent() {
         drag.current = { kind: 'cartpoint', uid: editTarget.uid, index: index + 1 };
       }
     },
-    [editTarget, links, carts, dispatch, gridSize],
+    [editTarget, links, carts, dispatch, gridSize, shapeOf],
   );
 
   return (
@@ -1406,14 +1801,51 @@ function SceneContent() {
         walls={state.walls}
         pillars={state.pillars}
         zones={state.showZones ? state.zones : []}
-        dollhouse={!isTop}
+        openings={state.openings}
+        dollhouse={!isTop && state.dollhouse}
         selected={selected}
-        pick={tool === TOOL.SELECT || tool === TOOL.ERASE}
+        /* 꼭짓점을 고치는 중에는 건물이 클릭을 받지 않는다 — 손잡이 옆의 벽이나
+           바닥을 스치면 선택이 옮겨 가면서 편집이 그 자리에서 끝나 버린다.
+           끝내는 것은 「끝내기」 버튼과 Esc, 두 가지로만. */
+        pick={(tool === TOOL.SELECT || tool === TOOL.ERASE) && !state.editShape}
         onPick={() => { pickedRef.current = true; }}
         onPillarDown={onPillarDown}
+        onOpeningDown={onOpeningDown}
         onSelect={(sel) => dispatch({ type: 'SELECT', selected: sel })}
+        onToggle={(sel) => dispatch({ type: 'SELECT_TOGGLE', ...sel })}
         onErase={tool === TOOL.ERASE ? (kind, uid) => dispatch({ type: 'DELETE', kind, uid }) : null}
       />
+
+      {/* 붙여넣기 미리보기 — 놓을 수 있으면 청록, 아니면 빨강 */}
+      {paste && (
+        <group>
+          {paste.items.map(({ src, pos, rect }, i) =>
+            paste.kind === 'pillar' ? (
+              <group key={i}>
+                <mesh position={[pos[0], src.height / 2, pos[1]]}>
+                  <boxGeometry args={[src.size[0], src.height, src.size[1]]} />
+                  <meshBasicMaterial
+                    color={paste.ok ? theme.ghostOk : theme.ghostBad}
+                    transparent
+                    opacity={0.5}
+                    depthWrite={false}
+                  />
+                </mesh>
+                {rect && <FootprintOutline rect={rect} color={paste.ok ? theme.ghostOk : theme.ghostBad} />}
+              </group>
+            ) : (
+              <PlacedModel
+                key={i}
+                placed={{ ...src, pos }}
+                item={itemOf(src.itemId)}
+                ghost
+                valid={paste.ok}
+                colors={theme}
+              />
+            ),
+          )}
+        </group>
+      )}
 
       {/* 마키(끌어서 여러 개 고르기) */}
       {marquee && isTop && (
@@ -1464,6 +1896,17 @@ function SceneContent() {
       {placed.map((p) => {
         const it = itemOf(p.itemId);
         const isSel = selected?.kind === 'equip' && selected.uid === p.uid;
+        if (isStillage(it)) {
+          return (
+            <StillageView
+              key={p.uid}
+              placed={p}
+              item={it}
+              selected={isSel}
+              onPointerDown={(e) => onModelDown(p, e)}
+            />
+          );
+        }
         return isShelf(it) ? (
           <ShelfView
             key={p.uid}
@@ -1478,6 +1921,7 @@ function SceneContent() {
             placed={p}
             item={it}
             selected={isSel}
+            halted={halted.equips.has(p.uid)}
             colors={theme}
             onPointerDown={(e) => onModelDown(p, e)}
           />
@@ -1486,7 +1930,7 @@ function SceneContent() {
 
       {/* 선택 표시 — 설비·선반 모두 높이를 가진 케이지로 (한 곳에서) */}
       {placed
-        .filter((p) => selected?.kind === 'equip' && selectedSet.has(p.uid))
+        .filter((p) => selEquip.has(p.uid))
         .map((p) => {
           const rect = rectOf(p);
           const bb = boxFor(p);
@@ -1504,15 +1948,18 @@ function SceneContent() {
       {/* 비어 있는 설비 포트의 입출고 표시 (선반은 ShelfView 가 직접 그린다) */}
       <ZoneMarks zones={openPortZones} />
 
-      {/* 벨트 위를 흐르는 반송물 */}
-      {beltFlows.map(({ link, path, owner }) => (
+      {/* 벨트 위를 흐르는 반송물 — 종점(스틸리지)이 가득 차면 선다 */}
+      {beltFlows.map(({ link, path, owner, sink }) => (
         <BeltItems
           key={`f${link.uid}`}
           path={path}
           speed={link.speed ?? state.beltSpeed}
           gap={owner.spawnGap ?? 3}
           layers={owner.outputCount ?? 3}
-          running={state.running}
+          payload={payloadOf(itemOf(owner.itemId))}
+          running={state.running && !halted.links.has(link.uid)}
+          /* 종점에 닿은 한 덩어리가 곧 재고 한 묶음이 된다 */
+          onArrive={sink ? (n) => addStock(sink.uid, n, stillageCapacity(sink), payloadKeyOf(itemOf(owner.itemId))) : null}
         />
       ))}
 
@@ -1526,6 +1973,10 @@ function SceneContent() {
           stations={stations}
           selected={selected?.kind === 'cart' && selected.uid === cart.uid}
           running={state.running}
+          /* 트럭은 건물 밖으로 나가는 순간 짐이 출하로 넘어간다 */
+          shipOutside={isTruck(itemOf(cart.itemId))}
+          floor={floor}
+          gates={gates}
           onPointerDown={(e) => onCartDown(cart, e)}
         />
       ))}
