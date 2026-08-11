@@ -25,7 +25,6 @@ import { usePayloadSpecs } from '../core/payload.js';
 import { rotToRad } from '../core/grid.js';
 import {
   FALLBACK,
-  ZONE,
   bayLength,
   levelY,
   shelfBays,
@@ -38,7 +37,7 @@ import {
   slotPosition,
   payloadWidth,
 } from '../core/shelf.js';
-import { NO_PICK, ZONE_IN_COLOR, ZONE_OUT_COLOR } from './ZoneMarks.jsx';
+import { NO_PICK, SHELF_BAND_COLOR } from './ZoneMarks.jsx';
 
 const FRAME_COLOR = '#64748b';
 const BOARD_COLOR = '#94a3b8';
@@ -203,6 +202,28 @@ export default function ShelfView({
     [placed.bays, placed.bayLength, modelSpec],
   );
 
+  /**
+   * 그릴 띠 — 한 면에 한 줄.
+   * -------------------------------------------------------------------------
+   *  shelfZones 는 앞뒤 면을 다시 반씩(입고·출고) 쪼개 넷을 준다. 그 구분은
+   *  카트가 역할을 정하지 않았을 때의 기본값을 고르는 데에만 쓰이고, 화면에서는
+   *  의미가 없다 — 색이 같으니 어차피 한 줄로 보인다. 같은 면끼리 합쳐 두면
+   *  "앞면 전체가 하나의 역" 이라는 지금 규칙이 형상에서도 그대로 읽히고,
+   *  맞닿은 두 판이 만드는 이음매도 남지 않는다.
+   */
+  const bands = useMemo(() => {
+    const bySide = new Map();
+    for (const z of zones) {
+      const key = z.cz.toFixed(4);
+      const lo = z.cx - z.w / 2;
+      const hi = z.cx + z.w / 2;
+      const cur = bySide.get(key);
+      if (!cur) bySide.set(key, { cz: z.cz, d: z.d, lo, hi });
+      else { cur.lo = Math.min(cur.lo, lo); cur.hi = Math.max(cur.hi, hi); }
+    }
+    return [...bySide.values()].map((b) => ({ cx: (b.lo + b.hi) / 2, cz: b.cz, w: b.hi - b.lo, d: b.d }));
+  }, [zones]);
+
   /* 길이·단수를 줄이면 수용량이 줄어든다. 남아 있던 재고가 그보다 많으면
      "54 / 27" 같은 값이 남으므로 여기서 잘라 낸다. */
   useEffect(() => {
@@ -223,9 +244,11 @@ export default function ShelfView({
 
       {!ghost && <StoredItems placed={placed} spec={modelSpec} count={stock} />}
 
-      {/* 입출고 구역 — 앞뒤 양면에 입고(녹색)·출고(주황)를 반씩.
-          카트 경로를 그릴 때 보이도록 선택 여부와 무관하게 늘 표시한다. */}
-      {zones.map((z, i) => (
+      {/* 입출고 띠 — 앞뒤 양면에 한 줄씩, **한 가지 색**.
+          싣는 곳인지 내리는 곳인지는 카트가 역마다 정하므로(cart.roles) 선반
+          쪽에서는 단정하지 않는다. 실제로 무엇을 하는지는 경로 위의 정차역 링이
+          보여 준다. 카트 경로를 그릴 때 보이도록 늘 표시한다. */}
+      {bands.map((z, i) => (
         <mesh
           key={i}
           position={[z.cx, 0.02, z.cz]}
@@ -235,7 +258,7 @@ export default function ShelfView({
         >
           <planeGeometry args={[z.w, z.d]} />
           <meshBasicMaterial
-            color={ghost ? (valid ? '#22d3ee' : '#f43f5e') : z.kind === ZONE.IN ? ZONE_IN_COLOR : ZONE_OUT_COLOR}
+            color={ghost ? (valid ? '#22d3ee' : '#f43f5e') : SHELF_BAND_COLOR}
             transparent
             opacity={selected ? 0.6 : 0.35}
             depthTest={false}
