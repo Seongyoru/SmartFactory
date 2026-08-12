@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node tools/check/run.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

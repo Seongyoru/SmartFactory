@@ -1,0 +1,175 @@
+/**
+ * 벨트 한 줄의 흐름 — 자리 계산과 재료 셈.
+ *  예전에는 BeltItems.jsx 에서 블록을 떼어 돌렸다. 이제 `core/belt.js` 라 그냥 부른다.
+ *  여기서 나오는 수가 그대로 재고와 처리량이 되므로, 개수가 새거나 늘면 안 된다.
+ */
+import assert from 'node:assert/strict';
+import { SRC, group, t } from './_harness.mjs';
+
+group('벨트 흐름');
+
+const B = await import(SRC + 'core/belt.js');
+
+/** 한 프레임 굴리기 — 기본 도면: 길이 30, 간격 3 → 칸 11개 */
+const setup = ({ length = 30, step = 3 } = {}) => B.makeBelt(B.beltCount(length, step));
+const run = (st, d, opt = {}) =>
+  B.advanceBelt(st, { d, step: 3, length: 30, ...opt });
+
+/** 벨트 위에 실제로 보이는 물건 수 */
+const onBelt = (st, { step = 3, length = 30 } = {}) => {
+  let n = 0;
+  for (let k = 0; k < st.fill.length; k++) {
+    if (B.beltOffset(st, step) + k * step <= length && B.beltHas(st, k)) n++;
+  }
+  return n;
+};
+
+/* ---------- 칸 수 ---------- */
+t('길이 ÷ 간격 + 1 칸', () => {
+  assert.equal(B.beltCount(30, 3), 11);
+  assert.equal(B.beltCount(10, 3), 4);        // 0, 3, 6, 9
+});
+t('길이가 0 이면 칸이 없다', () => {
+  assert.equal(B.beltCount(0, 3), 0);
+  assert.equal(B.beltCount(30, 0), 0);
+});
+t('아주 촘촘해도 상한을 넘지 않는다', () => {
+  assert.equal(B.beltCount(1000, 0.4), B.MAX_ITEMS);
+});
+
+/* ---------- 올라타기 ---------- */
+t('처음 한 걸음에 첫 덩어리가 올라탄다', () => {
+  const st = setup();
+  run(st, 1);
+  assert.equal(st.born, 0);
+  assert.equal(onBelt(st), 1);
+  assert.ok(Math.abs(B.beltOffset(st, 3) - 1) < 1e-9);
+});
+t('간격을 지날 때마다 한 덩어리씩 는다', () => {
+  const st = setup();
+  for (let i = 0; i < 9; i++) run(st, 1);       // 9m
+  assert.equal(onBelt(st), 4);                  // 0, 3, 6, 9 자리
+});
+t('한 프레임에 여러 덩어리가 올라타도 안 빠뜨린다', () => {
+  const st = setup();
+  run(st, 7);                                   // 0 → 7 은 3, 6 두 경계 + 첫 덩어리
+  assert.equal(st.born, 2);
+  assert.equal(onBelt(st), 3);
+});
+
+/* ---------- 끝에 닿기 ---------- */
+t('벨트 길이만큼 가면 첫 덩어리가 도착한다', () => {
+  const st = setup();
+  let got = 0;
+  for (let i = 0; i < 31; i++) got += run(st, 1);
+  assert.equal(got, 1);
+});
+t('한 프레임에 여러 개가 지나가도 안 빠뜨린다', () => {
+  const st = setup();
+  for (let i = 0; i < 30; i++) run(st, 1);       // 벨트를 꽉 채웠다
+  const got = run(st, 9);                        // 세 칸치를 한 번에
+  assert.equal(got, 3);
+});
+t('넣은 만큼만 나온다 — 오래 돌려도 개수가 안 샌다', () => {
+  const st = setup();
+  let out = 0;
+  for (let i = 0; i < 2000; i++) out += run(st, 0.37);
+  const total = st.born + 1;                     // 지금까지 올라탄 덩어리 수
+  assert.equal(out + onBelt(st), total, `나간 ${out} + 위 ${onBelt(st)} ≠ 올라탄 ${total}`);
+});
+
+/* ---------- 재료를 못 낼 때 = **빈칸**이 흐른다 ---------- */
+t('재료를 하나도 못 내면 빈칸만 지나간다 — 벨트는 계속 간다', () => {
+  const st = setup();
+  const calls = [];
+  for (let i = 0; i < 30; i++) run(st, 1, { spawn: (k) => { calls.push(k); return 0; } });
+  assert.equal(onBelt(st), 0, '빈 벨트여야 한다');
+  assert.ok(Math.abs(st.trav - 30) < 1e-9, `벨트가 섰다: trav=${st.trav}`);
+  assert.ok(calls.length > 0, '청구는 계속 해야 한다');
+});
+t('굶는 동안에는 도착이 없다', () => {
+  const st = setup();
+  let got = 0;
+  for (let i = 0; i < 200; i++) got += run(st, 1, { spawn: () => 0 });
+  assert.equal(got, 0);
+});
+t('feeding=false 면 청구조차 안 한다', () => {
+  const st = setup();
+  let asked = 0;
+  for (let i = 0; i < 30; i++) run(st, 1, { feeding: false, spawn: () => { asked++; return 9; } });
+  assert.equal(asked, 0);
+  assert.equal(onBelt(st), 0);
+  assert.ok(Math.abs(st.trav - 30) < 1e-9);
+});
+t('두 개 중 하나만 냈으면 하나는 물건, 하나는 빈칸', () => {
+  const st = setup();
+  run(st, 7, { spawn: () => 1 });                // 세 덩어리치가 올라탈 자리
+  assert.equal(onBelt(st), 1);
+});
+t('음수·undefined 를 돌려주면 0 으로 본다', () => {
+  const a = setup();
+  run(a, 10, { spawn: () => -5 });
+  assert.equal(onBelt(a), 0);
+  const b = setup();
+  run(b, 10, { spawn: () => undefined });
+  assert.equal(onBelt(b), 0);
+});
+t('낸 것보다 많이 돌려줘도 청구한 수를 안 넘는다', () => {
+  const st = setup();
+  run(st, 7, { spawn: () => 999 });
+  assert.equal(onBelt(st), 3);                   // 올라탄 자리 수만큼만
+});
+t('spawn 이 없으면 달라는 대로 다 만든다 (공급원)', () => {
+  const st = setup();
+  run(st, 7);
+  assert.equal(onBelt(st), 3);
+});
+
+/* ---------- 이게 이번에 고친 자리 ---------- */
+t('굶다가 재료가 오면, 앞머리만 비어 있고 뒤는 그대로 흘러 나간다', () => {
+  const st = setup();
+  /* ① 벨트를 물건으로 꽉 채운다 */
+  for (let i = 0; i < 30; i++) run(st, 1);
+  const before = onBelt(st);
+  assert.ok(before >= 10, `채워졌어야 한다: ${before}`);
+
+  /* ② 앞 설비가 선다 — 벨트는 계속 돈다 */
+  let got = 0;
+  for (let i = 0; i < 30; i++) got += run(st, 1, { feeding: false });
+
+  assert.equal(got, 10, `이미 올라타 있던 것이 다 나가야 한다 (나간 것 ${got})`);
+  assert.equal(onBelt(st), 0, '벨트가 비어야 한다');
+});
+t('막혀 섰다 풀리면 서 있던 자리에서 이어 간다', () => {
+  const st = setup();
+  for (let i = 0; i < 20; i++) run(st, 1);
+  const held = onBelt(st);
+  const head = B.beltOffset(st, 3);
+
+  /* 막힌 동안에는 advanceBelt 를 아예 안 부른다 (running=false) */
+  assert.equal(onBelt(st), held, '서 있는 동안 물건이 사라졌다');
+  assert.equal(B.beltOffset(st, 3), head, '서 있는 동안 줄이 움직였다');
+
+  run(st, 1);                                    // 풀렸다
+  assert.ok(Math.abs(B.beltOffset(st, 3) - ((head + 1) % 3)) < 1e-9, '이어 가지 않았다');
+});
+
+/* ---------- 굴러도 안 새는지 ---------- */
+t('아주 짧은 벨트를 한 번에 지나가도 개수가 안 늘어난다', () => {
+  const st = setup({ length: 2, step: 3 });      // 칸 1개
+  const got = B.advanceBelt(st, { d: 20, step: 3, length: 2 });
+  assert.ok(got <= st.fill.length, `${got} 개가 한 프레임에 나왔다`);
+  assert.ok(got >= 0);
+});
+t('trav 가 커지면 되감아도 자리가 그대로다', () => {
+  const st = setup();
+  st.trav = 1e6 - 1;
+  st.born = Math.floor(st.trav / 3);
+  st.gone = Math.floor((st.trav - 30) / 3);
+  st.fill.fill(1);
+  const before = onBelt(st);
+  run(st, 2);
+  assert.ok(st.trav < 1e6, `되감기지 않았다: ${st.trav}`);
+  assert.equal(st.born, Math.floor(st.trav / 3), 'born 이 trav 와 어긋났다');
+  assert.ok(Math.abs(onBelt(st) - before) <= 1, '되감기가 줄을 흐트러뜨렸다');
+});
