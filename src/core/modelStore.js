@@ -241,6 +241,28 @@ function buildSpec(key, gltf, opts = {}) {
 }
 
 /**
+ * 항목 하나를 로드 옵션으로 바꾼다.
+ * ---------------------------------------------------------------------------
+ *  **부르는 곳마다 손으로 골라 넘기지 않기 위해서다.** 예전에는 네 군데가 각자
+ *  `{ url, axis, merge }` 를 적어 넘겼는데, 그중 한 곳(App 의 프리로드)이 `tint`
+ *  를 빠뜨렸다. 그 한 곳이 **먼저** 캐시를 채우면 뒤에 제대로 넘긴 호출은 아래
+ *  `hit.promise` 에 걸려 통째로 무시된다 — 반송물이 전부 원본 색으로 나왔고,
+ *  코드는 어디도 틀린 데가 없어 보였다.
+ *
+ *  옵션을 만드는 곳을 하나로 두면 항목에 필드를 더해도 부르는 곳을 안 고쳐도 된다.
+ */
+export const modelOptions = (item) => ({
+  url: item?.url ?? null,
+  buffer: item?.buffer ?? null,
+  axis: item?.axis ?? null,
+  merge: !!item?.merge,
+  tint: item?.tint ?? null,
+});
+
+/** 같은 키를 다른 옵션으로 불렀는지 가리기 위한 지문 (buffer 는 키가 이미 고유하다) */
+const optionSig = ({ url, axis, merge, tint }) => `${url ?? ''}|${axis ?? ''}|${merge ? 1 : 0}|${tint ?? ''}`;
+
+/**
  * URL 또는 ArrayBuffer 로 모델을 로드한다. 같은 key 는 한 번만 로드.
  *  @param merge 재질이 같은 조각들을 한 메시로 합칠지 (mergeByMaterial 참고).
  *               이름으로 찾는 노드가 없는 모델에만 켤 것.
@@ -248,10 +270,22 @@ function buildSpec(key, gltf, opts = {}) {
  *               URL 과 달라야 원본과 따로 캐시된다.
  */
 export function loadModel(key, { url = null, buffer = null, axis = null, merge = false, tint = null } = {}) {
+  const sig = optionSig({ url, axis, merge, tint });
   const hit = cache.get(key);
-  if (hit?.promise) return hit.promise;
+  if (hit?.promise) {
+    /* 먼저 부른 쪽이 이긴다 — 그 사실을 조용히 넘기면 "색이 안 먹네" 로만 보이고
+       코드에서는 아무 데도 틀린 곳을 못 찾는다. 어긋난 순간에 말하게 한다. */
+    if (hit.sig !== sig) {
+      console.warn(
+        `[modelStore] "${key}" 를 서로 다른 옵션으로 두 번 불렀습니다 — 먼저 부른 쪽이 남습니다.\n` +
+        `  캐시: ${hit.sig}\n  요청: ${sig}\n` +
+        '  (옵션은 modelOptions(item) 으로 만들어 넘기세요)',
+      );
+    }
+    return hit.promise;
+  }
 
-  const entry = { status: 'loading', spec: null, error: null };
+  const entry = { status: 'loading', spec: null, error: null, sig };
   const promise = new Promise((resolve, reject) => {
     const onDone = (gltf) => {
       try {
@@ -313,11 +347,7 @@ export function useModelSpec(item) {
   useEffect(() => subscribeModels(() => force((n) => n + 1)), []);
   useEffect(() => {
     if (!key) return;
-    if (!cache.has(key)) {
-      loadModel(key, {
-        url: item.url, buffer: item.buffer, axis: item.axis, merge: item.merge, tint: item.tint,
-      }).catch(() => {});
-    }
+    if (!cache.has(key)) loadModel(key, modelOptions(item)).catch(() => {});
   }, [key, item?.url, item?.buffer, item?.axis, item?.merge, item?.tint]);
 
   if (!key) return null;

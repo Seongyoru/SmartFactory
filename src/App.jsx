@@ -14,7 +14,7 @@
 import React, { useEffect } from 'react';
 import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2, Truck } from 'lucide-react';
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
-import { loadModel } from './core/modelStore.js';
+import { loadModel, modelOptions } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
 import { shippedTotal, useAllStock, useShipped } from './core/simStore.js';
 import { bottleneck, getRan, throughput, useMetrics } from './core/metrics.js';
@@ -30,12 +30,16 @@ import Scenarios from './ui/Scenarios.jsx';
 import ErrorBoundary from './ui/ErrorBoundary.jsx';
 
 /* 기본 제공 모델은 앱이 뜨자마자 받아 둔다 — 라이브러리 카드에 치수를 띄우고,
-   첫 배치 때 고스트가 늦게 나타나는 것을 막기 위해. */
+   첫 배치 때 고스트가 늦게 나타나는 것을 막기 위해.
+
+   옵션은 반드시 `modelOptions(i)` 로 만든다. 여기가 **가장 먼저** 캐시를 채우는
+   자리라, 필드를 하나라도 빠뜨리면 뒤에 제대로 넘긴 호출이 통째로 무시된다 —
+   실제로 `tint` 를 빠뜨려 반송물이 전부 원본 색으로 나온 적이 있다. */
 function usePreloadBuiltins() {
   useEffect(() => {
     [...BUILTIN_LIBRARY, ...Object.values(PAYLOAD_ITEMS)]
       .filter((i) => i.url)
-      .forEach((i) => loadModel(i.modelKey, { url: i.url, axis: i.axis, merge: i.merge }).catch(() => {}));
+      .forEach((i) => loadModel(i.modelKey, modelOptions(i)).catch(() => {}));
   }, []);
 }
 

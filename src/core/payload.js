@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { PAYLOAD_ITEMS } from '../data/library.js';
-import { getSpec, loadModel, subscribeModels } from './modelStore.js';
+import { getSpec, loadModel, modelOptions, subscribeModels } from './modelStore.js';
 
 /**
  * @returns (kind) => spec — 모르는 이름이나 아직 못 읽은 모델이면 기본 반송물,
@@ -23,9 +23,7 @@ export function usePayloadSpecs() {
 
   useEffect(() => {
     for (const it of Object.values(PAYLOAD_ITEMS)) {
-      if (!getSpec(it.modelKey)) {
-        loadModel(it.modelKey, { url: it.url, merge: it.merge, tint: it.tint }).catch(() => {});
-      }
+      if (!getSpec(it.modelKey)) loadModel(it.modelKey, modelOptions(it)).catch(() => {});
     }
   }, []);
 
