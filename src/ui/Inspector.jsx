@@ -11,8 +11,9 @@ import { CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, stationStyle 
 import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import {
-  CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE, SHIFT_PRESETS,
-  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, normalizeShifts, shiftAt, shiftLabel,
+  CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
+  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts,
+  shiftAt, shiftLabel, splitHM,
 } from '../core/crew.js';
 import {
   LOSS_FLOOR, cartBlockRatio, getBlocked, getCartBlocked, getCartRan, getRan, getSeries,
@@ -2504,6 +2505,17 @@ function BomReport() {
  *  총원을 0 으로 두면 "사람이 없다" 가 아니라 **"인력을 안 따진다"** 는 뜻이다.
  *  0 을 "아무도 없음" 으로 읽으면 기본값이 곧 전면 정지가 되어 버린다.
  */
+/**
+ * 좁은 줄에 들어가는 숫자 칸.
+ *  브라우저 기본 스피너(위아래 화살표)를 감춘다 — 한 줄에 숫자 칸이 셋이라
+ *  스피너가 먹는 폭(칸마다 ~16px)을 감당할 수 없다. 두 자리면 충분한 값들이라
+ *  키보드로 넣는 편이 빠르기도 하다.
+ */
+const NUM_FIELD =
+  'w-9 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink '
+  + 'outline-none focus:border-sky-500/60 [appearance:textfield] '
+  + '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+
 function CrewPanel() {
   const { state, dispatch, itemOf } = useEditor();
   const elapsed = useElapsed();
@@ -2538,7 +2550,8 @@ function CrewPanel() {
           <Row label="지금 조">
             {shift.name}
             <span className="ml-1 text-[10px] font-normal text-ink4">
-              ({Number.isFinite(endsIn) ? `${formatElapsed(endsIn)} 남음` : '계속'})
+              {shiftLabel(shift.minutes)} 중{' '}
+              {Number.isFinite(endsIn) ? `${formatElapsed(endsIn)} 남음` : '계속'}
             </span>
           </Row>
           <Row label="배정">
@@ -2550,9 +2563,14 @@ function CrewPanel() {
         </>
       )}
 
-      <p className="mb-1 mt-3 flex items-center justify-between text-[10.5px] text-ink4">
+      {/* 한 바퀴가 얼마인지, 그리고 **실제로 얼마나 기다려야** 그만큼 도는지.
+          뒤엣것이 없으면 8시간 조를 넣어 놓고 왜 안 바뀌는지 모른다. */}
+      <p className="mb-1 mt-3 flex items-center justify-between gap-2 text-[10.5px] text-ink4">
         교대조
-        <span className="tabular-nums">한 바퀴 {formatElapsed(cycleSeconds(shifts))}</span>
+        <span className="tabular-nums">
+          한 바퀴 {formatElapsed(cycleSeconds(shifts))}
+          <span className="ml-1 text-ink4/70">· {speed}× 로 {formatElapsed(cycleSeconds(shifts) / speed)}</span>
+        </span>
       </p>
       <ul className="space-y-1.5">
         {shifts.map((s, i) => (
@@ -2560,53 +2578,49 @@ function CrewPanel() {
             key={i}
             className={`rounded px-1 py-1 ${i === index && !unlimited ? 'bg-sky-500/10 ring-1 ring-sky-500/30' : ''}`}
           >
+            {/* 이름 · 시간 · 분 · 인원 · 지우기 — **한 줄**.
+                길이를 시간과 분으로 나눠 받는 것이 핵심이다. 7시간짜리 조를
+                넣으려고 420 을 손으로 계산하게 두지 않는다. 저장은 합친 분
+                하나이고(crew.js 의 joinHM), 화면에서만 둘로 갈린다. */}
             <div className="flex items-center gap-1 text-[11px]">
               <input
                 value={s.name}
                 onChange={(e) => set(i, { name: e.target.value })}
+                title="조 이름"
                 className="min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink outline-none focus:border-sky-500/60"
               />
-              {/* 길이는 **분**이다 — 10분씩 끊어 올린다. 8시간 조는 480 */}
               <input
-                type="number"
-                min={MINUTES_RANGE[0]} max={MINUTES_RANGE[1]} step={MINUTES_RANGE[2]}
-                value={s.minutes}
-                onChange={(e) => set(i, { minutes: Number(e.target.value) })}
-                title={shiftLabel(s.minutes)}
-                className="w-14 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+                type="number" min="0" max="24"
+                value={splitHM(s.minutes).h}
+                onChange={(e) => set(i, { minutes: joinHM(e.target.value, splitHM(s.minutes).m) })}
+                title={`${shiftLabel(s.minutes)} · ${speed}× 로 ${formatElapsed((s.minutes * 60) / speed)}`}
+                className={NUM_FIELD}
+              />
+              <span className="text-ink4">시</span>
+              <input
+                type="number" min="0" max="59" step={MINUTES_RANGE[2]}
+                value={splitHM(s.minutes).m}
+                onChange={(e) => set(i, { minutes: joinHM(splitHM(s.minutes).h, e.target.value) })}
+                title={`${shiftLabel(s.minutes)} · ${speed}× 로 ${formatElapsed((s.minutes * 60) / speed)}`}
+                className={NUM_FIELD}
               />
               <span className="text-ink4">분</span>
               <input
                 type="number" min={HEADCOUNT_RANGE[0]} max={HEADCOUNT_RANGE[1]}
                 value={s.headcount}
                 onChange={(e) => set(i, { headcount: Number(e.target.value) })}
-                className="w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+                title="이 조에 나오는 사람 수 (0 = 인력을 안 따진다)"
+                className={NUM_FIELD}
               />
               <span className="text-ink4">명</span>
-              {shifts.length > 1 && (
-                <button onClick={() => drop(i)} className="rounded px-0.5 text-ink4 hover:text-rose-500" title="이 조를 뺀다">
-                  <Trash2 size={11} />
-                </button>
-              )}
-            </div>
-            {/* 480 이 8시간이라는 것을 암산하게 두지 않는다. 자주 쓰는 길이는
-                눌러서 바로 넣는다 — 실제 시간이 얼마나 걸리는지도 함께 */}
-            <div className="mt-0.5 flex items-center gap-1 pl-1 text-[10px] text-ink4">
-              <span className="tabular-nums">{shiftLabel(s.minutes)}</span>
-              <span className="text-ink4/60">·</span>
-              <span className="tabular-nums" title="지금 배속으로 이 조가 끝나기까지 걸리는 실제 시간">
-                {speed}× 로 {formatElapsed((s.minutes * 60) / speed)}
-              </span>
-              <span className="flex-1" />
-              {SHIFT_PRESETS.map((p) => (
-                <button
-                  key={p.minutes}
-                  onClick={() => set(i, { minutes: p.minutes })}
-                  className={`rounded px-1 ${s.minutes === p.minutes ? 'bg-sky-500/20 text-sky-600' : 'hover:bg-raiseh hover:text-ink2'}`}
-                >
-                  {p.label}
-                </button>
-              ))}
+              <button
+                onClick={() => drop(i)}
+                disabled={shifts.length <= 1}
+                className="rounded px-0.5 text-ink4 enabled:hover:text-rose-500 disabled:opacity-25"
+                title={shifts.length > 1 ? '이 조를 뺀다' : '조는 하나 이상 있어야 한다'}
+              >
+                <Trash2 size={11} />
+              </button>
             </div>
           </li>
         ))}

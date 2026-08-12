@@ -1224,13 +1224,19 @@ export function EditorProvider({ children }) {
     })();
   }, []);
 
-  /* ---- 자동 저장 (배치가 바뀔 때마다, 0.6초 디바운스) ------------------- */
+  /* ---- 자동 저장 (배치가 바뀔 때마다, 0.6초 디바운스) -------------------
+   *  의존성은 **`DOC_KEYS` 에서 만든다.** 손으로 적어 두면 저장 대상이 늘 때마다
+   *  이 줄을 같이 고쳐야 하는데, 그걸 빠뜨려도 아무 데서도 안 터진다 — 그냥 그
+   *  값만 조용히 저장이 안 된다. 실제로 `openings` 와 `shifts` 가 빠져 있었다
+   *  (개구부는 그릴 때 `seq` 가 함께 바뀌어 우연히 저장됐고, 나중에 고치기만
+   *  하면 사라졌다).
+   *
+   *  `DOC_KEYS` 는 모듈 상수라 길이가 변하지 않으므로 의존성 배열로 안전하다. */
   useEffect(() => {
-    const t = setTimeout(() => {
-      saveLayout(layoutSnapshot(state));
-    }, 600);
+    const t = setTimeout(() => saveLayout(layoutSnapshot(state)), 600);
     return () => clearTimeout(t);
-  }, [state.placed, state.links, state.carts, state.areas, state.walls, state.pillars, state.zones, state.seq]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, DOC_KEYS.map((k) => state[k]));
 
   useEffect(() => {
     saveUserLibrary(state.library.filter((i) => i.source === 'user'));

@@ -16,7 +16,7 @@
  *  그 사실이 곧 답이다. 지어낸 숫자가 하나도 안 들어간다.
  *
  *      placed.crew   이 설비를 돌리는 데 필요한 인원 (0 = 무인 설비)
- *      state.shifts  교대조 — [{ name, hours, headcount }]
+ *      state.shifts  교대조 — [{ name, minutes, headcount }]
  *
  *  ── 모자라면 누가 먼저 받는가 ────────────────────────────────────────────
  *  **배치한 순서대로** 배정한다. 처리량이 큰 순서나 병목 순서로 주고 싶은 마음이
@@ -47,14 +47,6 @@ export const HEADCOUNT_RANGE = [0, 60, 1];    // 한 조의 총원
 /** 한 조의 길이(분) — 10분씩 끊어 올린다. 24시간까지 */
 export const MINUTES_RANGE = [10, 1440, 10];
 
-/** 자주 쓰는 길이 — 눌러서 바로 넣는다 */
-export const SHIFT_PRESETS = [
-  { label: '10분', minutes: 10 },
-  { label: '30분', minutes: 30 },
-  { label: '1시간', minutes: 60 },
-  { label: '8시간', minutes: 480 },
-];
-
 /** 분 → 읽히는 문자열 ("8시간" · "1시간 30분" · "20분") */
 export function shiftLabel(minutes) {
   const m = Math.max(0, Math.round(minutes));
@@ -63,6 +55,26 @@ export function shiftLabel(minutes) {
   if (!h) return `${r}분`;
   return r ? `${h}시간 ${r}분` : `${h}시간`;
 }
+
+/** 한 조의 길이를 쓸 수 있는 범위로 자른다 */
+export const clampShiftMinutes = (m) =>
+  Math.min(MINUTES_RANGE[1], Math.max(MINUTES_RANGE[0], Math.round(Number(m) || 0)));
+
+/**
+ * 화면에서는 **시간과 분을 따로** 받는다.
+ * ---------------------------------------------------------------------------
+ *  7시간짜리 조를 넣으려고 420 을 손으로 계산하게 두면 안 된다. 그렇다고 시간과
+ *  분을 **따로 저장하면** "1시간 90분" 같은 값이 도면에 남고, 그걸 읽는 쪽마다
+ *  정규화를 다시 해야 한다. 그래서 **화면에서만 둘로 갈라** 보여 주고 도면에는
+ *  합친 분 하나가 들어간다.
+ */
+export const splitHM = (minutes) => {
+  const t = Math.max(0, Math.round(minutes));
+  return { h: Math.floor(t / 60), m: t % 60 };
+};
+
+export const joinHM = (h, m) =>
+  clampShiftMinutes((Math.max(0, Number(h) || 0) * 60) + Math.max(0, Number(m) || 0));
 
 /** 이 설비에 필요한 인원 */
 export const crewOf = (placed) => Math.max(0, Math.round(placed?.crew ?? 0));
@@ -96,7 +108,7 @@ export function normalizeShifts(list) {
     const mins = Number.isFinite(raw) && raw > 0 ? raw : (Number(s?.hours) || 0) * 60;
     return {
       name: typeof s?.name === 'string' && s.name.trim() ? s.name.trim() : `${i + 1}조`,
-      minutes: Math.min(MINUTES_RANGE[1], Math.max(MINUTES_RANGE[0], Math.round(mins) || 480)),
+      minutes: clampShiftMinutes(Math.round(mins) || 480),
       headcount: Math.max(0, Math.round(Number(s?.headcount) || 0)),
     };
   });
