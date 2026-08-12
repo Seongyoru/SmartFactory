@@ -7,10 +7,17 @@ import { AlertTriangle, ChevronDown, ChevronUp, RotateCw, Trash2 } from 'lucide-
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
-import { cartPath, cartStations, nextRole, stationStyle } from '../core/cart.js';
+import { CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, stationStyle } from '../core/cart.js';
 import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed } from '../core/clock.js';
-import { getBlocked, getRan, getSeries, oeeOf, oeeOverall, resetMetrics, uptimeOf, useMetrics } from '../core/metrics.js';
+import {
+  LOSS_FLOOR, getBlocked, getRan, getSeries, getStarved, lossSplit, oeeOf, oeeOverall,
+  resetMetrics, useMetrics,
+} from '../core/metrics.js';
+import {
+  DEFAULT_INPUT_CAP, MAX_QTY, auditRecipes, countKinds, explode, flowEdges,
+  inputCapOf, isSource, missingOf, needFor, normalizeRecipe, outputKindOf, recipeOf,
+} from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
   getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
@@ -144,9 +151,19 @@ function EquipUptime({ uid }) {
           </span>
         )}
       </Row>
+      {/* 막힘과 굶음은 잃은 시간이 같아도 처방이 정반대라, 성능 한 줄 아래에
+          어느 쪽으로 잃었는지를 반드시 함께 적는다 — 숫자만 보면 하류를 늘려야
+          할 때 상류를 늘리게 된다 */}
       <Row label="· 성능">
         <span className={tone(o.performance)}>{pct(o.performance)}</span>
-        {o.blockSec > 0 && <span className="ml-1 text-[10px] text-ink4">({formatElapsed(o.blockSec)} 막힘)</span>}
+        {(o.blockSec > LOSS_FLOOR || o.starveSec > LOSS_FLOOR) && (
+          <span className="ml-1 text-[10px] text-ink4">
+            ({[
+              o.blockSec > LOSS_FLOOR ? `${formatElapsed(o.blockSec)} 막힘` : null,
+              o.starveSec > LOSS_FLOOR ? `${formatElapsed(o.starveSec)} 굶음` : null,
+            ].filter(Boolean).join(' · ')})
+          </span>
+        )}
       </Row>
       <Row label="· 양품률">
         <span className={tone(o.quality)}>{pct(o.quality)}</span>
@@ -202,6 +219,153 @@ function FaultFields({ placed }) {
   );
 }
 
+/** 반송물 종류 하나 — 색 견본과 이름 */
+function KindChip({ kind }) {
+  const it = PAYLOAD_ITEMS[kind];
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span
+        className="h-2.5 w-2.5 shrink-0 rounded-sm ring-1 ring-edge"
+        style={{ background: it?.color ?? '#94a3b8' }}
+      />
+      <span className="truncate">{it?.name ?? kind}</span>
+    </span>
+  );
+}
+
+const KIND_KEYS = Object.keys(PAYLOAD_ITEMS);
+
+/**
+ * 이 설비가 무엇을 먹고 무엇을 만드는가 (레시피 · BOM).
+ * ---------------------------------------------------------------------------
+ *  ── 왜 라이브러리 항목이 아니라 이 자리인가 ──────────────────────────────
+ *  같은 기계라도 자리마다 하는 일이 다르다. 라인 앞의 Machine 1 은 원자재를
+ *  깎고, 뒤의 Machine 1 은 그것을 조립할 수 있다. 라이브러리에 매달면 그 구분이
+ *  불가능하므로 **놓인 설비마다** 정한다.
+ *
+ *  ── 재료를 안 정하면 예전 그대로다 ───────────────────────────────────────
+ *  입력이 비면 원자재 공급원 — 아무것도 안 먹고 계속 만든다. 이미 그린 도면이
+ *  이 칸이 생겼다는 이유로 갑자기 서면 안 되므로 그것이 기본값이다.
+ */
+function RecipeSection({ placed, item }) {
+  const { dispatch } = useEditor();
+  const lots = useLots(placed.uid);
+  const stock = useStock(placed.uid);
+
+  const recipe = recipeOf(placed) ?? { in: [], out: null };
+  const source = isSource(recipe);
+  const cap = inputCapOf(placed);
+  const per = Math.max(1, placed.outputCount ?? 3);
+
+  const patch = (next) =>
+    dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { recipe: normalizeRecipe(next) } });
+
+  const used = new Set(recipe.in.map((r) => r.kind));
+  const addable = KIND_KEYS.filter((k) => !used.has(k));
+
+  /* 지금 한 덩어리(= 적재 층수)를 만들 재료가 있는가 — 없으면 무엇이 없는지까지 */
+  const missing = source ? {} : missingOf(countKinds(lots), needFor(recipe, per));
+  const short = Object.entries(missing);
+
+  return (
+    <Section title="만드는 것">
+      <label className="block py-1">
+        <span className="mb-1 block text-[11px] text-ink4">산출물</span>
+        <select
+          value={recipe.out ?? ''}
+          onChange={(e) => patch({ ...recipe, out: e.target.value || null })}
+          className="w-full rounded-md border border-edge bg-field px-2 py-1.5 text-xs text-ink outline-none focus:border-sky-500/60"
+        >
+          <option value="">라이브러리 기본값</option>
+          {KIND_KEYS.map((k) => (
+            <option key={k} value={k}>{PAYLOAD_ITEMS[k].name}</option>
+          ))}
+        </select>
+      </label>
+      <Row label="실제로 내보내는 것">
+        <KindChip kind={outputKindOf(placed, item)} />
+      </Row>
+
+      <p className="mb-1 mt-3 text-[10.5px] text-ink4">재료 (완성품 1개당)</p>
+      {recipe.in.length === 0 && (
+        <p className="rounded bg-raise px-2 py-1.5 text-[10.5px] leading-relaxed text-ink4 ring-1 ring-edge">
+          재료가 없습니다 — <b className="text-ink2">원자재 공급원</b>입니다. 아무것도 먹지 않고
+          계속 만듭니다(지금까지의 동작).
+        </p>
+      )}
+      <ul className="space-y-1">
+        {recipe.in.map((row) => (
+          <li key={row.kind} className="flex items-center gap-1.5 text-[11px] text-ink2">
+            <KindChip kind={row.kind} />
+            <input
+              type="number"
+              min="1"
+              max={MAX_QTY}
+              value={row.qty}
+              onChange={(e) => patch({
+                ...recipe,
+                in: recipe.in.map((r) => (r.kind === row.kind ? { ...r, qty: Number(e.target.value) } : r)),
+              })}
+              className="ml-auto w-12 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+            />
+            <span className="text-ink4">개</span>
+            <button
+              onClick={() => patch({ ...recipe, in: recipe.in.filter((r) => r.kind !== row.kind) })}
+              className="rounded px-1 text-ink4 hover:text-rose-500"
+              title="이 재료를 뺀다"
+            >
+              <Trash2 size={11} />
+            </button>
+          </li>
+        ))}
+      </ul>
+      {addable.length > 0 && (
+        <select
+          value=""
+          onChange={(e) => e.target.value && patch({ ...recipe, in: [...recipe.in, { kind: e.target.value, qty: 1 }] })}
+          className="mt-1.5 w-full rounded-md border border-dashed border-edge bg-field px-2 py-1 text-[11px] text-ink4 outline-none focus:border-sky-500/60"
+        >
+          <option value="">+ 재료 추가…</option>
+          {addable.map((k) => (
+            <option key={k} value={k}>{PAYLOAD_ITEMS[k].name}</option>
+          ))}
+        </select>
+      )}
+
+      {!source && (
+        <>
+          <Slider
+            label="입력 버퍼"
+            min={5} max={200} step={5}
+            value={cap}
+            text={`${cap} 개`}
+            onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { inputCap: v } })}
+          />
+          <Row label="지금 쌓인 재료">
+            <span className={stock >= cap ? 'text-rose-500' : ''}>{stock} / {cap} 개</span>
+          </Row>
+          <StockBreakdown uid={placed.uid} />
+          {short.length > 0 && (
+            <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+              한 덩어리({per}개)를 만들 재료가 모자랍니다 —{' '}
+              {short.map(([k, n]) => `${PAYLOAD_ITEMS[k]?.name ?? k} ${n}개`).join(' · ')} 부족.
+              이 설비는 <b>굶어서</b> 서 있습니다.
+            </p>
+          )}
+        </>
+      )}
+
+      <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+        재료는 <b className="text-ink3">만드는 순간</b>에 없어집니다 — 불량품도 재료를 먹습니다.
+        <br />설비는 출력 버퍼를 두지 않습니다. 벨트에 올라타거나 카트가 가져가는{' '}
+        <b className="text-ink3">그만큼만</b> 만듭니다.
+        <br />공정 <b className="text-ink3">순서는 따로 적지 않습니다</b> — 벨트가 이미 그 말을
+        하고 있고, 표를 하나 더 두면 도면과 어긋날 수 있습니다.
+      </p>
+    </Section>
+  );
+}
+
 function EquipmentPanel({ placed }) {
   const { state, dispatch, itemOf } = useEditor();
   const beltSpeed = state.beltSpeed;
@@ -222,6 +386,8 @@ function EquipmentPanel({ placed }) {
         <Row label="ID">{placed.uid}</Row>
         <EquipUptime uid={placed.uid} />
       </Section>
+
+      <RecipeSection placed={placed} item={item} />
 
       <FaultFields placed={placed} />
 
@@ -695,6 +861,9 @@ function CartPanel({ cart }) {
     () => (path ? cartStations(path, state.placed, itemOf, { loadOnly: isTruck(item), roles: cart.roles }) : []),
     [path, state.placed, itemOf, version, item, cart.roles],
   );
+  /* 앞차와 지키는 간격 — 씬과 같은 규칙으로 잰다(차체 길이 + 여유) */
+  const spec = item?.modelKey ? getSpec(item.modelKey) : null;
+  const gap = (spec?.bbox?.size?.[(spec?.connector?.axis ?? 'z') === 'z' ? 2 : 0] ?? 2.2) + CART_MARGIN;
 
   /** 역 하나의 역할을 자동 → 싣기 → 내리기 → 자동 으로 돌린다 */
   const cycleRole = (key) => {
@@ -740,6 +909,15 @@ function CartPanel({ cart }) {
         <Row label="경로 길이">{path ? `${path.length.toFixed(2)} m` : '—'}</Row>
         <Row label="경유점">{cart.points.length} 개</Row>
         <Row label="주행 방식">{cart.closed ? '고리 (계속 순환)' : '왕복'}</Row>
+        {/* 차끼리 겹치지 못하게 막고 나면 짧은 경로에 여러 대를 올릴 수 없다.
+            얼어붙고 나서 이유를 찾게 두지 않는다 */}
+        {path && !fleetFits(path.length, cart.count ?? 1, gap).fits && (
+          <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+            경로가 짧아 {cart.count} 대가 다 못 돕니다 — 차끼리 겹칠 수 없어 서로 막습니다.
+            최소 <b>{fleetFits(path.length, cart.count ?? 1, gap).need.toFixed(1)} m</b> 가
+            필요합니다(차체 {(gap - CART_MARGIN).toFixed(1)} m + 여유).
+          </p>
+        )}
       </Section>
 
       {/* 한 번에 몇 개를 실을지는 **차가** 정한다 — 선반·적치대는 얼마든지 내줄
@@ -1948,11 +2126,30 @@ function RunReport() {
 
   if (ran <= 0) return null;
 
-  /* 막힌 적이 있는 설비만, 오래 막힌 순서로 */
+  /**
+   * 선 적이 있는 설비만, **많이 잃은 순서**로.
+   * -------------------------------------------------------------------------
+   *  예전에는 막힌 시간만 세고 그것으로 순위를 매겼다. 이제 서는 이유가 둘이라
+   *  (막힘 · 굶음) 막힌 시간만으로 줄을 세우면, 라인 전체가 굶어 서 있는 도면이
+   *  "아무 문제 없음" 으로 나온다 — 가장 심하게 놀고 있을 때 표가 가장 조용하다.
+   *  잃은 시간은 합쳐서 줄을 세우고, **어느 쪽으로 잃었는지는 줄마다 적는다.**
+   */
+  const starved = getStarved();
   const rows = state.placed
-    .map((p) => ({ uid: p.uid, name: p.name ?? p.uid, sec: blocked[p.uid] ?? 0, up: uptimeOf(p.uid) }))
-    .filter((r) => r.sec > 0)
-    .sort((a, b) => a.up - b.up);
+    .map((p) => {
+      const sec = blocked[p.uid] ?? 0;
+      const starve = starved[p.uid] ?? 0;
+      return {
+        uid: p.uid,
+        name: p.name ?? p.uid,
+        sec,
+        starve,
+        run: Math.max(0, 1 - Math.min(1, (sec + starve) / ran)),
+      };
+    })
+    .filter((r) => r.sec > LOSS_FLOOR || r.starve > LOSS_FLOOR)
+    .sort((a, b) => a.run - b.run);
+  const split = lossSplit();
 
   return (
     <Section
@@ -1979,7 +2176,7 @@ function RunReport() {
           <div className="mb-1 flex gap-1 text-[10px]">
             {[
               ['가동률', overall.availability, '고장으로 못 돈 시간 — 정비로 푼다'],
-              ['성능', overall.performance, '막혀서 못 돈 시간 — 배치로 푼다'],
+              ['성능', overall.performance, '막혀서·굶어서 못 돈 시간 — 배치로 푼다'],
               ['양품률', overall.quality, '만들었지만 못 쓰는 것 — 공정으로 푼다'],
             ].map(([label, v, why]) => (
               <div key={label} className="flex-1 rounded bg-raise px-1.5 py-1 text-center ring-1 ring-edge" title={why}>
@@ -1997,37 +2194,163 @@ function RunReport() {
         <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
           {state.placed.length === 0
             ? '아직 설비가 없습니다.'
-            : '막혀 선 설비가 없습니다 — 라인이 흐르고 있습니다.'}
+            : '서 있는 설비가 없습니다 — 라인이 흐르고 있습니다.'}
         </p>
       ) : (
         <>
-          <p className="mb-1 mt-2 text-[10.5px] text-ink4">가동률 (낮은 순)</p>
+          <p className="mb-1 mt-2 text-[10.5px] text-ink4">돈 시간 (낮은 순)</p>
           <ul className="space-y-1">
             {rows.map((r) => (
               <li key={r.uid} className="text-[11px]">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-ink2">{r.name}</span>
-                  <b className={`shrink-0 tabular-nums ${r.up < 0.5 ? 'text-rose-500' : r.up < 0.85 ? 'text-amber-600' : 'text-ink2'}`}>
-                    {(r.up * 100).toFixed(0)}%
+                  <b className={`shrink-0 tabular-nums ${r.run < 0.5 ? 'text-rose-500' : r.run < 0.85 ? 'text-amber-600' : 'text-ink2'}`}>
+                    {(r.run * 100).toFixed(0)}%
                   </b>
                 </div>
                 {/* 막대가 짧을수록 오래 서 있었다 — 숫자보다 먼저 눈에 들어온다 */}
                 <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-kbd">
                   <div
-                    className={`h-full ${r.up < 0.5 ? 'bg-rose-500' : r.up < 0.85 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                    style={{ width: `${Math.max(2, r.up * 100)}%` }}
+                    className={`h-full ${r.run < 0.5 ? 'bg-rose-500' : r.run < 0.85 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                    style={{ width: `${Math.max(2, r.run * 100)}%` }}
                   />
                 </div>
-                <div className="text-[10px] tabular-nums text-ink4">{formatElapsed(r.sec)} 막힘</div>
+                <div className="text-[10px] tabular-nums text-ink4">
+                  {[
+                    r.sec > LOSS_FLOOR ? `${formatElapsed(r.sec)} 막힘` : null,
+                    r.starve > LOSS_FLOOR ? `${formatElapsed(r.starve)} 굶음` : null,
+                  ].filter(Boolean).join(' · ')}
+                </div>
               </li>
             ))}
           </ul>
+          {/**
+           * 어느 쪽으로 더 잃었는지 한 줄로 못 박는다.
+           * ---------------------------------------------------------------------
+           *  같은 "성능 40%" 라도 처방이 정반대다. 막힘이 많으면 뒤가 못 받는
+           *  것이고(하류를 늘린다), 굶음이 많으면 앞이 못 대는 것이다(상류를
+           *  늘린다). 숫자만 늘어놓고 방향을 안 말하면 반대로 손보게 된다.
+           */}
           <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-            막힘은 <b className="text-ink2">보낼 곳이 가득 차서</b> 선 시간입니다. 맨 위를 풀면
-            그다음이 병목이 됩니다.
+            {split?.starvedMore ? (
+              <>
+                <b className="text-ink2">굶음</b>이 더 큽니다 — 재료가 여기까지 못 옵니다.
+                라인 <b className="text-ink2">앞쪽</b>(투입·앞 공정·나르는 카트)을 늘려야 합니다.
+              </>
+            ) : (
+              <>
+                <b className="text-ink2">막힘</b>이 더 큽니다 — 만들었는데 보낼 곳이 없습니다.
+                라인 <b className="text-ink2">뒤쪽</b>(적치대 수용량·다음 공정·반출)을 늘려야 합니다.
+              </>
+            )}
+            {' '}맨 위를 풀면 그다음이 병목이 됩니다.
           </p>
         </>
       )}
+    </Section>
+  );
+}
+
+/**
+ * 레시피가 말이 되는가 — 도면에서 읽는 라우팅.
+ * ---------------------------------------------------------------------------
+ *  가장 흔한 실수는 **재료가 들어올 길이 없는 조립 설비**다. 그려 놓고 돌리면
+ *  아무 일도 안 일어나는데, 화면만 봐서는 벨트가 왜 안 도는지 알 수 없다 —
+ *  굶어 서 있는 설비와 아직 안 돌린 설비가 똑같이 보이기 때문이다.
+ *
+ *  ── 왜 라우팅 표를 따로 두지 않는가 ──────────────────────────────────────
+ *  "제품 P 는 공정 1 → 2 → 3" 을 따로 적어 두면, 벨트를 하나 옮기는 순간 표와
+ *  도면이 어긋난다. 그리고 어긋났을 때 **어느 쪽이 사실인지 말할 수 없다.**
+ *  여기서는 벨트가 곧 라우팅이므로 적지 않고 읽는다 — 옮기면 같이 옮겨 간다.
+ */
+function BomReport() {
+  const { state, itemOf } = useEditor();
+  const version = useModelsVersion();
+
+  const { warnings, finals } = useMemo(() => {
+    const byUid = new Map(state.placed.map((p) => [p.uid, p]));
+    const edges = flowEdges(state.links, byUid, itemOf);
+
+    /* 카트가 내려놓는 역이 붙은 설비는 진단에서 뺀다 — 카트는 무엇이든 실어 올
+       수 있어서 무엇이 올지 도면만으로는 단정할 수 없다. 단정할 수 없는 것을
+       경고로 만들면 멀쩡한 도면이 붉어진다. */
+    const cartFed = new Set();
+    for (const c of state.carts) {
+      const path = cartPath(c);
+      if (!path) continue;
+      const opt = { loadOnly: isTruck(itemOf(c.itemId)), roles: c.roles };
+      for (const st of cartStations(path, state.placed, itemOf, opt)) {
+        if (st.kind === 'unload') cartFed.add(st.uid);
+      }
+    }
+
+    const nodes = state.placed
+      .filter((p) => {
+        const it = itemOf(p.itemId);
+        return !isShelf(it) && !isStillage(it);
+      })
+      .map((p) => ({
+        uid: p.uid,
+        name: p.name ?? p.uid,
+        recipe: recipeOf(p),
+        cartFed: cartFed.has(p.uid),
+      }));
+
+    /* 완제품 — 만든 것을 **다른 설비가 재료로 쓰지 않는** 자리. 여기서부터
+       거슬러 올라가야 "이거 하나에 원자재가 몇 개" 가 나온다. */
+    const feeds = new Set();
+    for (const e of edges) {
+      const r = recipeOf(byUid.get(e.to));
+      if (!isSource(r) && r.in.some((x) => x.kind === e.kind)) feeds.add(e.from);
+    }
+
+    return {
+      warnings: auditRecipes(nodes, edges),
+      finals: nodes
+        .filter((n) => !isSource(n.recipe) && !feeds.has(n.uid))
+        .map((n) => ({ ...n, ...explode(n.uid, byUid, edges) })),
+    };
+  }, [state.placed, state.links, state.carts, itemOf, version]);
+
+  if (!warnings.length && !finals.length) return null;
+
+  return (
+    <Section title="레시피">
+      {warnings.map((w) => (
+        <p
+          key={`${w.uid}:${w.kind}`}
+          className="mb-1 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25"
+        >
+          <b>{w.name}</b> 은 <b>{PAYLOAD_ITEMS[w.kind]?.name ?? w.kind}</b> 가 필요한데{' '}
+          {w.reason === 'none'
+            ? '들어오는 컨베이어가 없습니다.'
+            : '들어오는 컨베이어가 다른 것을 실어 옵니다.'}
+          {' '}이대로 돌리면 이 설비는 영영 굶습니다.
+        </p>
+      ))}
+
+      {finals.map((f) => {
+        const raw = Object.entries(f.raw);
+        if (!raw.length) return null;
+        return (
+          <div key={f.uid} className="py-1">
+            <p className="text-[11px] text-ink2">{f.name} — 완성품 1개당 원자재</p>
+            <ul className="mt-0.5 space-y-0.5">
+              {raw.map(([kind, n]) => (
+                <li key={kind} className="flex items-center justify-between gap-2 text-[11px]">
+                  <KindChip kind={kind} />
+                  <b className="shrink-0 tabular-nums text-ink">{n} 개</b>
+                </li>
+              ))}
+            </ul>
+            {f.looped && (
+              <p className="mt-0.5 text-[10px] text-amber-600">
+                자기 자신으로 돌아오는 고리가 있어 거기서 세는 것을 멈췄습니다.
+              </p>
+            )}
+          </div>
+        );
+      })}
     </Section>
   );
 }
@@ -2063,6 +2386,8 @@ function Summary() {
           <Row key={kind} label={`· ${PAYLOAD_ITEMS[kind]?.name ?? kind}`}>{n} 개</Row>
         ))}
       </Section>
+
+      <BomReport />
 
       <RunReport />
 

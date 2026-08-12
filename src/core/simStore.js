@@ -123,6 +123,39 @@ export function takeLots(uid, amount, kind = null) {
 export const takeStock = (uid, amount) => takeLots(uid, amount).length;
 
 /**
+ * 여러 종류를 **한꺼번에, 전부 아니면 아무것도** 가져간다 (조립 설비의 재료 소비).
+ * ---------------------------------------------------------------------------
+ *  레시피가 "A 2개 + B 1개" 라면, A 는 있는데 B 가 없을 때 **A 를 먹으면 안 된다.**
+ *  먹어 놓고 못 만들면 그 A 는 어디에도 없이 사라진다 — 라인을 오래 돌릴수록
+ *  재료가 조용히 새고, 처리량이 왜 안 나오는지 도면 어디에도 단서가 남지 않는다.
+ *  그래서 먼저 세어 보고, 다 있을 때만 손을 댄다.
+ *
+ *  빼는 순서는 `takeLots` 와 같다 — **위에서부터**. 집는 순서가 그렇다.
+ *
+ *  @param need { 종류: 개수 }
+ *  @returns 가져갔으면 true, 하나라도 모자라면 false (재고는 그대로)
+ */
+export function takeEach(uid, need) {
+  const rows = Object.entries(need ?? {}).filter(([, n]) => n > 0);
+  if (!rows.length) return true;                 // 먹을 것이 없다 (원자재 공급원)
+
+  const cur = getLots(uid);
+  const have = {};
+  for (const k of cur) have[k] = (have[k] ?? 0) + 1;
+  for (const [kind, n] of rows) if ((have[kind] ?? 0) < n) return false;
+
+  const rest = Object.fromEntries(rows);
+  const left = [];
+  for (let i = cur.length - 1; i >= 0; i--) {
+    const k = cur[i];
+    if (rest[k] > 0) { rest[k]--; continue; }
+    left.push(k);
+  }
+  commit(uid, left.reverse());                   // 위에서부터 훑었으니 되돌린다
+  return true;
+}
+
+/**
  * 수용량을 넘은 재고를 잘라 낸다.
  *  길이나 단 수를 줄이면 수용량이 줄어드는데, 이미 쌓여 있던 값이 그대로면
  *  "54 / 27" 처럼 말이 안 되는 표시가 남는다. 위에서부터 덜어 낸다.

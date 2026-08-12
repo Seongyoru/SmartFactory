@@ -85,11 +85,14 @@ import EditHandles from './EditHandles.jsx';
 import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
-import { addStock, getStock, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
+import { addStock, getLots, getStock, shippedTotal, takeEach, useAllStock, useShipped } from '../core/simStore.js';
 import { tick } from '../core/clock.js';
 import { accumulate } from '../core/metrics.js';
 import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
-import { isShelf, isStillage, isTruck, isUtility, payloadKeyOf, payloadOf } from '../data/library.js';
+import { isShelf, isStillage, isTruck, isUtility, payloadByKey } from '../data/library.js';
+import {
+  buildableCount, countKinds, inputCapOf, isSource, needFor, outputKindOf, recipeOf,
+} from '../core/bom.js';
 import ShelfView from './ShelfView.jsx';
 import StillageView from './StillageView.jsx';
 import ZoneMarks from './ZoneMarks.jsx';
@@ -111,7 +114,7 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, equips }) {
+function SimClock({ running, halted, jammed, starved, equips }) {
   const shipped = shippedTotal(useShipped());
   useFrame((_, real) => {
     const dt = tick(real, running);
@@ -121,15 +124,26 @@ function SimClock({ running, halted, equips }) {
     const nowDown = stepFaults(dt, equips);
 
     /**
-     * 막힘과 고장은 **겹쳐 세면 안 된다.**
+     * 서 있는 이유는 **한 프레임에 하나만** 센다.
      * -----------------------------------------------------------------------
-     *  고장 난 설비는 halted 목록에도 들어 있다(벨트를 세워야 하므로). 그대로
-     *  적분하면 같은 시간을 두 번 빼서 가동률과 성능이 함께 깎이고, 둘을 나눠
-     *  세는 뜻이 사라진다. 고장 중인 시간은 고장 쪽에만 넣는다.
+     *  한 설비가 동시에 여러 목록에 들어갈 수 있다. 고장 난 설비는 벨트를 세워야
+     *  하니 halted 에도 있고, 막힌 설비가 마침 재료도 없을 수 있다. 그대로 다
+     *  적분하면 같은 시간을 두 번 빼서 지표가 함께 깎이고, 이유를 나눠 세는 뜻이
+     *  사라진다.
+     *
+     *  순서는 **고칠 수 있는 것이 앞**이다. 고장 중에는 재료가 있든 없든 못 도니
+     *  고장이 먼저고, 보낼 곳이 없으면 재료가 와도 못 도니 막힘이 그다음이다.
+     *  굶음은 앞의 둘 중 어느 것도 아닐 때만 굶음이다.
      */
     const blockedOnly = new Set();
-    for (const uid of halted) if (!nowDown.has(uid)) blockedOnly.add(uid);
-    accumulate(dt, blockedOnly, shipped);
+    const starvedOnly = new Set();
+    for (const uid of halted) {
+      if (nowDown.has(uid)) continue;
+      if (jammed?.has(uid)) blockedOnly.add(uid);
+      else if (starved?.has(uid)) starvedOnly.add(uid);
+      else blockedOnly.add(uid);
+    }
+    accumulate(dt, blockedOnly, shipped, starvedOnly);
   });
   return null;
 }
@@ -677,51 +691,106 @@ function SceneContent() {
           if (!ep?.uid || ep.anchor || ep.link) return null;
           const owner = placed.find((x) => x.uid === ep.uid);
           if (!owner) return null;
-          /* 이 벨트가 어디로 들어가는가 — 종점이 스틸리지면 자재가 거기 쌓인다 */
+
+          /**
+           * 이 벨트가 어디로 들어가는가 — 자재가 **쌓이는 자리**를 찾는다.
+           * -------------------------------------------------------------------
+           *  적치대는 예전부터 그랬다. 이제 **재료를 먹는 설비**도 같다 —
+           *  들어온 것이 그 설비의 입력 버퍼에 쌓이고, 거기서 레시피대로 빠진다.
+           *
+           *  레시피가 없는 설비로 보내면 예전처럼 **그냥 사라진다.** 여기에 다
+           *  쌓기 시작하면 이미 그린 도면들이 어느 날 갑자기 버퍼가 차서 서게
+           *  된다 — 먹지 않는 설비에 쌓아 둘 이유도 없다.
+           */
           const dest = link.to?.uid ? placed.find((x) => x.uid === link.to.uid) : null;
-          const sink = dest && isStillage(itemOf(dest.itemId)) ? dest : null;
-          return { link, path, owner, sink };
+          let sink = null;
+          if (dest && isStillage(itemOf(dest.itemId))) {
+            sink = { uid: dest.uid, cap: stillageCapacity(dest) };
+          } else if (dest && !isSource(recipeOf(dest))) {
+            sink = { uid: dest.uid, cap: inputCapOf(dest) };
+          }
+
+          /* 이 벨트에 흐르는 것은 **출발 설비가 만드는 것**이다.
+             레시피가 산출 종류를 정했으면 그것, 아니면 라이브러리 항목의 payload. */
+          const recipe = recipeOf(owner);
+          return { link, path, owner, sink, recipe, outKind: outputKindOf(owner, itemOf(owner.itemId)) };
         })
         .filter(Boolean),
     [linkPaths, itemOf, placed],
   );
 
   /**
-   * 가득 찬 스틸리지 때문에 멈춘 것들.
+   * 서 있는 것들 — 그리고 **왜** 서 있는가.
    * -------------------------------------------------------------------------
-   *  라인이 서는 이유는 하나뿐이다 — 종점이 다 찼다. 그 사실을 벨트에도(멈춤),
-   *  그 벨트를 먹이던 설비에도(정지 표시) 알려야 도면만 보고 원인을 짚을 수 있다.
-   *  재고는 도면이 아니라 시뮬레이션 값이라 simStore 에서 읽는다.
+   *  설비가 서는 이유는 이제 셋이다. 화면에서 벌어지는 일은 같지만(붉게 서고
+   *  벨트도 선다) 푸는 방법이 다르고, 무엇보다 **전파 방향이 다르다.**
+   *
+   *    고장(down)     설비 자체가 못 돈다        → 정비로 푼다
+   *    막힘(jammed)   보낼 곳이 가득 찼다        → **상류**로 번진다
+   *    굶음(starved)  먹을 재료가 없다           → **하류**로 번진다
+   *
+   *  막힘과 굶음을 한 목록에 담아 상류 전파를 태우면 **교착이 난다.** 굶은 설비로
+   *  들어가는 벨트까지 세워 버리면, 재료를 실어다 줄 바로 그 벨트가 멈춘 채
+   *  영영 풀리지 않는다 — 굶주림은 "못 받는 상태" 가 아니라 "아직 안 온 상태" 다.
+   *  그래서 전파의 씨앗은 `jammed` 뿐이고, 굶음은 자기 유출 벨트만 세운다.
+   *  (하류로는 저절로 번진다 — 아무것도 안 오면 다음 설비도 스스로 굶는다)
    */
   const halted = useMemo(() => {
     const links = new Set();
     const equips = new Set();
+    /** 받을 수 없는 설비 — 상류 전파의 씨앗 (고장 · 막힘) */
+    const jammed = new Set();
+    /** 재료가 없어 서 있는 설비 — 지표에서 막힘과 갈라 센다 */
+    const starved = new Set();
 
     /**
      * ⓪ 고장 난 설비.
      * -----------------------------------------------------------------------
-     *  서는 이유가 하나 더 생겼다. 막힘은 배치를 고쳐 풀 수 있지만 고장은 설비
-     *  자체의 성질이라, 지표에서는 갈라 센다(SimClock). 다만 **화면에서 벌어지는
-     *  일은 같다** — 그 설비가 서고, 내보내던 벨트도 선다. 그래서 여기서는 같은
-     *  목록에 넣고, 아래의 상류 전파도 그대로 태운다.
+     *  막힘은 배치를 고쳐 풀 수 있지만 고장은 설비 자체의 성질이라, 지표에서는
+     *  갈라 센다(SimClock). 다만 화면에서 벌어지는 일은 같고, 고장 난 설비는
+     *  실제로 **받지도 못하므로** 상류 전파도 그대로 태운다.
      */
-    for (const uid of Object.keys(downMap)) equips.add(uid);
+    for (const uid of Object.keys(downMap)) { equips.add(uid); jammed.add(uid); }
     for (const f of beltFlows) if (downMap[f.owner.uid]) links.add(f.link.uid);
 
-    /* ① 가득 찬 적치대로 들어가는 벨트와, 그 벨트를 먹이던 설비 */
+    /* ① 가득 찬 종점(적치대 · 설비 입력 버퍼)으로 들어가는 벨트와, 그 벨트를
+       먹이던 설비. 두 종점이 같은 규칙을 따른다 — 자리가 없으면 못 받는다. */
     for (const f of beltFlows) {
       if (!f.sink) continue;
-      if (getStock(f.sink.uid) < stillageCapacity(f.sink)) continue;
+      if (getStock(f.sink.uid) < f.sink.cap) continue;
       links.add(f.link.uid);
       equips.add(f.owner.uid);
+      jammed.add(f.owner.uid);
     }
+
+    /**
+     * ①' 재료가 모자란 설비.
+     * -----------------------------------------------------------------------
+     *  벨트 한 덩어리는 `outputCount` 층이다. 한 덩어리를 만들 재료가 없으면 그
+     *  설비는 이번 순간 아무것도 못 낸다.
+     *
+     *  벨트를 물리지 않은 설비(카트만 드나드는 자리)도 함께 본다 — 굶은 것은
+     *  벨트가 있고 없고의 문제가 아니라 그 설비의 상태다. 정지 표시가 안 뜨면
+     *  카트가 왜 빈손으로 지나가는지 도면에서 읽을 수 없다.
+     */
+    for (const p of placed) {
+      const item = itemOf(p.itemId);
+      if (isShelf(item) || isStillage(item)) continue;
+      const recipe = recipeOf(p);
+      if (isSource(recipe)) continue;
+      const per = Math.max(1, p.outputCount ?? 3);
+      if (buildableCount(countKinds(getLots(p.uid)), recipe) >= per) continue;
+      equips.add(p.uid);
+      starved.add(p.uid);
+    }
+    for (const f of beltFlows) if (starved.has(f.owner.uid)) links.add(f.link.uid);
 
     /**
      * ② 상류로 거슬러 올라간다.
      * -----------------------------------------------------------------------
-     *  멈춘 설비는 더 이상 받지 못한다. 그러면 **그 설비로 들어가던 벨트**도 설
-     *  자리가 없고, 그 벨트를 먹이던 앞 설비도 함께 선다. 실제 라인에서 적치대
-     *  하나가 차면 그 앞 공정이 줄줄이 서는 것과 같다.
+     *  받지 못하는 설비가 있으면 **그 설비로 들어가던 벨트**도 설 자리가 없고,
+     *  그 벨트를 먹이던 앞 설비도 함께 선다. 실제 라인에서 적치대 하나가 차면
+     *  그 앞 공정이 줄줄이 서는 것과 같다.
      *
      *  바로 앞 한 대만 세우면 그 뒤 설비들이 계속 자재를 밀어 넣어, 갈 곳 없는
      *  물건이 벨트 위에 계속 흐르는 그림이 된다.
@@ -735,14 +804,15 @@ function SceneContent() {
       for (const f of beltFlows) {
         if (links.has(f.link.uid)) continue;
         const dest = f.link.to?.uid;
-        if (!dest || !equips.has(dest)) continue;
+        if (!dest || !jammed.has(dest)) continue;
         links.add(f.link.uid);
         equips.add(f.owner.uid);
+        jammed.add(f.owner.uid);
         grew = true;
       }
     }
-    return { links, equips };
-  }, [beltFlows, stockVersion, downMap]);
+    return { links, equips, jammed, starved };
+  }, [beltFlows, placed, itemOf, stockVersion, downMap]);
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
   const cartPaths = useMemo(
@@ -1836,7 +1906,13 @@ function SceneContent() {
 
   return (
     <>
-      <SimClock running={state.running} halted={halted.equips} equips={faultParams} />
+      <SimClock
+        running={state.running}
+        halted={halted.equips}
+        jammed={halted.jammed}
+        starved={halted.starved}
+        equips={faultParams}
+      />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />
       <CameraRig view={view} key={view} />
@@ -2013,22 +2089,43 @@ function SceneContent() {
       {/* 비어 있는 설비 포트의 입출고 표시 (선반은 ShelfView 가 직접 그린다) */}
       <ZoneMarks zones={openPortZones} />
 
-      {/* 벨트 위를 흐르는 반송물 — 종점(스틸리지)이 가득 차면 선다 */}
-      {beltFlows.map(({ link, path, owner, sink }) => (
+      {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차거나 재료가 떨어지면 선다 */}
+      {beltFlows.map(({ link, path, owner, sink, recipe, outKind }) => (
         <BeltItems
           key={`f${link.uid}`}
           path={path}
           speed={link.speed ?? state.beltSpeed}
           gap={owner.spawnGap ?? 3}
           layers={owner.outputCount ?? 3}
-          payload={payloadOf(itemOf(owner.itemId))}
+          payload={payloadByKey(outKind)}
           running={state.running && !halted.links.has(link.uid)}
+          /**
+           * 한 덩어리가 벨트에 올라탈 때 — **재료를 여기서 낸다.**
+           * -----------------------------------------------------------------
+           *  만드는 순간에 재료가 없어지는 것이 맞다. 도착할 때 내면 아직 재료가
+           *  없는 설비도 일단 벨트를 채우고 나중에 값을 치르게 되어, 있지도 않은
+           *  재고를 마이너스로 끌어 쓰게 된다.
+           *
+           *  불량품도 재료를 먹는다 — 불량은 만들고 나서 걸러지는 것이지, 재료를
+           *  안 쓰고 나오는 것이 아니다. 그래서 여기서는 `screen` 을 보지 않는다.
+           *
+           *  낸 만큼만 돌려주면 벨트가 그 자리에서 선다. 위의 「굶음」 판정이
+           *  이미 벨트를 세워 두므로 여기까지 오는 일은 드물지만(카트가 마지막
+           *  한 개를 가져간 바로 그 프레임), 그 한 프레임에 공짜로 만들어지는
+           *  것을 막는 자리가 여기다.
+           */
+          onSpawn={recipe && !isSource(recipe) ? (n) => {
+            const per = needFor(recipe, Math.max(1, owner.outputCount ?? 3));
+            let paid = 0;
+            while (paid < n && takeEach(owner.uid, per)) paid++;
+            return paid;
+          } : null}
           /* 종점에 닿은 한 덩어리가 곧 재고 한 묶음이 된다 */
           onArrive={sink ? (n) => {
             /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
                적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다. */
             const good = screen(n, owner.scrapRate ?? 0);
-            if (good > 0) addStock(sink.uid, good, stillageCapacity(sink), payloadKeyOf(itemOf(owner.itemId)));
+            if (good > 0) addStock(sink.uid, good, sink.cap, outKind);
           } : null}
         />
       ))}

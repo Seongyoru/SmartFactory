@@ -23,7 +23,9 @@ export function usePayloadSpecs() {
 
   useEffect(() => {
     for (const it of Object.values(PAYLOAD_ITEMS)) {
-      if (!getSpec(it.modelKey)) loadModel(it.modelKey, { url: it.url, merge: it.merge }).catch(() => {});
+      if (!getSpec(it.modelKey)) {
+        loadModel(it.modelKey, { url: it.url, merge: it.merge, tint: it.tint }).catch(() => {});
+      }
     }
   }, []);
 

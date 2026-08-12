@@ -99,6 +99,32 @@ function mergeByMaterial(scene) {
   return out;
 }
 
+/**
+ * =============================================================================
+ *  색만 다른 변형 — 모델 하나로 여러 종류를 만든다
+ * =============================================================================
+ *  조립(BOM)을 하려면 "A 2개 + B 1개 → C 1개" 처럼 반송물이 최소 셋은 있어야
+ *  한다. 그런데 모델러가 준 반송물 GLB 는 둘뿐이다. 종류를 하나 더 만들자고
+ *  모델을 새로 그리라고 할 일은 아니라서, **같은 형상을 색만 바꿔** 쓴다.
+ *
+ *  캐시 키가 URL 과 따로 놀 수 있다는 점을 그대로 이용한다 — 키를 다르게 주면
+ *  같은 파일을 한 번 더 읽어 **독립된 재질**을 가진 사본이 생긴다. 재질을
+ *  공유하지 않으므로 한쪽을 물들여도 다른 쪽 색이 따라 변하지 않는다.
+ *  (반송물은 24 KB · 256² 라 사본 하나가 늘어도 비용이 사실상 없다)
+ *
+ *  색은 텍스처에 **곱해진다.** 그래서 밑바탕이 밝은 회색인 모델에서만 뜻대로
+ *  나온다 — 노란 모델을 빨갛게 물들이면 탁한 주황이 될 뿐이다. 새 종류를 만들
+ *  때는 회색 모델(OBJ_1)을 밑바탕으로 삼을 것.
+ */
+function applyTint(scene, tint) {
+  const color = new THREE.Color(tint);
+  scene.traverse((n) => {
+    if (!n.isMesh || !n.material || Array.isArray(n.material)) return;
+    n.material = n.material.clone();
+    n.material.color = color.clone();
+  });
+}
+
 function buildSpec(key, gltf, opts = {}) {
   let scene = gltf.scene ?? gltf.scenes[0];
   scene.updateMatrixWorld(true);
@@ -109,6 +135,10 @@ function buildSpec(key, gltf, opts = {}) {
     const merged = mergeByMaterial(scene);
     if (merged) scene = merged;
   }
+
+  /* 색 변형은 합치기 **뒤**에 건다 — 합치기는 재질이 같은 조각을 한 덩어리로
+     모으는 일이라, 먼저 물들이면 재질이 갈려 합칠 것이 없어진다. */
+  if (opts.tint) applyTint(scene, opts.tint);
 
   /* CAD 익스포트는 얇은 판재가 많아 뒷면이 뚫려 보인다. 양면 렌더로 고정.
      머티리얼이 없는 모델(테스트 모델처럼)에는 기본 회색 재질을 물려 준다. */
@@ -135,8 +165,10 @@ function buildSpec(key, gltf, opts = {}) {
  * URL 또는 ArrayBuffer 로 모델을 로드한다. 같은 key 는 한 번만 로드.
  *  @param merge 재질이 같은 조각들을 한 메시로 합칠지 (mergeByMaterial 참고).
  *               이름으로 찾는 노드가 없는 모델에만 켤 것.
+ *  @param tint  같은 파일을 색만 바꿔 쓸 때의 색 (applyTint 참고). 이때 key 는
+ *               URL 과 달라야 원본과 따로 캐시된다.
  */
-export function loadModel(key, { url = null, buffer = null, axis = null, merge = false } = {}) {
+export function loadModel(key, { url = null, buffer = null, axis = null, merge = false, tint = null } = {}) {
   const hit = cache.get(key);
   if (hit?.promise) return hit.promise;
 
@@ -144,7 +176,7 @@ export function loadModel(key, { url = null, buffer = null, axis = null, merge =
   const promise = new Promise((resolve, reject) => {
     const onDone = (gltf) => {
       try {
-        entry.spec = buildSpec(key, gltf, { axis, merge });
+        entry.spec = buildSpec(key, gltf, { axis, merge, tint });
         entry.status = 'ready';
         notify();
         resolve(entry.spec);
@@ -203,9 +235,11 @@ export function useModelSpec(item) {
   useEffect(() => {
     if (!key) return;
     if (!cache.has(key)) {
-      loadModel(key, { url: item.url, buffer: item.buffer, axis: item.axis, merge: item.merge }).catch(() => {});
+      loadModel(key, {
+        url: item.url, buffer: item.buffer, axis: item.axis, merge: item.merge, tint: item.tint,
+      }).catch(() => {});
     }
-  }, [key, item?.url, item?.buffer, item?.axis, item?.merge]);
+  }, [key, item?.url, item?.buffer, item?.axis, item?.merge, item?.tint]);
 
   if (!key) return null;
   return getSpec(key);

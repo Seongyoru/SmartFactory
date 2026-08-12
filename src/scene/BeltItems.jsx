@@ -33,12 +33,28 @@ const MAX_ITEMS = 60;
  * @param payload 이 벨트에 흐르는 반송물. 설비마다 만들어 내는 물건이 다르므로
  *                무엇이 흐를지는 **내보내는 설비**가 정한다(library 의 payload).
  */
-export default function BeltItems({ path, speed = 0.6, gap = 3, layers = 1, running = true, onArrive = null, payload = PAYLOAD_ITEM }) {
+export default function BeltItems({
+  path,
+  speed = 0.6,
+  gap = 3,
+  layers = 1,
+  running = true,
+  onArrive = null,
+  /**
+   * 한 덩어리가 벨트에 **올라탈** 때. 몇 덩어리가 올라탈지 넘기고, 실제로
+   * 만들어진 덩어리 수를 돌려받는다(조립 설비가 재료를 내는 자리).
+   * 돌려받은 수가 모자라면 그 덩어리가 설 자리 바로 앞에서 벨트가 멈춘다.
+   */
+  onSpawn = null,
+  payload = PAYLOAD_ITEM,
+}) {
   const spec = useModelSpec(payload);
   const offsetRef = useRef(0);
   /* 콜백은 매 렌더 새로 오므로 ref 로 잡아 둔다 — useFrame 을 다시 걸지 않기 위해 */
   const arriveRef = useRef(onArrive);
   arriveRef.current = onArrive;
+  const spawnRef = useRef(onSpawn);
+  spawnRef.current = onSpawn;
   const slotsRef = useRef([]);
 
   const step = Math.max(0.4, gap);
@@ -77,7 +93,27 @@ export default function BeltItems({ path, speed = 0.6, gap = 3, layers = 1, runn
 
     if (running && speed > 0) {
       const prev = offsetRef.current;
-      const next = prev + speed * simStep(dt);
+      let next = prev + speed * simStep(dt);
+
+      /**
+       * 벨트에 새로 올라타는 덩어리 — 만들려면 재료를 내야 한다.
+       * -----------------------------------------------------------------------
+       *  offset 은 [0, 간격) 을 도는 값이라, 한 덩어리가 s = 0 에 새로 올라타는
+       *  순간은 offset 이 간격을 넘어가는 때다. 아직 나눈 나머지를 취하기 전이므로
+       *  `next / 간격` 의 몫이 곧 이번 프레임에 올라탄 개수다(빠른 벨트·긴 프레임
+       *  에서는 둘 이상일 수 있다).
+       *
+       *  낸 만큼만 나아간다. 값을 못 치른 덩어리가 설 자리 **바로 앞**에 세우면,
+       *  재료가 들어오는 순간 그 자리에서 이어서 간다 — 되돌리거나 건너뛰지
+       *  않으므로 줄 간격이 흐트러지지 않는다.
+       */
+      if (spawnRef.current) {
+        const spawns = Math.floor(next / step);
+        if (spawns > 0) {
+          const paid = Math.max(0, Math.min(spawns, spawnRef.current(spawns) ?? 0));
+          if (paid < spawns) next = Math.min(next, (paid + 1) * step - 1e-6);
+        }
+      }
 
       /**
        * 물건이 벨트 끝을 넘어가는 순간을 잡는다.

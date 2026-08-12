@@ -26,8 +26,31 @@ import { downTimeOf, quality } from './faults.js';
 const SAMPLE_SEC = 10;
 const MAX_SAMPLES = 360;
 
+/**
+ * 표에 올릴 만한 최소 정지 시간(초).
+ * ---------------------------------------------------------------------------
+ *  라인이 도는 동안 버퍼가 잠깐 찼다 비는 일은 늘 있다. 그 0.2초까지 줄을 세우면
+ *  「0초 막힘」 이라고 적힌 행이 목록을 채운다 — 초 단위로 반올림해 보여 주므로
+ *  숫자가 0 으로 나오고, 읽는 사람에게는 고장 난 표로 보인다. 값은 그대로 쌓되
+ *  **보여 줄 때만** 이 아래를 걸러 낸다.
+ */
+export const LOSS_FLOOR = 0.5;
+
 let ran = 0;                 // 시뮬레이션이 실제로 돈 시간(초)
 let blocked = {};            // 설비 uid → 막혀서 서 있던 누적 시간(초)
+/**
+ * 설비 uid → **굶어서** 서 있던 누적 시간(초).
+ * ---------------------------------------------------------------------------
+ *  막힘과 굶음은 잃은 시간의 양이 같아도 **가리키는 방향이 정반대**다.
+ *
+ *    막힘 — 만들었는데 보낼 곳이 없다 → 이 설비가 빠르거나 **하류가 느리다**
+ *    굶음 — 만들 수 있는데 재료가 없다 → 이 설비가 놀거나 **상류가 느리다**
+ *
+ *  한 칸에 합쳐 놓으면 "성능 40%" 라는 같은 숫자를 보고 정반대의 처방을 하게
+ *  된다. 그래서 잃은 시간은 같이 세되(둘 다 P 의 손실이다) 어느 쪽인지는 끝까지
+ *  따로 들고 간다.
+ */
+let starved = {};
 let series = [];             // [{ t, shipped }] — 시간축 추이
 let lastSample = 0;
 
@@ -77,11 +100,13 @@ const subscribe = (f) => {
 };
 
 /**
- * 프레임마다 — 흘린 시뮬 시간과 **지금 막혀 있는 설비들**을 넘긴다.
- *  @param haltedUids Set<uid> · 막혀서 서 있는 설비
- *  @param shipped    지금까지의 출하 총량 (추이 표본용)
+ * 프레임마다 — 흘린 시뮬 시간과 **지금 서 있는 설비들**을 넘긴다.
+ *  @param haltedUids  Set<uid> · 막혀서 서 있는 설비
+ *  @param shipped     지금까지의 출하 총량 (추이 표본용)
+ *  @param starvedUids Set<uid> · 재료가 없어 서 있는 설비. 호출부가 이미 막힘·
+ *                     고장과 겹치지 않게 갈라서 넘긴다(EditorScene 의 SimClock)
  */
-export function accumulate(dt, haltedUids, shipped) {
+export function accumulate(dt, haltedUids, shipped, starvedUids = null) {
   if (!(dt > 0)) return;
   /* 이번 실행의 기준점 — 분자와 분모가 같은 순간에서 출발해야 한다 */
   if (shippedStart === null) shippedStart = shipped ?? 0;
@@ -90,6 +115,11 @@ export function accumulate(dt, haltedUids, shipped) {
     const next = { ...blocked };
     for (const uid of haltedUids) next[uid] = (next[uid] ?? 0) + dt;
     blocked = next;
+  }
+  if (starvedUids?.size) {
+    const next = { ...starved };
+    for (const uid of starvedUids) next[uid] = (next[uid] ?? 0) + dt;
+    starved = next;
   }
 
   /* 추이는 촘촘히 남길 필요가 없다 — 10 시뮬초에 하나면 그래프로 충분하고,
@@ -109,6 +139,7 @@ export function accumulate(dt, haltedUids, shipped) {
 export function resetMetrics() {
   ran = 0;
   blocked = {};
+  starved = {};
   series = [];
   lastSample = 0;
   shippedStart = null;
@@ -118,7 +149,20 @@ export function resetMetrics() {
 
 export const getRan = () => ran;
 export const getBlocked = () => blocked;
+export const getStarved = () => starved;
 export const getSeries = () => series;
+
+/**
+ * 라인 전체가 굶은 시간이 막힌 시간보다 많은가 — "어디를 손볼까" 의 첫 갈림길.
+ *  많이 굶었다면 라인 안이 아니라 **라인 앞**이 모자란 것이다(투입·공급).
+ */
+export function lossSplit() {
+  const sum = (m) => Object.values(m).reduce((s, n) => s + n, 0);
+  const block = sum(blocked);
+  const starve = sum(starved);
+  if (!block && !starve) return null;
+  return { block, starve, starvedMore: starve > block };
+}
 
 /**
  * 설비 하나의 가동률 — 막히지 않고 돈 시간의 비율.
@@ -128,8 +172,13 @@ export const getSeries = () => series;
 export const uptimeOf = (uid) => (ran > 0 ? 1 - Math.min(1, (blocked[uid] ?? 0) / ran) : 1);
 
 /**
- * 병목 — 가장 오래 막혀 있던 설비.
+ * 병목 — 가장 오래 **막혀** 있던 설비.
  *  막힌 시간이 아예 없으면 병목이 없는 것이다(라인이 흐르고 있다).
+ *
+ *  ── 굶은 시간은 병목 판정에 넣지 않는다 ───────────────────────────────────
+ *  굶은 설비는 **피해자**다. 재료가 안 와서 놀고 있는 기계를 병목이라고 지목하면
+ *  손볼 곳을 정확히 반대로 짚는다 — 정작 느린 것은 그 앞이다. 가장 오래 굶은
+ *  설비는 "여기까지 물건이 못 온다" 는 표시일 뿐이라 따로 보여 준다(starvedWorst).
  */
 export function bottleneck() {
   let uid = null;
@@ -139,6 +188,17 @@ export function bottleneck() {
   }
   if (!uid || ran <= 0) return null;
   return { uid, blocked: worst, ratio: Math.min(1, worst / ran) };
+}
+
+/** 가장 오래 굶은 설비 — 자재가 여기까지 못 온다는 표시 */
+export function starvedWorst() {
+  let uid = null;
+  let worst = 0;
+  for (const [k, v] of Object.entries(starved)) {
+    if (v > worst) { worst = v; uid = k; }
+  }
+  if (!uid || ran <= 0) return null;
+  return { uid, starved: worst, ratio: Math.min(1, worst / ran) };
 }
 
 /**
@@ -160,25 +220,36 @@ export function throughput(shipped) {
  *
  *    가동률 A = 1 − 고장으로 선 시간 / 전체 시간
  *               설비 자체가 못 돈 시간. 정비로 푼다
- *    성능   P = 1 − 막혀서 선 시간 / (돌 수 있었던 시간)
- *               돌 수 있었는데 보낼 곳이 없어 못 돈 시간. **배치로 푼다**
+ *    성능   P = 1 − (막힘 + 굶음) / (돌 수 있었던 시간)
+ *               돌 수 있었는데 보낼 곳이 없거나 받을 것이 없어 못 돈 시간
  *    양품률 Q = 1 − 불량 / 만든 것
  *               만들긴 했는데 못 쓰는 것. 공정으로 푼다
  *
  *  성능의 분모가 전체 시간이 아니라 **고장 시간을 뺀 시간**인 것이 중요하다.
  *  고장으로 선 동안은 애초에 돌 수 없었으므로, 그 시간까지 "막혀서 못 돌았다"
- *  로 세면 같은 손실을 두 번 빼게 된다(SimClock 이 둘을 겹치지 않게 나눠 센다).
+ *  로 세면 같은 손실을 두 번 빼게 된다(SimClock 이 셋을 겹치지 않게 나눠 센다).
+ *
+ *  ── 굶음도 성능 손실이다. 다만 처방이 반대다 ─────────────────────────────
+ *  잃은 시간으로 보면 막힘과 굶음은 같다 — 돌 수 있었는데 못 돌았다. 그래서 P
+ *  하나에 함께 넣는다. 하지만 막힘은 **하류를 늘려** 풀고 굶음은 **상류를 늘려**
+ *  푼다. 숫자 하나만 보고는 어느 쪽인지 알 수 없으므로 `blockSec`·`starveSec`
+ *  을 끝까지 따로 들고 가서 화면이 이유를 말할 수 있게 한다.
  */
 export function oeeOf(uid) {
   if (ran <= 0) return null;
   const downSec = downTimeOf(uid);
   const able = Math.max(0, ran - downSec);          // 돌 수 있었던 시간
   const blockSec = Math.min(able, blocked[uid] ?? 0);
+  const starveSec = Math.min(Math.max(0, able - blockSec), starved[uid] ?? 0);
 
   const availability = Math.max(0, 1 - downSec / ran);
-  const performance = able > 0 ? Math.max(0, 1 - blockSec / able) : 1;
+  const performance = able > 0 ? Math.max(0, 1 - (blockSec + starveSec) / able) : 1;
   const q = quality();
-  return { availability, performance, quality: q, oee: availability * performance * q, downSec, blockSec };
+  return {
+    availability, performance, quality: q,
+    oee: availability * performance * q,
+    downSec, blockSec, starveSec,
+  };
 }
 
 /** 라인 전체 — 설비들의 평균. 볼 설비가 없으면 null */

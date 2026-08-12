@@ -16,7 +16,8 @@
 import { buildFreePath } from './routing.js';
 import { allPorts } from './link.js';
 import { PORT_KIND, PORT_ZONE_REACH } from './ports.js';
-import { isShelf, isStillage, payloadKeyOf } from '../data/library.js';
+import { isShelf, isStillage } from '../data/library.js';
+import { inputCapOf, isSource, outputKindOf, recipeOf } from './bom.js';
 import { ZONE, shelfCapacity, shelfZones } from './shelf.js';
 import { stillageCapacity } from './stillage.js';
 import { rotateXZ } from './grid.js';
@@ -129,6 +130,65 @@ export function forgetStation(lastKey, lastS, s, length, closed) {
   return away > STATION_RESET_DIST ? null : lastKey;
 }
 
+/**
+ * 앞차와 지켜야 할 최소 간격 — 차체 길이에 더할 여유(m).
+ *  간격의 바탕은 차체 길이다. 두 대가 붙어 설 수 있는 최소 거리가 곧 차 한 대의
+ *  길이이기 때문이다. 여기에 조금 더 둔다.
+ */
+export const CART_MARGIN = 0.6;
+
+/**
+ * 앞차에 막혀 이번 프레임에 갈 수 있는 거리.
+ * ---------------------------------------------------------------------------
+ *  한 경로에 여러 대를 올리면 **출발할 때만** 등간격이었다(startS 가 경로 길이를
+ *  대수로 나눈다). 그 뒤로는 유지되지 않는다 — 역에서 실제로 주고받은 차만
+ *  `dwell` 만큼 서기 때문에, 선 차는 뒤처지고 뒤차는 그대로 와서 붙는다.
+ *  그런데 붙어도 아무 일이 없었다. 차끼리 판정이 아예 없어서 **서로 겹쳐
+ *  지나갔다.** 화면에서는 몇 대가 한 덩어리로 뭉쳐 다니는 것으로 보인다.
+ *
+ *  실제 AGV 라인에서 이건 그냥 보기 나쁜 것이 아니라 **처리량을 정하는 요소**다.
+ *  앞차가 역에서 서 있으면 뒤차도 못 간다. 그 대기가 없으면 카트를 몇 대든
+ *  올릴수록 처리량이 늘어나는 것으로 나와, 대수를 정하는 데 쓸 수 없는 숫자가
+ *  된다. 그래서 겹치지 못하게 막는다 — 추월도 없다(통로가 하나다).
+ *
+ *  ── 마주 오는 차는 막지 않는다 ───────────────────────────────────────────
+ *  왕복 경로에서는 한 대가 끝에서 돌아서면 두 대가 마주 본다. 그때도 막으면
+ *  둘 다 영영 못 가는 **교착**이 된다(실제 단선 왕복 궤도에서 벌어지는 일이고,
+ *  그래서 현장은 고리를 쓴다). 여기서는 서로 지나가게 두고, 대신 그 사실을
+ *  적어 둔다 — 막을 수 없는 것을 막은 척하는 것보다 낫다.
+ *
+ *  @param me     { s, dir }
+ *  @param others [{ s, dir }, …] — 자기 자신이 섞여 있어도 된다(간격 0 은 건너뛴다)
+ *  @returns 갈 수 있는 거리(m). 앞이 비었으면 Infinity
+ */
+export function followDistance(me, others, { length, closed, gap }) {
+  let room = Infinity;
+  for (const o of others ?? []) {
+    if (!o || o === me) continue;
+    if (o.dir !== me.dir) continue;                 // 마주 오는 차
+    let ahead = (o.s - me.s) * me.dir;
+    if (closed && length > 0) ahead = ((ahead % length) + length) % length;
+    if (ahead <= 1e-6) continue;                    // 뒤에 있거나 같은 자리
+    room = Math.min(room, ahead - gap);
+  }
+  return Math.max(0, room);
+}
+
+/**
+ * 이 경로에 이 대수가 들어가는가.
+ * ---------------------------------------------------------------------------
+ *  차끼리 겹치지 못하게 막고 나면 **짧은 고리에 여러 대를 올릴 수 없다.** 대수 ×
+ *  간격이 경로 길이를 넘으면 모두가 앞차에 막혀 한 대도 못 움직인다 — 실제로도
+ *  그렇지만(그래서 현장은 고리를 길게 잡는다), 화면에서는 그냥 전부 얼어붙은 것
+ *  으로만 보인다. 얼기 전에 미리 말해 줄 수 있어야 한다.
+ *
+ *  @returns { fits, need } — need 는 이 대수가 돌려면 필요한 최소 경로 길이(m)
+ */
+export function fleetFits(length, count, gap) {
+  const need = Math.max(0, count) * Math.max(0, gap);
+  return { fits: !(count > 1) || length > need, need };
+}
+
 export function cartPath(cart) {
   if (!cart?.points || cart.points.length < 2) return null;
   return buildFreePath(cart.points, {
@@ -222,7 +282,18 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false, roles
       name: owner?.name ?? port.uid,
       count: Math.max(0, owner?.outputCount ?? 3),
       /* 이 설비가 만드는 물건 — 카트가 실으면 그대로 따라가서 선반에 쌓인다 */
-      payloadKind: payloadKeyOf(itemOf(owner?.itemId)),
+      payloadKind: outputKindOf(owner, itemOf(owner?.itemId)),
+      /**
+       * 이 설비의 레시피 — 카트가 유입부에 내려놓을 때와 유출부에서 실을 때
+       * 둘 다 필요하다.
+       *   유입부: 이 설비가 **쓰는 종류만** 받는다. 안 쓰는 것을 받아 두면 버퍼가
+       *           영영 안 빠지는 것으로 차서, 멀쩡한 재료가 들어올 자리가 없어진다
+       *   유출부: 실어 갈 만큼의 재료를 실제로 낼 수 있을 때만 싣는다
+       * 원자재 공급원이면 null 이라 예전 그대로 동작한다.
+       */
+      recipe: isSource(recipeOf(owner)) ? null : recipeOf(owner),
+      /** 유입부에 내려놓을 수 있는 양 (입력 버퍼) */
+      capacity: inputCapOf(owner),
     });
   }
 

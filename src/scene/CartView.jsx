@@ -18,9 +18,10 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
-import { forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
+import { CART_MARGIN, followDistance, forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
 import { simStep } from '../core/clock.js';
-import { addLots, addShipped, takeLots } from '../core/simStore.js';
+import { addLots, addShipped, getLots, takeEach, takeLots } from '../core/simStore.js';
+import { buildableCount, countKinds, needFor } from '../core/bom.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
 
@@ -66,7 +67,12 @@ function StationMarks({ path, stations }) {
  * 카트 한 대
  * ======================================================================== */
 
-function CartUnit({ cart, spec, path, stations, running, selected, startS, shipOutside, floor, gates, oneWay, onPointerDown }) {
+function CartUnit({
+  cart, spec, path, stations, running, selected, startS, shipOutside, floor, gates, oneWay,
+  /** 같은 경로 위 모든 차의 자리 — 앞차와 간격을 지키려면 서로를 봐야 한다 */
+  fleet, index, gap,
+  onPointerDown,
+}) {
   const groupRef = useRef(null);
   const sRef = useRef(startS);
   /**
@@ -92,6 +98,11 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
 
   // 대수가 바뀌면 출발 지점을 다시 나눠 갖는다
   useEffect(() => { sRef.current = startS; }, [startS]);
+  /* 첫 프레임 전에도 남들이 내 자리를 볼 수 있어야 한다 — 안 그러면 대수가
+     바뀐 직후 한 프레임 동안 서로가 안 보여 겹친 채로 출발한다 */
+  useEffect(() => {
+    if (fleet) fleet.current[index] = { s: sRef.current, dir: dirRef.current };
+  }, [fleet, index, startS]);
   /* 방향을 뒤집으면 곧바로 반영한다 — 다음 바퀴를 기다리지 않는다.
      (고리는 제자리에서 돌아서고, 끝이 있는 경로는 startS 가 반대쪽 끝으로
       바뀌므로 위의 효과가 자리도 함께 옮긴다) */
@@ -169,13 +180,32 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
       );
       if (!lastKeyRef.current) lastSRef.current = null;
 
+      /**
+       * 앞차와의 간격 — **속도를 깎아서** 지킨다.
+       * ---------------------------------------------------------------------
+       *  움직이고 나서 위치를 되밀면 안 된다. 정차역 판정은 "이번 프레임에
+       *  s0 → s1 사이를 지났는가" 로 하는데, 지나간 뒤 되밀면 밟지도 않은 역을
+       *  들른 것으로 세게 된다. 갈 수 있는 거리를 이번 프레임 시간으로 나눠
+       *  **속도 상한**으로 바꿔 주면, 그 뒤 계산은 전부 그대로 맞는다.
+       *
+       *  앞차의 자리는 최대 한 프레임 묵은 값이다(형제들이 차례로 돈다). 한
+       *  프레임은 길어야 0.1 시뮬초라 간격 여유 안에서 흡수된다.
+       */
+      const me = { s: sRef.current, dir: dirRef.current };
+      const speed = cart.speed ?? 1.4;
+      let capped = speed;
+      if (fleet && gap > 0) {
+        const room = followDistance(me, fleet.current, { length: path.length, closed: cart.closed, gap });
+        if (room !== Infinity && dt > 1e-6) capped = Math.min(speed, room / dt);
+      }
+
       const next = stepCart(
         { s: sRef.current, dir: dirRef.current, pause: pauseRef.current, lastKey: lastKeyRef.current },
         {
           length: path.length,
           closed: cart.closed,
           oneWay,
-          speed: cart.speed ?? 1.4,
+          speed: capped,
           dwell: cart.dwell ?? 1.2,
         },
         stations,
@@ -192,6 +222,8 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
       sRef.current = next.s;
       dirRef.current = next.dir;
       pauseRef.current = next.pause;
+      /* 옮긴 자리를 형제들에게 알린다 — 이 값 하나로 서로 간격을 잰다 */
+      if (fleet) fleet.current[index] = { s: next.s, dir: next.dir };
 
       /* 수량 계산은 여기서 한다 — 선반이 몇 개나 받아 줄지는 재고에 달렸고,
          "실제로 주고받았을 때만" 그 역을 들른 것으로 기록해야 하기 때문이다. */
@@ -242,15 +274,52 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
         } else if (a.kind === 'load') {
           /* 설비에서 싣는 것도 마찬가지다 — "이 종류만 나른다" 고 정해 둔
              카트는 다른 것을 만드는 설비 앞을 그냥 지나간다. */
-          const take = Math.min(a.count, loadRoom(carried, capacity, topUp, a.count));
+          let take = Math.min(a.count, loadRoom(carried, capacity, topUp, a.count));
+          /**
+           * 조립 설비라면 **재료를 내고 받아 간다.**
+           * -------------------------------------------------------------------
+           *  벨트로 나갈 때와 같은 규칙이다(EditorScene 의 onSpawn). 설비는 출력
+           *  버퍼를 따로 두지 않는다 — 만들어 놓고 기다리는 것이 아니라 **가지러
+           *  온 만큼 만든다.** 버퍼를 하나 더 두면 "몇 개가 어디에 있는가" 를 두
+           *  곳에서 세게 되고, 화면에 안 보이는 재고가 생긴다.
+           */
+          if (take > 0 && a.recipe) take = Math.min(take, buildableCount(countKinds(getLots(a.uid)), a.recipe));
           if (take > 0 && (!cart.pickKind || (a.payloadKind ?? 'OBJ') === cart.pickKind)) {
-            setCarried(carried + take);
-            setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind ?? 'OBJ')]);
-            sourceRef.current = a.uid;
-            acted = true;
+            if (!a.recipe || takeEach(a.uid, needFor(a.recipe, take))) {
+              setCarried(carried + take);
+              setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind ?? 'OBJ')]);
+              sourceRef.current = a.uid;
+              acted = true;
+            }
           }
         } else if (a.kind === 'unload') {
-          if (carried > 0) { setCarried(0); setCarriedKinds([]); sourceRef.current = null; acted = true; }
+          /**
+           * 설비 유입부에 내려놓기.
+           * ---------------------------------------------------------------------
+           *  레시피가 있는 설비에는 **실제로 쌓인다** — 그것이 그 설비의 재료다.
+           *  다만 **쓰는 종류만** 받는다. 안 쓰는 것을 받아 두면 그 자리는 영영
+           *  안 빠지고, 정작 필요한 재료가 들어올 자리가 없어져 라인이 조용히
+           *  선다(무엇이 잘못됐는지 화면에 아무 단서도 안 남는다).
+           *
+           *  레시피가 없는 설비에서는 예전 그대로 **사라진다.** 안 먹는 설비에
+           *  쌓아 둘 이유가 없고, 이미 그린 도면이 갑자기 다르게 굴러도 안 된다.
+           */
+          if (carried > 0 && a.recipe) {
+            const wanted = new Set(a.recipe.in.map((r) => r.kind));
+            const ok = [];
+            const no = [];
+            for (const k of carriedKinds) (wanted.has(k) ? ok : no).push(k);
+            const moved = ok.length ? addLots(a.uid, ok, a.capacity) : 0;
+            if (moved > 0) {
+              const left = [...ok.slice(moved), ...no];
+              setCarried(left.length);
+              setCarriedKinds(left);
+              if (!left.length) sourceRef.current = null;
+              acted = true;
+            }
+          } else if (carried > 0) {
+            setCarried(0); setCarriedKinds([]); sourceRef.current = null; acted = true;
+          }
         }
 
         if (acted) {
@@ -367,6 +436,24 @@ export default function CartView({
   const spec = useModelSpec(item);
   const count = Math.max(1, Math.min(20, cart.count ?? 1));
 
+  /**
+   * 한 경로 위 모든 차의 자리 — 서로 겹치지 않으려면 서로를 봐야 한다.
+   * -------------------------------------------------------------------------
+   *  React 상태로 두면 프레임마다 리렌더가 걸린다(차 한 대가 움직일 때마다
+   *  경로·정차역·컨베이어까지 다시 계산된다). 자리는 그리기용 값이 아니라
+   *  계산용 값이므로 ref 로 나눠 갖는다.
+   */
+  const fleet = useRef([]);
+  /* 대수를 줄이면 사라진 차의 자리가 남아 유령 앞차가 된다 */
+  useEffect(() => { fleet.current.length = count; }, [count]);
+
+  /* 최소 간격은 **차체 길이**가 바탕이다 — 두 대가 붙어 설 수 있는 가장 짧은
+     거리가 곧 한 대의 길이다. 트럭(7m 남짓)과 카트(2m 남짓)는 그래서 다르다.
+     모델을 아직 못 읽었으면 카트 크기로 어림잡는다. */
+  const axis = spec?.connector?.axis ?? 'z';
+  const bodyLen = spec?.bbox?.size?.[axis === 'z' ? 2 : 0] ?? 2.2;
+  const gap = bodyLen + CART_MARGIN;
+
   if (!path) return null;
 
   return (
@@ -396,6 +483,9 @@ export default function CartView({
           floor={floor}
           gates={gates}
           oneWay={shipOutside && !cart.closed}
+          fleet={fleet}
+          index={k}
+          gap={gap}
           onPointerDown={onPointerDown}
         />
       ))}
