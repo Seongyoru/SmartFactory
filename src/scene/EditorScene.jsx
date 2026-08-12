@@ -85,19 +85,22 @@ import EditHandles from './EditHandles.jsx';
 import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
-import { addStock, getLots, getStock, shippedTotal, takeEach, useAllStock, useShipped } from '../core/simStore.js';
+import {
+  addLotsShared, addStock, getLots, getStock, shippedTotal, takeEach, useAllStock, useShipped,
+} from '../core/simStore.js';
 import { tick, useElapsed } from '../core/clock.js';
 import { accumulate } from '../core/metrics.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
 import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
 import { isShelf, isStillage, isTruck, isUtility, payloadByKey } from '../data/library.js';
 import {
-  buildableCount, countKinds, inputCapOf, isSource, needFor, outputKindOf, recipeOf,
+  buildableCount, countKinds, inputCapOf, isSource, needFor, outputKindOf, recipeOf, slotShares,
 } from '../core/bom.js';
 import ShelfView from './ShelfView.jsx';
 import StillageView from './StillageView.jsx';
 import ZoneMarks from './ZoneMarks.jsx';
 import WorkerView from './WorkerView.jsx';
+import StockTag from './StockTag.jsx';
 import { sceneTheme } from '../theme.js';
 
 /** 카트 경로를 그릴 때 첫 점을 다시 눌러 고리를 닫는 거리(m) */
@@ -732,17 +735,34 @@ function SceneContent() {
            *  된다 — 먹지 않는 설비에 쌓아 둘 이유도 없다.
            */
           const dest = link.to?.uid ? placed.find((x) => x.uid === link.to.uid) : null;
+          const outKind = outputKindOf(owner, itemOf(owner.itemId));
           let sink = null;
           if (dest && isStillage(itemOf(dest.itemId))) {
-            sink = { uid: dest.uid, cap: stillageCapacity(dest) };
+            /* 적치대는 한 통이다 — 무엇이든 들어오는 대로 쌓인다 */
+            sink = { uid: dest.uid, cap: stillageCapacity(dest), slots: null };
           } else if (dest && !isSource(recipeOf(dest))) {
-            sink = { uid: dest.uid, cap: inputCapOf(dest) };
+            /**
+             * 재료를 먹는 설비 — **자리가 종류마다 정해져 있다.**
+             * ---------------------------------------------------------------
+             *  `slots[outKind]` 이 없으면 그 설비가 **안 쓰는 종류**다. 예전에는
+             *  그래도 받아서 쌓였는데(카트는 걸러 받는데 벨트만 안 걸렀다),
+             *  그러면 쓸모없는 것이 자리를 차지해 라인이 조용히 죽는다.
+             *
+             *  안 받고 **벨트를 세운다.** 자재가 소리 없이 사라지면 도면이
+             *  틀렸다는 사실이 어디에도 안 남는다 — 벨트가 밀려 서 있으면
+             *  "여기 잘못 이었다" 가 눈에 보인다(레시피 진단도 같은 말을 한다).
+             */
+            sink = {
+              uid: dest.uid,
+              cap: inputCapOf(dest),
+              slots: slotShares(recipeOf(dest), inputCapOf(dest)),
+            };
           }
 
           /* 이 벨트에 흐르는 것은 **출발 설비가 만드는 것**이다.
              레시피가 산출 종류를 정했으면 그것, 아니면 라이브러리 항목의 payload. */
           const recipe = recipeOf(owner);
-          return { link, path, owner, sink, recipe, outKind: outputKindOf(owner, itemOf(owner.itemId)) };
+          return { link, path, owner, sink, recipe, outKind };
         })
         .filter(Boolean),
     [linkPaths, itemOf, placed],
@@ -792,11 +812,23 @@ function SceneContent() {
     for (const uid of Object.keys(downMap)) { equips.add(uid); jammed.add(uid); }
     for (const f of beltFlows) if (downMap[f.owner.uid]) links.add(f.link.uid);
 
-    /* ① 가득 찬 종점(적치대 · 설비 입력 버퍼)으로 들어가는 벨트와, 그 벨트를
-       먹이던 설비. 두 종점이 같은 규칙을 따른다 — 자리가 없으면 못 받는다. */
+    /**
+     * ① 자리가 없는 종점으로 들어가는 벨트와, 그 벨트를 먹이던 설비.
+     * -----------------------------------------------------------------------
+     *  적치대는 한 통이라 **전체가 차면** 못 받는다. 재료를 먹는 설비는 자리가
+     *  종류마다 나뉘어 있으므로 **그 종류 몫이 차면** 못 받는다 — 버퍼에 빈칸이
+     *  남아 있어도 그건 다른 종류의 자리다.
+     *
+     *  안 쓰는 종류(`slots` 에 없는 것)를 보내는 벨트도 여기서 선다. 받아서
+     *  쌓아 두면 라인이 조용히 죽고, 그냥 버리면 도면이 틀렸다는 사실이 안 남는다.
+     */
     for (const f of beltFlows) {
       if (!f.sink) continue;
-      if (getStock(f.sink.uid) < f.sink.cap) continue;
+      if (f.sink.slots) {
+        const slots = f.sink.slots[f.outKind] ?? 0;            // 0 = 안 쓰는 종류
+        const have = countKinds(getLots(f.sink.uid))[f.outKind] ?? 0;
+        if (slots - have > 0) continue;
+      } else if (getStock(f.sink.uid) < f.sink.cap) continue;
       links.add(f.link.uid);
       equips.add(f.owner.uid);
       jammed.add(f.owner.uid);
@@ -2129,6 +2161,24 @@ function SceneContent() {
       {/* 비어 있는 설비 포트의 입출고 표시 (선반은 ShelfView 가 직접 그린다) */}
       <ZoneMarks zones={openPortZones} />
 
+      {/* 설비 안에 무엇이 몇 개 있는지 — **누르지 않고도** 보인다.
+          자재가 어디서 막혔는지는 도면을 훑으면서 알아야 하는 정보다. */}
+      {placed.map((p) => {
+        const recipe = recipeOf(p);
+        if (isSource(recipe)) return null;
+        const bb = boxFor(p);
+        return (
+          <StockTag
+            key={`s${p.uid}`}
+            at={{ uid: p.uid, pos: p.pos }}
+            y={p.y ?? 0}
+            height={bb ? bb.max[1] : 4}
+            slots={slotShares(recipe, inputCapOf(p))}
+            starved={halted.starved.has(p.uid)}
+          />
+        );
+      })}
+
       {/* 작업자 — **사람이 붙은 설비에만** 선다. 빈자리가 곧 "사람이 없다" 는
           말이고, 그게 그 설비가 왜 서 있는지의 답이다(WorkerView 참고). */}
       {placed.map((p) => {
@@ -2183,7 +2233,14 @@ function SceneContent() {
             /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
                적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다. */
             const good = screen(n, owner.scrapRate ?? 0);
-            if (good > 0) addStock(sink.uid, good, sink.cap, outKind);
+            if (good <= 0) return;
+            /* 재료를 먹는 설비는 **그 종류 몫**까지만 받는다. 안 쓰는 종류면
+               몫이 0 이라 한 개도 안 들어간다(위 sink 주석 참고). */
+            if (sink.slots) {
+              addLotsShared(sink.uid, Array.from({ length: good }, () => outKind), (k) => sink.slots[k] ?? 0);
+            } else {
+              addStock(sink.uid, good, sink.cap, outKind);
+            }
           } : null}
         />
       ))}

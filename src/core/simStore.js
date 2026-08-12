@@ -86,6 +86,52 @@ export function addLots(uid, kindList, capacity = Infinity) {
 }
 
 /**
+ * **종류마다 자리가 정해진** 적재 (조립 설비의 입력 버퍼).
+ * ---------------------------------------------------------------------------
+ *  전체 수용량만 보고 받으면 빨리 들어오는 종류가 느린 종류의 자리를 먹어 치워
+ *  **되돌릴 수 없는 교착**이 된다(bom.js 의 slotShares 참고). 자리를 미리 나눠
+ *  두면 제 몫이 찬 종류는 더 못 들어오고, 그 벨트가 서면서 "앞 공정이 너무
+ *  빠르다" 가 화면에 드러난다.
+ *
+ *  @param slotsOf (종류) => 그 종류에 배정된 자리 수. 없는 종류는 0 — **안 받는다**
+ *  @returns { moved, left } · left 는 자리가 없어 못 넣은 것들
+ *
+ *  못 넣은 것을 **목록으로** 돌려주는 이유는 카트 때문이다. 개수만 주면 "몇 개가
+ *  들어갔다" 는 알아도 **무엇이** 들어갔는지 몰라서, 카트에 남은 짐을 맞출 수가
+ *  없다(앞에서부터 잘라 내면 안 들어간 종류가 사라진다).
+ */
+export function addLotsShared(uid, kindList, slotsOf) {
+  const cur = getLots(uid);
+  const have = {};
+  for (const k of cur) have[k] = (have[k] ?? 0) + 1;
+
+  const take = [];
+  const left = [];
+  for (const k of kindList ?? []) {
+    if ((have[k] ?? 0) < (slotsOf(k) ?? 0)) {
+      have[k] = (have[k] ?? 0) + 1;
+      take.push(k);
+    } else {
+      left.push(k);
+    }
+  }
+  if (take.length) commit(uid, [...cur, ...take]);
+  return { moved: take.length, left };
+}
+
+/**
+ * 한 종류만 통째로 버린다 (엉킨 버퍼를 손으로 푸는 자리).
+ *  @returns 버린 개수
+ */
+export function dropKind(uid, kind) {
+  const cur = getLots(uid);
+  const left = cur.filter((k) => k !== kind);
+  if (left.length === cur.length) return 0;
+  commit(uid, left);
+  return cur.length - left.length;
+}
+
+/**
  * 출고 — 있는 만큼만 내주고, **무엇을 내줬는지** 종류 목록으로 돌려준다.
  *  위(마지막)에서부터 꺼낸다. 아래에서 빼면 쌓여 있던 것이 아래로 주저앉는
  *  그림이 되는데, 실제로 물건을 집어 가는 순서와도 맞지 않는다.

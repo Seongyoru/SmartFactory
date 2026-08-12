@@ -115,6 +115,68 @@ export function outputKindOf(placed, item) {
 export const inputCapOf = (placed) =>
   Math.max(1, Math.round(placed?.inputCap ?? DEFAULT_INPUT_CAP));
 
+/**
+ * 버퍼의 자리를 **종류마다 떼어 준다.**
+ * ---------------------------------------------------------------------------
+ *  한 버퍼를 여러 종류가 자리다툼하게 두면 **되돌릴 수 없는 교착**이 생긴다.
+ *  실제로 이런 상태를 만났다 — 「제작품 3 × 3 + 제작품 1 × 3 → 조립품 2」 설비의
+ *  200칸이 이렇게 찼다.
+ *
+ *      제작품 3  177개    제작품 2  21개    제작품 1  2개
+ *
+ *  제작품 3 이 빨리 들어와 자리를 다 먹었고, 정작 필요한 제작품 1 이 들어올
+ *  자리가 없다. 버퍼가 가득 차 벨트도 서 있으니 **영영 풀리지 않는다.** 사람이
+ *  손으로 비워 주기 전에는 그 설비가 죽은 것이다.
+ *
+ *  ── 현장에서는 부품마다 통이 따로다 ──────────────────────────────────────
+ *  볼트 상자와 너트 상자를 한 통에 붓지 않는다. 볼트가 아무리 많이 와도 너트
+ *  자리를 먹지 못하고, 볼트 통이 차면 **볼트 라인이 선다.** 그게 옳은 신호다 —
+ *  "앞 공정이 너무 빠르다" 를 그 자리에서 말해 준다.
+ *
+ *  그래서 자리를 **레시피 비율대로** 나눈다. 3 : 3 이면 반반, 2 : 1 이면 2 : 1.
+ *  많이 먹는 것에 많은 자리를 주는 것이 맞다.
+ *
+ *  @returns { 종류: 자리수 } · 원자재 공급원이면 빈 객체
+ */
+export function slotShares(recipe, cap) {
+  const out = {};
+  if (isSource(recipe)) return out;
+  const total = Math.max(1, Math.round(cap));
+  const sum = recipe.in.reduce((s, r) => s + r.qty, 0);
+  if (sum <= 0) return out;
+
+  let given = 0;
+  recipe.in.forEach((r, i) => {
+    /* 마지막 종류가 나머지를 다 가져간다 — 내림 때문에 생긴 빈칸을 놀리지 않는다 */
+    const share = i === recipe.in.length - 1
+      ? total - given
+      : Math.floor((total * r.qty) / sum);
+    out[r.kind] = Math.max(0, share);
+    given += out[r.kind];
+  });
+  return out;
+}
+
+/**
+ * 이 버퍼가 한 덩어리치를 담을 만한가.
+ *  자리를 나누고 나면 버퍼가 작을 때 **어느 종류도 한 덩어리치를 못 채우는**
+ *  일이 생긴다. 그러면 설비는 영원히 굶는데 화면에는 "재료 부족" 이라고만 뜬다 —
+ *  진짜 원인(버퍼가 작다)을 말해 줄 수 있어야 한다.
+ *
+ *  @param per 한 덩어리의 개수(적재 층수)
+ *  @returns 모자란 종류들 [{ kind, need, slots }] · 넉넉하면 빈 배열
+ */
+export function tooSmallFor(recipe, cap, per) {
+  if (isSource(recipe)) return [];
+  const shares = slotShares(recipe, cap);
+  const out = [];
+  for (const { kind, qty } of recipe.in) {
+    const need = qty * Math.max(1, per);
+    if ((shares[kind] ?? 0) < need) out.push({ kind, need, slots: shares[kind] ?? 0 });
+  }
+  return out;
+}
+
 /* --------------------------------------------------------------------------
  * 소요량
  * ------------------------------------------------------------------------ */

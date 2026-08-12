@@ -21,8 +21,8 @@ import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { CART_MARGIN, followDistance, forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
 import { simStep } from '../core/clock.js';
 import { accumulateCart } from '../core/metrics.js';
-import { addLots, addShipped, getLots, takeEach, takeLots } from '../core/simStore.js';
-import { buildableCount, countKinds, needFor } from '../core/bom.js';
+import { addLots, addLotsShared, addShipped, getLots, takeEach, takeLots } from '../core/simStore.js';
+import { buildableCount, countKinds, needFor, slotShares } from '../core/bom.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
 import { canonKind } from '../data/library.js';
@@ -323,13 +323,12 @@ function CartUnit({
            *  쌓아 둘 이유가 없고, 이미 그린 도면이 갑자기 다르게 굴러도 안 된다.
            */
           if (carried > 0 && a.recipe) {
-            const wanted = new Set(a.recipe.in.map((r) => r.kind));
-            const ok = [];
-            const no = [];
-            for (const k of carriedKinds) (wanted.has(k) ? ok : no).push(k);
-            const moved = ok.length ? addLots(a.uid, ok, a.capacity) : 0;
+            /* 자리는 **종류마다** 정해져 있다 — 안 쓰는 종류는 몫이 0 이라
+               저절로 걸러지고, 쓰는 종류도 제 몫이 차면 더 못 넣는다.
+               못 넣은 것은 그대로 싣고 다음 자리로 간다(bom.js 의 slotShares). */
+            const slots = slotShares(a.recipe, a.capacity);
+            const { moved, left } = addLotsShared(a.uid, carriedKinds, (k) => slots[k] ?? 0);
             if (moved > 0) {
-              const left = [...ok.slice(moved), ...no];
               setCarried(left.length);
               setCarriedKinds(left);
               if (!left.length) sourceRef.current = null;

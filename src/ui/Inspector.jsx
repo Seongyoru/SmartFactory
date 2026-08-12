@@ -8,7 +8,7 @@ import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import { CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, stationStyle } from '../core/cart.js';
-import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
+import { clearStock, dropKind, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_INPUT_CAP, MAX_QTY, auditRecipes, countKinds, explode, flowEdges,
   inputCapOf, isSource, missingOf, needFor, normalizeRecipe, outputKindOf, recipeOf,
+  slotShares, tooSmallFor,
 } from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
@@ -88,24 +89,27 @@ const ROT_LABEL = ['0°', '90°', '180°', '270°'];
  *  없다. 색 견본을 함께 찍어 화면에서 본 것과 목록을 바로 이을 수 있게 한다.
  *  (한 종류만 있으면 굳이 나누어 보여 주지 않는다 — 총 개수로 충분하다)
  */
-function StockBreakdown({ uid }) {
+function StockBreakdown({ uid, slots = null }) {
   const lots = useLots(uid);
 
   const rows = useMemo(() => {
     const count = new Map();
     for (const k of lots) count.set(k, (count.get(k) ?? 0) + 1);
+    /* 자리를 배정받았지만 아직 하나도 안 들어온 종류도 보여 준다 —
+       "이게 안 오고 있다" 가 굶는 이유일 때가 많다 */
+    for (const k of Object.keys(slots ?? {})) if (!count.has(k)) count.set(k, 0);
     return [...count.entries()]
-      .map(([key, n]) => ({ key, n, item: PAYLOAD_ITEMS[key] }))
+      .map(([key, n]) => ({ key, n, item: PAYLOAD_ITEMS[key], slot: slots?.[key] ?? null }))
       .sort((a, b) => b.n - a.n);
-  }, [lots]);
+  }, [lots, slots]);
 
-  if (rows.length < 2) return null;
+  if (rows.length < 2 && !slots) return null;
 
   return (
     <div className="mt-2">
       <p className="mb-1 text-[10.5px] text-ink4">내역</p>
       <ul className="space-y-0.5">
-        {rows.map(({ key, n, item }) => (
+        {rows.map(({ key, n, item, slot }) => (
           <li key={key} className="flex items-center justify-between gap-2 text-[11px]">
             <span className="flex min-w-0 items-center gap-1.5 text-ink2">
               <span
@@ -114,12 +118,30 @@ function StockBreakdown({ uid }) {
               />
               <span className="truncate">{item?.name ?? key}</span>
             </span>
-            <b className="shrink-0 tabular-nums text-ink">
-              {n} 개
-              <span className="ml-1 font-normal text-ink4">
-                {Math.round((n / lots.length) * 100)}%
-              </span>
-            </b>
+            <span className="flex shrink-0 items-center gap-1">
+              {/* 자리가 나뉘어 있으면 **제 몫 대비**로 보여 준다. 전체 대비
+                  퍼센트는 자리다툼이 있던 시절의 숫자라 지금은 뜻이 없다 */}
+              <b className="tabular-nums text-ink">
+                {slot != null ? `${n} / ${slot} 개` : `${n} 개`}
+              </b>
+              {slot != null
+                ? n >= slot && slot > 0 && <span className="text-[10px] text-amber-600">가득</span>
+                : (
+                  <span className="text-[10px] font-normal text-ink4 tabular-nums">
+                    {Math.round((n / Math.max(1, lots.length)) * 100)}%
+                  </span>
+                )}
+              {/* 이 종류만 버리기 — 엉킨 버퍼를 손으로 푸는 자리 */}
+              {n > 0 && (
+                <button
+                  onClick={() => dropKind(uid, key)}
+                  className="rounded px-0.5 text-ink4 hover:text-rose-500"
+                  title={`${item?.name ?? key} ${n}개를 버린다`}
+                >
+                  <Trash2 size={10} />
+                </button>
+              )}
+            </span>
           </li>
         ))}
       </ul>
@@ -338,6 +360,17 @@ function RecipeSection({ placed, item }) {
   const missing = source ? {} : missingOf(countKinds(lots), needFor(recipe, per));
   const short = Object.entries(missing);
 
+  /**
+   * 자리는 **종류마다** 나뉘어 있다(bom.js 의 slotShares).
+   *  한 버퍼를 여럿이 자리다툼하게 두면 빠른 쪽이 느린 쪽 자리를 먹어 되돌릴 수
+   *  없는 교착이 된다. 나눠 두면 그런 일이 아예 안 생기고, 대신 **버퍼가 작을 때**
+   *  어느 종류도 한 덩어리치를 못 담는 새 문제가 생기므로 그것을 짚어 준다.
+   */
+  const slots = source ? null : slotShares(recipe, cap);
+  const tight = source ? [] : tooSmallFor(recipe, cap, per);
+  /* 한 덩어리치가 다 들어갈 만한 최소 버퍼 — 비율을 지키면서 담으려면 이만큼 */
+  const minCap = source ? 0 : recipe.in.reduce((s, r) => s + r.qty, 0) * per;
+
   return (
     <Section title="만드는 것">
       {/* 무엇을 만드는지는 **도면에만** 적힌다 — 라이브러리로 되돌아가는
@@ -412,10 +445,32 @@ function RecipeSection({ placed, item }) {
             onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { inputCap: v } })}
           />
           <Row label="지금 쌓인 재료">
-            <span className={stock >= cap ? 'text-rose-500' : ''}>{stock} / {cap} 개</span>
+            <span>{stock} / {cap} 개</span>
+            {stock > 0 && (
+              <button
+                onClick={() => clearStock(placed.uid)}
+                className="ml-1.5 rounded bg-kbd px-1 py-0.5 text-[10px] font-normal text-ink4 hover:text-rose-500"
+                title="쌓인 재료를 전부 버린다"
+              >
+                전부 비우기
+              </button>
+            )}
           </Row>
-          <StockBreakdown uid={placed.uid} />
-          {short.length > 0 && (
+          <StockBreakdown uid={placed.uid} slots={slots} />
+
+          {/* 버퍼가 작아 **어느 종류도 한 덩어리치를 못 담는** 경우.
+              자리를 나누고 나면 생길 수 있는 일인데, 화면에 "재료 부족" 이라고만
+              뜨면 진짜 원인(버퍼가 작다)을 영영 못 찾는다 */}
+          {tight.length > 0 && (
+            <p className="mt-2 rounded bg-rose-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-rose-500 ring-1 ring-rose-500/25">
+              <b>입력 버퍼가 작습니다.</b>{' '}
+              {tight.map((t) => `${PAYLOAD_ITEMS[t.kind]?.name ?? t.kind} 자리 ${t.slots}개 < 필요 ${t.need}개`).join(' · ')}.
+              한 덩어리({per}개)를 만들 재료가 **들어올 자리조차** 없어 영원히 굶습니다 —
+              버퍼를 최소 <b>{minCap}</b>개로 올리세요.
+            </p>
+          )}
+
+          {tight.length === 0 && short.length > 0 && (
             <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
               한 덩어리({per}개)를 만들 재료가 모자랍니다 —{' '}
               {short.map(([k, n]) => `${PAYLOAD_ITEMS[k]?.name ?? k} ${n}개`).join(' · ')} 부족.
