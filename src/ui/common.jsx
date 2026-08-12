@@ -27,7 +27,9 @@ export function IconBtn({ active, title, children, ...rest }) {
     <button
       type="button"
       title={title}
-      className={`grid h-8 w-8 place-items-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
+      /* relative — 버튼 위에 배지(개수 표시)를 얹는 곳이 있다. 기준이 없으면
+         배지가 화면 구석으로 날아간다. */
+      className={`relative grid h-8 w-8 place-items-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
         active ? 'bg-sky-500 text-white' : 'bg-raise text-ink2 hover:bg-raiseh ring-1 ring-edge'
       }`}
       {...rest}

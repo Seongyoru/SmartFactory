@@ -35,10 +35,12 @@ import {
   layoutSnapshot,
   loadAppearance,
   loadGuidePhase,
+  loadScenarios,
   loadLayout,
   loadUserLibrary,
   saveAppearance,
   saveGuidePhase,
+  saveScenarios,
   saveLayout,
   saveUserLibrary,
 } from './persistence.js';
@@ -194,6 +196,16 @@ const initialState = {
    *  어디까지 왔는지만 이 브라우저에 남긴다(persistence 의 loadGuidePhase).
    */
   guide: loadGuidePhase(),
+
+  /**
+   * 견주려고 모아 둔 배치들 — [{ uid, name, at, layout, run }].
+   * -------------------------------------------------------------------------
+   *  지금 도면은 작업 중인 한 벌이고, 이건 비교하려고 쌓아 둔 여러 벌이다.
+   *  도면이 아니므로 되돌리기 대상이 아니고, 초기화해도 남는다(따로 저장한다).
+   */
+  scenarios: loadScenarios(),
+  /** 시나리오 창이 열려 있는가 */
+  showScenarios: false,
 
   selected: null,       // { kind:'equip'|'link'|'cart'|'area'|'wall'|'pillar'|'zone', uid, edge? }
   connectFrom: null,    // 포트 참조 { uid, portId }
@@ -826,6 +838,44 @@ function reducer(state, action) {
       };
     }
 
+    /* ---- 시나리오 -------------------------------------------------------
+     *  도면 한 벌과 그 도면으로 돌린 성적표의 짝. 도면이 아니므로 되돌리기에
+     *  들어가지 않는다(DOC_KEYS 밖). 저장은 EditorProvider 의 효과가 맡는다. */
+    case 'SCENARIO_ADD': {
+      const uid = `S${state.seq}`;
+      return {
+        ...state,
+        seq: state.seq + 1,
+        scenarios: [
+          ...state.scenarios,
+          {
+            uid,
+            name: action.name?.trim() || `배치 ${state.scenarios.length + 1}`,
+            at: Date.now(),
+            layout: layoutSnapshot(state),
+            run: action.run ?? null,
+          },
+        ],
+      };
+    }
+
+    /** 지금 돌린 성적을 그 시나리오에 박제한다 (도면도 지금 것으로 갱신) */
+    case 'SCENARIO_RECORD':
+      return {
+        ...state,
+        scenarios: state.scenarios.map((s) =>
+          (s.uid === action.uid ? { ...s, layout: layoutSnapshot(state), run: action.run, at: Date.now() } : s)),
+      };
+
+    case 'SCENARIO_RENAME':
+      return {
+        ...state,
+        scenarios: state.scenarios.map((s) => (s.uid === action.uid ? { ...s, name: action.name } : s)),
+      };
+
+    case 'SCENARIO_DELETE':
+      return { ...state, scenarios: state.scenarios.filter((s) => s.uid !== action.uid) };
+
     /** 꼭짓점 편집 시작·끝 (target 이 null 이면 끝) */
     case 'EDIT_SHAPE':
       return { ...state, editShape: action.target ?? null };
@@ -1172,6 +1222,11 @@ export function EditorProvider({ children }) {
   useEffect(() => {
     if (state.guide !== 'welcome') saveGuidePhase(state.guide);
   }, [state.guide]);
+
+  /* ---- 시나리오도 이 브라우저에 남긴다 (도면과는 따로) --------------------
+   *  도면을 초기화해도 비교 기록은 남아야 한다 — 배치를 바꿔 가며 견주는 일이
+   *  곧 초기화의 연속이기 때문이다. */
+  useEffect(() => { saveScenarios(state.scenarios); }, [state.scenarios]);
 
   /* ---- 조회 헬퍼 -------------------------------------------------------- */
   const itemOf = useCallback((id) => state.library.find((i) => i.id === id) ?? null, [state.library]);

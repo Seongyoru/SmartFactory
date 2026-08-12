@@ -14,6 +14,7 @@ const LAYOUT_KEY = 'egis.factory.layout.v1';
 const LIB_KEY = 'egis.factory.userlib.v1';
 const THEME_KEY = 'egis.factory.appearance';
 const GUIDE_KEY = 'egis.factory.guide.v1';
+const SCENARIO_KEY = 'egis.factory.scenarios.v1';
 const DB_NAME = 'egis-factory';
 const STORE = 'models';
 
@@ -120,6 +121,31 @@ export function saveGuidePhase(phase) {
   try {
     localStorage.setItem(GUIDE_KEY, phase === 'steps' ? 'steps' : 'done');
   } catch { /* 무시 */ }
+}
+
+/**
+ * 시나리오 — 도면 한 벌과 그 도면으로 돌린 성적표의 짝.
+ * ---------------------------------------------------------------------------
+ *  **지금 도면과 따로 저장한다.** 지금 도면은 작업 중인 한 벌이고, 시나리오는
+ *  비교하려고 모아 둔 여러 벌이다. 한 곳에 담으면 도면을 초기화할 때 비교 기록도
+ *  함께 날아간다 — 배치를 바꿔 가며 견주는 일이 곧 초기화의 연속인데 말이다.
+ */
+export function saveScenarios(list) {
+  try {
+    localStorage.setItem(SCENARIO_KEY, JSON.stringify(list ?? []));
+  } catch (e) {
+    console.warn('시나리오 저장 실패', e);
+  }
+}
+
+export function loadScenarios() {
+  try {
+    const raw = localStorage.getItem(SCENARIO_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
 }
 
 /* ---- IndexedDB ---------------------------------------------------------- */

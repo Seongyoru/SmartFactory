@@ -26,6 +26,7 @@ import Toolbar from './ui/Toolbar.jsx';
 import Inspector from './ui/Inspector.jsx';
 import ZoneLayers from './ui/ZoneLayers.jsx';
 import Tutorial from './ui/Tutorial.jsx';
+import Scenarios from './ui/Scenarios.jsx';
 import ErrorBoundary from './ui/ErrorBoundary.jsx';
 
 /* 기본 제공 모델은 앱이 뜨자마자 받아 둔다 — 라이브러리 카드에 치수를 띄우고,
@@ -395,6 +396,8 @@ function Shell() {
           {/* 따라 하기 — 캔버스 안에 둔다. 환영 창이 도면만 가리고 라이브러리
               패널은 그대로 보여야, 창이 가리키는 탭을 바로 찾을 수 있다. */}
           <Tutorial />
+          {/* 배치 비교 — 도면을 덮는 창이라 캔버스 안에 둔다 */}
+          <Scenarios />
         </main>
         <Inspector />
       </div>

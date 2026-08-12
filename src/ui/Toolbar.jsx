@@ -8,6 +8,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  GitCompare,
   GraduationCap,
   Grid3x3,
   Magnet,
@@ -206,6 +207,20 @@ export default function Toolbar() {
         />
         <span className="w-14 tabular-nums text-ink2">{state.beltSpeed.toFixed(2)} m/s</span>
       </label>
+
+      {/* 배치 비교 — 담아 둔 벌이 있으면 개수를 배지로 */}
+      <IconBtn
+        title="배치 비교 — 배치를 바꿔 보고 성적을 나란히 놓는다"
+        active={state.showScenarios}
+        onClick={() => dispatch({ type: 'SET', patch: { showScenarios: !state.showScenarios } })}
+      >
+        <GitCompare size={14} />
+        {state.scenarios.length > 0 && (
+          <span className="absolute -right-0.5 -top-0.5 rounded-full bg-sky-500 px-1 text-[9px] font-bold leading-[13px] text-white">
+            {state.scenarios.length}
+          </span>
+        )}
+      </IconBtn>
 
       {/* 따라 하기 — 처음 한 번은 저절로 뜨고, 그 뒤로는 여기서 다시 연다 */}
       <IconBtn

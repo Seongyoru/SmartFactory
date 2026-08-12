@@ -32,12 +32,21 @@ let series = [];             // [{ t, shipped }] — 시간축 추이
 let lastSample = 0;
 
 const subs = new Set();
-const EMPTY = {};
+
+/**
+ * 무엇이 바뀌었는지가 아니라 **바뀌었다는 사실**만 알린다.
+ * ---------------------------------------------------------------------------
+ *  처음에는 막힘 목록(blocked)을 그대로 스냅샷으로 썼다. 그런데 아무 데도 안
+ *  막히면 그 값이 영영 그대로라, 시간이 흐르고 처리량이 쌓여도 화면이 갱신되지
+ *  않았다 — 라인이 잘 도는 도면일수록 성적표가 안 뜨는 셈이었다.
+ *  값이 아니라 판을 세면 그런 일이 없다.
+ */
+let version = 0;
 
 const NOTIFY_MS = 250;
 let lastNotify = 0;
 
-const emit = () => subs.forEach((f) => f());
+const emit = () => { version++; subs.forEach((f) => f()); };
 const subscribe = (f) => {
   subs.add(f);
   return () => subs.delete(f);
@@ -148,5 +157,4 @@ export function oeeOverall(uids) {
   return { availability, performance, quality: q, oee: availability * performance * q };
 }
 
-export const useMetrics = () =>
-  useSyncExternalStore(subscribe, () => blocked, () => EMPTY);
+export const useMetrics = () => useSyncExternalStore(subscribe, () => version, () => 0);
