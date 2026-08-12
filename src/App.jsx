@@ -268,8 +268,12 @@ function ShippedHUD() {
   const total = shippedTotal(shipped);
   /** 재공(WIP) — 아직 공장 안에 있는 것. 적치대·선반에 쌓인 것을 센다 */
   const wip = Object.values(stock).reduce((s, n) => s + n, 0);
-  const neck = bottleneck();
-  const neckName = neck ? state.placed.find((p) => p.uid === neck.uid)?.name ?? neck.uid : null;
+  /* 지워진 설비가 병목으로 남아 있으면 안 된다 — 기록은 이번 실행의 것이지만
+     화면은 지금 있는 도면을 말해야 한다. 도면에 없는 uid 면 없는 것으로 본다. */
+  const neckRaw = bottleneck();
+  const neckOwner = neckRaw ? state.placed.find((p) => p.uid === neckRaw.uid) : null;
+  const neck = neckOwner ? neckRaw : null;
+  const neckName = neckOwner?.name ?? null;
 
   if (!kinds.length && !wip && !neck) return null;
 

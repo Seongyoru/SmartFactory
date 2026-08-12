@@ -9,6 +9,8 @@ import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import { cartPath, cartStations, nextRole, stationStyle } from '../core/cart.js';
 import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
+import { formatElapsed, resetClock, useElapsed } from '../core/clock.js';
+import { getBlocked, getRan, getSeries, resetMetrics, uptimeOf, useMetrics } from '../core/metrics.js';
 import { PAYLOAD_ITEMS, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
   MAX_BAYS,
@@ -106,6 +108,27 @@ function StockBreakdown({ uid }) {
   );
 }
 
+/**
+ * 이 설비 한 대의 가동률.
+ *  전체 순위는 도면 요약의 「이번 실행」에 있고, 여기서는 고른 설비만 본다 —
+ *  "이 기계를 손볼까" 를 고민하는 자리에서 바로 근거가 보여야 한다.
+ */
+function EquipUptime({ uid }) {
+  useMetrics();
+  const ran = getRan();
+  if (ran <= 0) return null;
+  const up = uptimeOf(uid);
+  const sec = getBlocked()[uid] ?? 0;
+  return (
+    <Row label="가동률">
+      <span className={up < 0.5 ? 'text-rose-500' : up < 0.85 ? 'text-amber-600' : 'text-ink2'}>
+        {(up * 100).toFixed(0)} %
+      </span>
+      {sec > 0 && <span className="ml-1 text-[10px] text-ink4">({formatElapsed(sec)} 막힘)</span>}
+    </Row>
+  );
+}
+
 function EquipmentPanel({ placed }) {
   const { state, dispatch, itemOf } = useEditor();
   const beltSpeed = state.beltSpeed;
@@ -124,6 +147,7 @@ function EquipmentPanel({ placed }) {
         />
         <Row label="라이브러리 항목">{item?.name ?? placed.itemId}</Row>
         <Row label="ID">{placed.uid}</Row>
+        <EquipUptime uid={placed.uid} />
       </Section>
 
       <Section title="배치">
@@ -1785,6 +1809,130 @@ function MultiPanel({ items }) {
   );
 }
 
+/**
+ * 생산 추이 — 시간축 위의 출하 누계.
+ * ---------------------------------------------------------------------------
+ *  숫자 하나로는 "지금 얼마나 나갔나" 만 알 수 있다. 라인이 도중에 섰는지,
+ *  점점 느려지는지는 **기울기**로만 보인다 — 평평해진 구간이 곧 멈춰 있던 시간이다.
+ *
+ *  라이브러리를 들이지 않고 SVG 폴리라인 하나로 그린다. 표본은 metrics 가 10
+ *  시뮬초에 하나씩 쌓아 두고 있어서 여기서는 그리기만 하면 된다.
+ */
+function ProductionChart({ series }) {
+  const W = 220;
+  const H = 44;
+  if (series.length < 2) return null;
+
+  const t0 = series[0].t;
+  const t1 = series[series.length - 1].t;
+  const span = Math.max(1e-6, t1 - t0);
+  const top = Math.max(1, series[series.length - 1].shipped);
+
+  const pts = series
+    .map((s) => {
+      const x = ((s.t - t0) / span) * W;
+      const y = H - (s.shipped / top) * H;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <div className="mt-1">
+      <svg viewBox={`0 0 ${W} ${H}`} className="h-11 w-full" preserveAspectRatio="none">
+        {/* 채움은 흐리게, 선은 또렷하게 — 값보다 모양(기울기)이 먼저 읽혀야 한다 */}
+        <polyline points={`0,${H} ${pts} ${W},${H}`} fill="rgb(14 165 233 / 0.14)" stroke="none" />
+        <polyline points={pts} fill="none" stroke="rgb(14 165 233)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="flex justify-between text-[10px] tabular-nums text-ink4">
+        <span>{formatElapsed(t0)}</span>
+        <span>{top.toLocaleString()} 개</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 이번 실행의 성적표.
+ * ---------------------------------------------------------------------------
+ *  화면 왼쪽 위의 HUD 는 "지금 어떤가" 한 줄이고, 여기는 **어느 설비가 얼마나
+ *  서 있었는가** 를 전부 편다. 병목은 하나만 있는 것이 아니다 — 앞의 것을 풀면
+ *  그다음이 병목이 되므로, 순위로 봐야 다음에 무엇을 손볼지 알 수 있다.
+ *
+ *  가동률은 **막히지 않고 돈 시간의 비율**이다(적치대가 차서 선 시간을 뺀 것).
+ *  아직 아무것도 안 돌았으면 나눌 것이 없으므로 통째로 감춘다.
+ */
+function RunReport() {
+  const { state } = useEditor();
+  useMetrics();
+  const elapsed = useElapsed();
+  const ran = getRan();
+  const blocked = getBlocked();
+  const series = getSeries();
+
+  if (ran <= 0) return null;
+
+  /* 막힌 적이 있는 설비만, 오래 막힌 순서로 */
+  const rows = state.placed
+    .map((p) => ({ uid: p.uid, name: p.name ?? p.uid, sec: blocked[p.uid] ?? 0, up: uptimeOf(p.uid) }))
+    .filter((r) => r.sec > 0)
+    .sort((a, b) => a.up - b.up);
+
+  return (
+    <Section
+      title="이번 실행"
+      right={
+        <button
+          onClick={() => { resetClock(); resetMetrics(); }}
+          className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+          title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
+        >
+          다시 재기
+        </button>
+      }
+    >
+      <Row label="돌린 시간">{formatElapsed(elapsed)}</Row>
+
+      <ProductionChart series={series} />
+
+      {rows.length === 0 ? (
+        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+          {state.placed.length === 0
+            ? '아직 설비가 없습니다.'
+            : '막혀 선 설비가 없습니다 — 라인이 흐르고 있습니다.'}
+        </p>
+      ) : (
+        <>
+          <p className="mb-1 mt-2 text-[10.5px] text-ink4">가동률 (낮은 순)</p>
+          <ul className="space-y-1">
+            {rows.map((r) => (
+              <li key={r.uid} className="text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-ink2">{r.name}</span>
+                  <b className={`shrink-0 tabular-nums ${r.up < 0.5 ? 'text-rose-500' : r.up < 0.85 ? 'text-amber-600' : 'text-ink2'}`}>
+                    {(r.up * 100).toFixed(0)}%
+                  </b>
+                </div>
+                {/* 막대가 짧을수록 오래 서 있었다 — 숫자보다 먼저 눈에 들어온다 */}
+                <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-kbd">
+                  <div
+                    className={`h-full ${r.up < 0.5 ? 'bg-rose-500' : r.up < 0.85 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                    style={{ width: `${Math.max(2, r.up * 100)}%` }}
+                  />
+                </div>
+                <div className="text-[10px] tabular-nums text-ink4">{formatElapsed(r.sec)} 막힘</div>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+            막힘은 <b className="text-ink2">보낼 곳이 가득 차서</b> 선 시간입니다. 맨 위를 풀면
+            그다음이 병목이 됩니다.
+          </p>
+        </>
+      )}
+    </Section>
+  );
+}
+
 function Summary() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -1816,6 +1964,8 @@ function Summary() {
           <Row key={kind} label={`· ${PAYLOAD_ITEMS[kind]?.name ?? kind}`}>{n} 개</Row>
         ))}
       </Section>
+
+      <RunReport />
 
       <Section title="조작">
         <ul className="space-y-1.5 text-[11px] leading-relaxed text-ink3">
