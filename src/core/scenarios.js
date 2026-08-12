@@ -29,7 +29,7 @@
  */
 
 import { getElapsed } from './clock.js';
-import { getRan, bottleneck, oeeOverall, throughput } from './metrics.js';
+import { getRan, bottleneck, oeeOverall, producedInRun, throughput } from './metrics.js';
 import { getScrapped, quality } from './faults.js';
 import { getAllStock, shippedTotal } from './simStore.js';
 
@@ -53,9 +53,11 @@ export function captureRun(placed, shipped) {
   return {
     ran,
     elapsed: getElapsed(),
-    shipped: total,
+    /* 이번 실행에 나간 개수 — 누적 총량이 아니다. 「다시 재기」 뒤에도 견줄 수
+       있어야 하므로 분자와 분모의 시작점을 맞춘다(metrics 의 shippedStart). */
+    shipped: producedInRun(total),
     byKind: { ...shipped },
-    throughput: throughput(total),
+    throughput: throughput(total) ?? 0,
     wip: Object.values(getAllStock()).reduce((s, n) => s + n, 0),
     scrapped: getScrapped(),
     quality: quality(),

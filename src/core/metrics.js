@@ -31,6 +31,30 @@ let blocked = {};            // 설비 uid → 막혀서 서 있던 누적 시�
 let series = [];             // [{ t, shipped }] — 시간축 추이
 let lastSample = 0;
 
+/**
+ * 이번 실행이 시작될 때의 출하 누계.
+ * ---------------------------------------------------------------------------
+ *  처리량은 **개수 ÷ 시간** 인데, 둘의 시작점이 다르면 값이 터무니없어진다.
+ *  「다시 재기」로 시간만 0 으로 되돌리면 이미 나간 450개가 분자에 그대로 남아,
+ *  0.3초 만에 570만 개/시간 같은 숫자가 나온다.
+ *
+ *  출하 누계 자체를 지울 수는 없다 — 그건 이 도면이 지금까지 만들어 낸 성과이고,
+ *  선반의 재고처럼 시뮬레이션이 이어 가는 값이다. 대신 **이번 실행이 시작될 때의
+ *  값을 기준으로 잡아** 그 뒤로 늘어난 만큼만 센다.
+ */
+let shippedStart = null;
+
+/** 이번 실행 동안 나간 개수 */
+export const producedInRun = (shipped) =>
+  Math.max(0, (shipped ?? 0) - (shippedStart ?? shipped ?? 0));
+
+/**
+ * 처리량이 뜻을 갖기까지 필요한 최소 시간(시뮬 초).
+ *  갓 시작한 순간에는 몇 초 만에 한 개만 나가도 수천 개/시간이 된다. 라인이
+ *  채워지기 전의 숫자는 견줄 값이 아니므로 아예 내놓지 않는다.
+ */
+export const WARMUP = 10;
+
 const subs = new Set();
 
 /**
@@ -59,6 +83,8 @@ const subscribe = (f) => {
  */
 export function accumulate(dt, haltedUids, shipped) {
   if (!(dt > 0)) return;
+  /* 이번 실행의 기준점 — 분자와 분모가 같은 순간에서 출발해야 한다 */
+  if (shippedStart === null) shippedStart = shipped ?? 0;
   ran += dt;
   if (haltedUids?.size) {
     const next = { ...blocked };
@@ -70,7 +96,7 @@ export function accumulate(dt, haltedUids, shipped) {
      오래 돌려도 표본이 무한정 늘지 않는다 */
   if (ran - lastSample >= SAMPLE_SEC) {
     lastSample = ran;
-    series = [...series, { t: ran, shipped }].slice(-MAX_SAMPLES);
+    series = [...series, { t: ran, shipped: producedInRun(shipped) }].slice(-MAX_SAMPLES);
   }
 
   const now = performance.now();
@@ -85,6 +111,7 @@ export function resetMetrics() {
   blocked = {};
   series = [];
   lastSample = 0;
+  shippedStart = null;
   lastNotify = 0;
   emit();
 }
@@ -114,8 +141,16 @@ export function bottleneck() {
   return { uid, blocked: worst, ratio: Math.min(1, worst / ran) };
 }
 
-/** 시간당 처리량 — 개수를 시뮬 시간으로 나눈 값 */
-export const throughput = (shipped) => (ran > 0 ? (shipped * 3600) / ran : 0);
+/**
+ * 시간당 처리량 — **이번 실행에** 나간 개수를 **이번 실행이 돈** 시간으로 나눈다.
+ *  분자와 분모의 시작점이 같아야 한다(위 shippedStart 참고).
+ *  아직 데울 시간(WARMUP)이 안 됐으면 null 을 돌려준다 — 화면이 「측정 중」이라고
+ *  말할 수 있게. 라인이 채워지기 전의 숫자는 견줄 값이 아니다.
+ */
+export function throughput(shipped) {
+  if (ran < WARMUP) return null;
+  return (producedInRun(shipped) * 3600) / ran;
+}
 
 /**
  * OEE — 설비종합효율.

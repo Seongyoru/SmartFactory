@@ -271,6 +271,7 @@ function ShippedHUD() {
   const wip = Object.values(stock).reduce((s, n) => s + n, 0);
   /* 지워진 설비가 병목으로 남아 있으면 안 된다 — 기록은 이번 실행의 것이지만
      화면은 지금 있는 도면을 말해야 한다. 도면에 없는 uid 면 없는 것으로 본다. */
+  const tp = throughput(total);
   const neckRaw = bottleneck();
   const neckOwner = neckRaw ? state.placed.find((p) => p.uid === neckRaw.uid) : null;
   const neck = neckOwner ? neckRaw : null;
@@ -308,7 +309,13 @@ function ShippedHUD() {
         <div className="rounded-lg bg-float px-2.5 py-1.5 text-[11px] ring-1 ring-edge backdrop-blur">
           <div className="flex items-center justify-between gap-2">
             <span className="text-ink4">처리량</span>
-            <b className="tabular-nums text-ink">{throughput(total).toFixed(1)} 개/시간</b>
+            {/* 라인이 채워지기 전(WARMUP)에는 숫자를 내놓지 않는다 — 몇 초 만에
+                한 개만 나가도 수천 개/시간이 되어 사람을 속인다 */}
+            {tp == null ? (
+              <span className="text-[10.5px] text-ink4">측정 중…</span>
+            ) : (
+              <b className="tabular-nums text-ink">{tp.toFixed(1)} 개/시간</b>
+            )}
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-ink4">재공</span>
