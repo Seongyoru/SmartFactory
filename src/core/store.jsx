@@ -12,7 +12,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
 import { DEFAULT_GRID, clean } from './grid.js';
-import { BUILTIN_LIBRARY, CATEGORY, KIND } from '../data/library.js';
+import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
 import {
   OPENING_DEFAULTS,
@@ -346,6 +346,16 @@ function reducer(state, action) {
       const uid = `E${state.seq}`;
       const item = state.library.find((i) => i.id === action.itemId);
       const n = state.placed.filter((p) => p.itemId === action.itemId).length + 1;
+      /**
+       * 무엇을 만드는지는 **놓는 순간 도면에 적힌다.**
+       * -----------------------------------------------------------------------
+       *  라이브러리를 그릴 때마다 되묻지 않는다. 되물으면 같은 기계를 놓은 두
+       *  자리가 영영 같은 것만 만들게 되고, 무엇을 만드는지가 도면이 아니라
+       *  카탈로그에 적혀 있게 된다 — 인스펙터에서 바꿔도 카탈로그가 이긴다.
+       *  여기서 한 번 복사하고 나면 그 뒤로는 아무도 라이브러리를 안 본다.
+       *  (재료는 비워 둔다 = 원자재 공급원. 조립은 사용자가 정한다)
+       */
+      const out = defaultOutOf(item);
       return {
         ...state,
         seq: state.seq + 1,
@@ -363,6 +373,7 @@ function reducer(state, action) {
             outputCount: 3,
             /** 벨트 위로 내보내는 간격(m) */
             spawnGap: 3,
+            ...(out ? { recipe: { in: [], out } } : null),
             /** 선반이면 길이(칸 수)가 함께 들어온다 */
             ...(action.extra ?? {}),
           },

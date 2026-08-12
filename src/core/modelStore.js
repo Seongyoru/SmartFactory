@@ -103,8 +103,7 @@ function mergeByMaterial(scene) {
  * =============================================================================
  *  색만 다른 변형 — 모델 하나로 여러 종류를 만든다
  * =============================================================================
- *  조립(BOM)을 하려면 "A 2개 + B 1개 → C 1개" 처럼 반송물이 최소 셋은 있어야
- *  한다. 그런데 모델러가 준 반송물 GLB 는 둘뿐이다. 종류를 하나 더 만들자고
+ *  반송물은 종류가 여럿인데 모델러가 준 GLB 는 몇 개뿐이다. 종류를 늘리자고
  *  모델을 새로 그리라고 할 일은 아니라서, **같은 형상을 색만 바꿔** 쓴다.
  *
  *  캐시 키가 URL 과 따로 놀 수 있다는 점을 그대로 이용한다 — 키를 다르게 주면
@@ -112,16 +111,96 @@ function mergeByMaterial(scene) {
  *  공유하지 않으므로 한쪽을 물들여도 다른 쪽 색이 따라 변하지 않는다.
  *  (반송물은 24 KB · 256² 라 사본 하나가 늘어도 비용이 사실상 없다)
  *
- *  색은 텍스처에 **곱해진다.** 그래서 밑바탕이 밝은 회색인 모델에서만 뜻대로
- *  나온다 — 노란 모델을 빨갛게 물들이면 탁한 주황이 될 뿐이다. 새 종류를 만들
- *  때는 회색 모델(OBJ_1)을 밑바탕으로 삼을 것.
+ *  ── 곱하기만 해서는 지정한 색이 안 나온다 ────────────────────────────────
+ *  three 의 `material.color` 는 텍스처에 **곱해진다.** 밑바탕이 회색이면 뜻대로
+ *  나오지만, 노란 텍스처(Assembly.glb 는 평균 #dddf22 다)에 청록을 곱하면 초록이
+ *  되고 자홍을 곱하면 빨강이 된다 — 고른 색과 화면의 색이 다르면 목록의 색
+ *  견본이 거짓말을 하게 되고, 그 견본은 "저 벨트 위의 것이 무엇인가" 를 읽는
+ *  유일한 단서다.
+ *
+ *  그래서 **밑바탕을 회색으로 만든 뒤에** 곱한다(`neutralize`). 무늬와 음영은
+ *  그대로 남고 색만 없어지므로, 어떤 모델을 가져와도 고른 색 그대로 나온다.
  */
+
+/** 중립화한 텍스처의 목표 평균 밝기 — 곱했을 때 색이 죽지 않을 만큼 */
+const TINT_BASE = 0.82;
+
+/**
+ * 텍스처에서 색을 빼고 밝기를 맞춘다.
+ * ---------------------------------------------------------------------------
+ *  밝기까지 맞추는 이유는 **모델끼리 견줄 수 있어야** 하기 때문이다. 회색
+ *  텍스처(평균 0.60)와 노란 텍스처(휘도 0.82)를 그냥 회색으로만 바꾸면, 같은
+ *  빨강을 줘도 한쪽은 어둡고 한쪽은 밝게 나온다 — 화면에서 같은 색으로 안 읽힌다.
+ *
+ *  캔버스로 한 번 굽고 새 텍스처를 만든다. 256² 짜리라 한 종류당 한 번이면 되고,
+ *  결과는 모델 캐시에 그대로 얹힌다.
+ */
+function neutralize(map) {
+  const img = map?.image;
+  if (!img?.width || !img?.height) return null;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0);
+
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  } catch {
+    return null;                       // 다른 출처의 이미지면 읽을 수 없다 — 원본을 쓴다
+  }
+
+  /* 1차: 휘도로 바꾸면서 평균을 잰다 */
+  const p = data.data;
+  let sum = 0;
+  for (let i = 0; i < p.length; i += 4) {
+    const y = 0.2126 * p[i] + 0.7152 * p[i + 1] + 0.0722 * p[i + 2];
+    p[i] = p[i + 1] = p[i + 2] = y;
+    sum += y;
+  }
+  const mean = sum / (p.length / 4);
+
+  /* 2차: 평균을 목표에 맞춰 올린다(내린다). 흰 쪽은 255 에서 잘린다 */
+  const scale = mean > 1 ? (TINT_BASE * 255) / mean : 1;
+  if (Math.abs(scale - 1) > 0.01) {
+    for (let i = 0; i < p.length; i += 4) {
+      const v = Math.min(255, p[i] * scale);
+      p[i] = p[i + 1] = p[i + 2] = v;
+    }
+  }
+  ctx.putImageData(data, 0, 0);
+
+  /* 원본의 샘플링 설정을 그대로 옮긴다. flipY 를 안 옮기면 무늬가 뒤집힌다
+     (GLTFLoader 는 flipY = false 로 읽는다), colorSpace 를 안 옮기면 색이 뜬다 */
+  const out = new THREE.CanvasTexture(canvas);
+  out.flipY = map.flipY;
+  out.colorSpace = map.colorSpace;
+  out.wrapS = map.wrapS;
+  out.wrapT = map.wrapT;
+  out.repeat.copy(map.repeat);
+  out.offset.copy(map.offset);
+  out.channel = map.channel ?? 0;
+  out.needsUpdate = true;
+  return out;
+}
+
 function applyTint(scene, tint) {
   const color = new THREE.Color(tint);
+  /* 같은 재질을 쓰는 메시가 여럿이면 한 번만 굽는다 */
+  const done = new Map();
   scene.traverse((n) => {
     if (!n.isMesh || !n.material || Array.isArray(n.material)) return;
-    n.material = n.material.clone();
-    n.material.color = color.clone();
+    const src = n.material;
+    let next = done.get(src);
+    if (!next) {
+      next = src.clone();
+      if (src.map) next.map = neutralize(src.map) ?? src.map;
+      next.color = color.clone();
+      done.set(src, next);
+    }
+    n.material = next;
   });
 }
 

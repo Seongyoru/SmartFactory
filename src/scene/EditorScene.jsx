@@ -713,7 +713,7 @@ function SceneContent() {
           /* 이 벨트에 흐르는 것은 **출발 설비가 만드는 것**이다.
              레시피가 산출 종류를 정했으면 그것, 아니면 라이브러리 항목의 payload. */
           const recipe = recipeOf(owner);
-          return { link, path, owner, sink, recipe, outKind: outputKindOf(owner, itemOf(owner.itemId)) };
+          return { link, path, owner, sink, recipe, outKind: outputKindOf(owner) };
         })
         .filter(Boolean),
     [linkPaths, itemOf, placed],

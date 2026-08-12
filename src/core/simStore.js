@@ -12,6 +12,9 @@
  */
 
 import { useSyncExternalStore } from 'react';
+/* 종류 이름을 문자열로 박아 두지 않는다 — 목록에서 사라진 이름이 재고에만 남으면
+   그리는 쪽이 아무것도 못 그린다. 기준은 라이브러리 한 곳에 있다. */
+import { DEFAULT_KIND } from '../data/library.js';
 
 let stock = {};            // { [선반 uid]: 적재 수량 }
 
@@ -65,7 +68,7 @@ function commit(uid, list) {
  * 적재 — 수용량을 넘지 않는 만큼만 받고, 실제로 받은 수를 돌려준다.
  *  @param kind 들어오는 물건의 종류. 받은 개수만큼 **위에 쌓인다**.
  */
-export function addStock(uid, amount, capacity = Infinity, kind = 'OBJ') {
+export function addStock(uid, amount, capacity = Infinity, kind = DEFAULT_KIND) {
   return addLots(uid, Array.from({ length: Math.max(0, Math.round(amount)) }, () => kind), capacity);
 }
 
@@ -173,7 +176,7 @@ export function setStock(uid, value, kind = null) {
   const cur = getLots(uid);
   if (cur.length === v) return;
   if (v < cur.length) return commit(uid, cur.slice(0, v));
-  const fill = kind ?? getKind(uid) ?? 'OBJ';
+  const fill = kind ?? getKind(uid) ?? DEFAULT_KIND;
   commit(uid, [...cur, ...Array.from({ length: v - cur.length }, () => fill)]);
 }
 
@@ -228,7 +231,7 @@ export function addShipped(kinds) {
   const list = Array.isArray(kinds) ? kinds : [];
   if (!list.length) return;
   const next = { ...shipped };
-  for (const k of list) next[k ?? 'OBJ'] = (next[k ?? 'OBJ'] ?? 0) + 1;
+  for (const k of list) next[k ?? DEFAULT_KIND] = (next[k ?? DEFAULT_KIND] ?? 0) + 1;
   shipped = next;
   emit();
 }

@@ -22,7 +22,7 @@ import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
   getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
 } from '../core/faults.js';
-import { PAYLOAD_ITEMS, isShelf, isStillage, isTruck } from '../data/library.js';
+import { PAYLOAD_ITEMS, canonKind, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
   MAX_BAYS,
   MAX_BAY_LENGTH,
@@ -239,20 +239,21 @@ const KIND_KEYS = Object.keys(PAYLOAD_ITEMS);
  * 이 설비가 무엇을 먹고 무엇을 만드는가 (레시피 · BOM).
  * ---------------------------------------------------------------------------
  *  ── 왜 라이브러리 항목이 아니라 이 자리인가 ──────────────────────────────
- *  같은 기계라도 자리마다 하는 일이 다르다. 라인 앞의 Machine 1 은 원자재를
- *  깎고, 뒤의 Machine 1 은 그것을 조립할 수 있다. 라이브러리에 매달면 그 구분이
+ *  같은 기계라도 자리마다 하는 일이 다르다. 라인 앞의 제작기는 제작품 1 을
+ *  만들고 뒤의 제작기는 제작품 3 을 만들 수 있다. 라이브러리에 매달면 그 구분이
  *  불가능하므로 **놓인 설비마다** 정한다.
  *
  *  ── 재료를 안 정하면 예전 그대로다 ───────────────────────────────────────
  *  입력이 비면 원자재 공급원 — 아무것도 안 먹고 계속 만든다. 이미 그린 도면이
  *  이 칸이 생겼다는 이유로 갑자기 서면 안 되므로 그것이 기본값이다.
  */
-function RecipeSection({ placed, item }) {
+function RecipeSection({ placed }) {
   const { dispatch } = useEditor();
   const lots = useLots(placed.uid);
   const stock = useStock(placed.uid);
 
   const recipe = recipeOf(placed) ?? { in: [], out: null };
+  const out = outputKindOf(placed);
   const source = isSource(recipe);
   const cap = inputCapOf(placed);
   const per = Math.max(1, placed.outputCount ?? 3);
@@ -269,22 +270,22 @@ function RecipeSection({ placed, item }) {
 
   return (
     <Section title="만드는 것">
+      {/* 산출물은 **도면에만** 적힌다 — 놓을 때 심어 준 값이고, 라이브러리로
+          되돌아가는 「기본값」 같은 선택지는 없다. 무엇을 만드는지가 카탈로그에
+          적혀 있으면 여기서 바꿔도 카탈로그가 이긴다 */}
       <label className="block py-1">
         <span className="mb-1 block text-[11px] text-ink4">산출물</span>
         <select
-          value={recipe.out ?? ''}
-          onChange={(e) => patch({ ...recipe, out: e.target.value || null })}
+          value={out}
+          onChange={(e) => patch({ ...recipe, out: e.target.value })}
           className="w-full rounded-md border border-edge bg-field px-2 py-1.5 text-xs text-ink outline-none focus:border-sky-500/60"
         >
-          <option value="">라이브러리 기본값</option>
           {KIND_KEYS.map((k) => (
             <option key={k} value={k}>{PAYLOAD_ITEMS[k].name}</option>
           ))}
         </select>
       </label>
-      <Row label="실제로 내보내는 것">
-        <KindChip kind={outputKindOf(placed, item)} />
-      </Row>
+      <Row label="내보내는 것"><KindChip kind={out} /></Row>
 
       <p className="mb-1 mt-3 text-[10.5px] text-ink4">재료 (완성품 1개당)</p>
       {recipe.in.length === 0 && (
@@ -387,7 +388,7 @@ function EquipmentPanel({ placed }) {
         <EquipUptime uid={placed.uid} />
       </Section>
 
-      <RecipeSection placed={placed} item={item} />
+      <RecipeSection placed={placed} />
 
       <FaultFields placed={placed} />
 
@@ -1030,30 +1031,35 @@ function CartPanel({ cart }) {
       {/* 무엇을 나르는 카트인가.
           선반에는 여러 종류가 섞여 쌓인다. 정해 두지 않으면 위에 있던 것이
           잡히는 대로 실리므로, 특정 물건만 옮기려면 여기서 고른다. */}
-      {!truck && (
-        <Section title="가져올 물건">
-          <div className="flex flex-wrap gap-1">
-            <Btn active={!cart.pickKind} onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: null } })}>
-              가리지 않음
-            </Btn>
-            {Object.entries(PAYLOAD_ITEMS).map(([key, it]) => (
-              <Btn
-                key={key}
-                active={cart.pickKind === key}
-                onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: key } })}
-              >
-                <i className="inline-block h-2 w-2 rounded-[2px]" style={{ background: it.color }} />
-                {it.name}
+      {!truck && (() => {
+        /* 옛 도면에는 옛 종류 이름이 적혀 있다 — 지금 이름으로 바꿔서 견준다.
+           안 바꾸면 골라 둔 버튼이 하나도 안 눌린 것처럼 보인다 */
+        const pick = canonKind(cart.pickKind);
+        return (
+          <Section title="가져올 물건">
+            <div className="flex flex-wrap gap-1">
+              <Btn active={!pick} onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: null } })}>
+                가리지 않음
               </Btn>
-            ))}
-          </div>
-          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-            {cart.pickKind
-              ? `섞여 쌓인 더미에서 ${PAYLOAD_ITEMS[cart.pickKind]?.name ?? cart.pickKind} 만 골라 옵니다. 다른 것을 만드는 설비 앞은 그냥 지나갑니다.`
-              : '위에 있는 것부터 잡히는 대로 싣습니다.'}
-          </p>
-        </Section>
-      )}
+              {Object.entries(PAYLOAD_ITEMS).map(([key, it]) => (
+                <Btn
+                  key={key}
+                  active={pick === key}
+                  onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: key } })}
+                >
+                  <i className="inline-block h-2 w-2 rounded-[2px]" style={{ background: it.color }} />
+                  {it.name}
+                </Btn>
+              ))}
+            </div>
+            <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+              {pick
+                ? `섞여 쌓인 더미에서 ${PAYLOAD_ITEMS[pick].name} 만 골라 옵니다. 다른 것을 만드는 설비 앞은 그냥 지나갑니다.`
+                : '위에 있는 것부터 잡히는 대로 싣습니다.'}
+            </p>
+          </Section>
+        );
+      })()}
 
       <Section title={`정차역 ${stations.length}개`}>
         {stations.length === 0 && (

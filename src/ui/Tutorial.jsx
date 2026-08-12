@@ -59,9 +59,11 @@ const STEPS = [
     done: (f) => f.equip > 0,
     body: () => (
       <>
-        <b className="text-ink2">기계설비</b> 탭에서 Machine 을 고르고 바닥을 클릭하세요.
-        놓기 전에 <kbd className="rounded bg-kbd px-1">R</kbd> 로 90° 돌릴 수 있습니다.
-        <br />자재를 만들어 내보내는 쪽입니다.
+        <b className="text-ink2">기계설비</b> 탭에서 <b className="text-ink2">제작기</b>를 고르고
+        바닥을 클릭하세요. 놓기 전에 <kbd className="rounded bg-kbd px-1">R</kbd> 로 90° 돌릴 수
+        있습니다.
+        <br />자재를 만들어 내보내는 쪽입니다. 무엇을 만들지는 인스펙터의{' '}
+        <b className="text-ink2">「만드는 것」</b>에서 정합니다 — 조립기는 재료를 받아야 돕니다.
       </>
     ),
   },

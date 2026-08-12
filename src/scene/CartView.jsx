@@ -24,6 +24,7 @@ import { addLots, addShipped, getLots, takeEach, takeLots } from '../core/simSto
 import { buildableCount, countKinds, needFor } from '../core/bom.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
+import { canonKind } from '../data/library.js';
 
 const CART_COLOR = '#a78bfa';
 
@@ -263,7 +264,7 @@ function CartUnit({
             /* 무엇을 가져올지 정해 두었으면 **그 종류만** 골라 온다.
                선반에는 여러 종류가 섞여 쌓이므로, 정해 두지 않으면 위에 있던
                것이 잡히는 대로 실린다 — 필요한 것만 나르려면 골라야 한다. */
-            const got = takeLots(a.uid, room, cart.pickKind ?? null);
+            const got = takeLots(a.uid, room, canonKind(cart.pickKind));
             if (got.length > 0) {
               setCarried(carried + got.length);
               setCarriedKinds([...carriedKinds, ...got]);
@@ -284,10 +285,13 @@ function CartUnit({
            *  곳에서 세게 되고, 화면에 안 보이는 재고가 생긴다.
            */
           if (take > 0 && a.recipe) take = Math.min(take, buildableCount(countKinds(getLots(a.uid)), a.recipe));
-          if (take > 0 && (!cart.pickKind || (a.payloadKind ?? 'OBJ') === cart.pickKind)) {
+          /* 옛 도면에 적힌 옛 종류 이름을 지금 이름으로 바꿔서 견준다 —
+             안 바꾸면 골라 둔 카트가 아무 설비 앞에서도 안 선다 */
+          const want = canonKind(cart.pickKind);
+          if (take > 0 && (!want || a.payloadKind === want)) {
             if (!a.recipe || takeEach(a.uid, needFor(a.recipe, take))) {
               setCarried(carried + take);
-              setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind ?? 'OBJ')]);
+              setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind)]);
               sourceRef.current = a.uid;
               acted = true;
             }

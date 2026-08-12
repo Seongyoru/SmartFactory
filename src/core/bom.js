@@ -16,8 +16,8 @@
  *               qty 는 **완성품 1개당** 소요량이다
  *
  *  ── 설비 인스턴스에 붙인다 (라이브러리 항목이 아니라) ─────────────────────
- *  같은 기계라도 자리마다 하는 일이 다르다. 라인 앞쪽의 Machine 1 은 원자재를
- *  깎고, 뒤쪽의 Machine 1 은 그것을 조립할 수 있다. 라이브러리 항목에 매달면
+ *  같은 기계라도 자리마다 하는 일이 다르다. 라인 앞쪽의 제작기는 제작품 1 을
+ *  만들고 뒤쪽의 제작기는 제작품 3 을 만들 수 있다. 라이브러리 항목에 매달면
  *  그 구분이 불가능하다. `placed.recipe` 는 도면의 일부라 저장·되돌리기가
  *  그대로 따라온다(layoutSnapshot 이 placed 를 통째로 담는다).
  *
@@ -34,10 +34,13 @@
  * ---------------------------------------------------------------------------
  */
 
-import { PAYLOAD_ITEMS, payloadKeyOf } from '../data/library.js';
+import { PAYLOAD_ITEMS, canonKind } from '../data/library.js';
 
 /** 설비 입력 버퍼의 기본 크기(개) — 도면에 적지 않으면 이 값 */
 export const DEFAULT_INPUT_CAP = 30;
+
+/** 산출물을 알 수 없을 때 (손으로 고친 도면·아주 옛날 파일) */
+const DEFAULT_KIND = Object.keys(PAYLOAD_ITEMS)[0];
 
 /** 한 종류당 소요량의 상한 — 슬라이더 범위이자 정규화 한계 */
 export const MAX_QTY = 20;
@@ -46,7 +49,8 @@ export const MAX_QTY = 20;
  * 레시피 읽기
  * ------------------------------------------------------------------------ */
 
-const knownKind = (k) => (typeof k === 'string' && PAYLOAD_ITEMS[k] ? k : null);
+/** 모르는 이름은 떨구고, 옛 이름은 지금 이름으로 바꾼다 (library 의 KIND_ALIAS) */
+const knownKind = (k) => (typeof k === 'string' ? canonKind(k) : null);
 
 /**
  * 저장된 값을 믿을 수 있는 모양으로 다듬는다.
@@ -89,10 +93,16 @@ export const isSource = (recipe) => !recipe?.in?.length;
 
 /**
  * 이 설비가 내보내는 종류.
- *  레시피가 정했으면 그것, 아니면 라이브러리 항목의 payload — 이미 그린 도면이
- *  레시피 없이도 예전 그대로 동작하는 이유다.
+ * ---------------------------------------------------------------------------
+ *  **도면만 본다.** 예전에는 레시피가 없으면 라이브러리 항목의 `payload` 를
+ *  되물었는데, 그러면 같은 기계를 놓은 두 자리가 영영 같은 것만 만들게 되고
+ *  무엇을 만드는지가 도면이 아니라 카탈로그에 적혀 있게 된다. 지금은 놓는 순간
+ *  `recipe.out` 에 심어 주므로(store 의 PLACE) 되물을 일이 없다.
+ *
+ *  그래도 기본값은 남겨 둔다 — 손으로 고친 도면이나 아주 옛날 파일에는 `out` 이
+ *  없을 수 있고, 그때 아무것도 안 만드는 설비가 되면 왜 안 도는지 알 길이 없다.
  */
-export const outputKindOf = (placed, item) => recipeOf(placed)?.out ?? payloadKeyOf(item);
+export const outputKindOf = (placed) => recipeOf(placed)?.out ?? DEFAULT_KIND;
 
 /** 입력 버퍼 크기 */
 export const inputCapOf = (placed) =>
@@ -178,7 +188,7 @@ export function flowEdges(links, byUid, itemOf) {
     const a = l.from?.uid && !l.from.anchor && !l.from.link ? byUid.get(l.from.uid) : null;
     const b = l.to?.uid && !l.to.anchor && !l.to.link ? byUid.get(l.to.uid) : null;
     if (!a || !b) continue;
-    out.push({ from: a.uid, to: b.uid, kind: outputKindOf(a, itemOf(a.itemId)) });
+    out.push({ from: a.uid, to: b.uid, kind: outputKindOf(a) });
   }
   return out;
 }
@@ -227,8 +237,8 @@ export function auditRecipes(nodes, edges) {
 /**
  * BOM 전개 — 완성품 1개에 원자재가 몇 개 드는가.
  * ---------------------------------------------------------------------------
- *  "조립품 1개 = 반송물 2개 + 반송물2 1개" 는 레시피만 봐도 안다. 알고 싶은 것은
- *  그 반송물 2개를 만드느라 **라인 맨 앞에서 몇 개가 들어와야 하는가** 다.
+ *  "조립품 1 하나 = 제작품 1 두 개 + 제작품 2 한 개" 는 레시피만 봐도 안다. 알고
+ *  싶은 것은 그 제작품들을 만드느라 **라인 맨 앞에서 몇 개가 들어와야 하는가** 다.
  *  그 숫자가 있어야 앞 공정의 처리량이 뒤 공정을 먹여 살릴 수 있는지 견줄 수
  *  있다.
  *

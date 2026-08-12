@@ -43,22 +43,33 @@ export const KIND = { CART: 'cart', SHELF: 'shelf', TRUCK: 'truck', STILLAGE: 's
 export const BUILTIN_LIBRARY = [
   {
     id: 'MACHINE_1',
-    name: 'Machine 1',
-    desc: '2.83 × 4.63 × 3.92 m · 포트 2',
+    name: '제작기',
+    desc: '2.83 × 4.63 × 3.92 m · 제작품을 만든다',
     category: CATEGORY.EQUIPMENT,
     modelKey: '/models/Machine_1.glb',
     url: '/models/Machine_1.glb',
+    /**
+     * 배치할 때 레시피의 산출물로 **심어 줄** 종류.
+     * -----------------------------------------------------------------------
+     *  예전에는 `payload` 를 두고 **그릴 때마다** 라이브러리를 되물었다. 그러면
+     *  같은 기계를 놓은 두 자리가 영영 같은 것만 만들게 되고, 무엇을 만드는지가
+     *  도면이 아니라 카탈로그에 적혀 있게 된다.
+     *
+     *  지금은 놓는 순간 `placed.recipe.out` 으로 **한 번 복사되고 끝**이다.
+     *  그 뒤로는 아무도 이 값을 보지 않는다 — 도면이 유일한 사실이다.
+     */
+    defaultOut: 'PART_R',
     color: '#38bdf8',
     source: 'builtin',
   },
   {
     id: 'MACHINE_2',
-    name: 'Machine 2',
+    name: '조립기',
+    desc: '2.83 × 4.63 × 3.92 m · 제작품을 조립한다',
     category: CATEGORY.EQUIPMENT,
     modelKey: '/models/Machine_2.glb',
     url: '/models/Machine_2.glb',
-    /** 이 설비가 사출하는 반송물 (PAYLOAD_ITEMS 의 키) */
-    payload: 'OBJ2',
+    defaultOut: 'ASM_C',
     color: '#38bdf8',
     source: 'builtin',
   },
@@ -176,84 +187,105 @@ export const BUILTIN_LIBRARY = [
  * 반송물 모델 — 라이브러리에 넣지 않는다.
  *  사용자가 직접 배치하는 물건이 아니라, 설비가 내보내고 벨트가 실어 나르는
  *  "자재" 그 자체다. 컨베이어 위를 흐르는 것도, 카트에 실리는 것도 이 모델이다.
- *  (카트 GLB 안에도 같은 형상이 OBJ 노드로 들어 있어 카트는 그쪽을 쓴다)
+ *  (카트 GLB 안에도 같은 형상이 OBJ 노드로 들어 있어 카트는 그쪽을 자리로 쓴다)
  */
 /**
- *  ── 모델 파일을 바꿀 때 ──────────────────────────────────────────────────
- *  **키(OBJ · OBJ2)는 그대로 두고 경로만 바꾼다.** 이 키는 저장된 도면 안에
- *  들어 있다 — 적치대·선반의 재고가 자리마다 종류를 이 이름으로 기억하고
- *  (simStore 의 lots), 설비 항목의 `payload` 도 이 이름을 가리킨다. 키를 바꾸면
- *  옛 도면을 열었을 때 재고의 종류를 알아볼 수 없게 된다.
+ *  ── 두 갈래 · 여섯 종류 ──────────────────────────────────────────────────
+ *  **제작품**(제작기가 원자재에서 깎아 낸다)과 **조립품**(조립기가 제작품을 붙여
+ *  만든다). 갈래마다 셋이고, 갈래는 **형상**으로, 종류는 **색**으로 갈린다.
+ *
+ *      제작품 1·2·3   OBJ_1.glb    빨강 · 초록 · 파랑
+ *      조립품 1·2·3   Assembly.glb 청록 · 자홍 · 노랑
+ *
+ *  형상과 색을 이렇게 나눈 것이 핵심이다. 벨트 위를 흐르는 것을 멀리서 봐도
+ *  **모양만으로 어느 공정 뒤의 물건인지** 알 수 있고, 가까이 가면 색으로 어느
+ *  갈래인지가 갈린다. 여섯 개를 전부 색으로만 갈랐다면 축소한 도면에서 구분이
+ *  안 된다.
+ *
+ *  ── 모델은 셋이 아니라 하나씩이다 ────────────────────────────────────────
+ *  갈래마다 GLB 는 **한 개**고, 색만 다른 사본을 셋 만든다. `modelKey` 가 URL 과
+ *  다른 것이 그 장치다 — 키가 다르면 같은 파일이 한 번 더 읽혀 재질이 독립된
+ *  사본이 생기고, 그래야 이쪽만 물들일 수 있다(modelStore 의 applyTint).
+ *  물들이기는 **텍스처의 색을 먼저 없앤 뒤** 곱하므로, 밑바탕이 무슨 색이든
+ *  (Assembly 의 텍스처는 노랗다) 고른 색 그대로 나온다.
+ *
+ *  ── 키를 바꾸지 말 것 ────────────────────────────────────────────────────
+ *  키는 저장된 도면 안에 들어 있다 — 설비 레시피의 `in`·`out`, 카트의 `pickKind`.
+ *  모델 파일을 바꿀 때는 **키는 그대로 두고 `url` 만** 바꾼다.
+ *  (옛 이름 OBJ·OBJ2·OBJ3 은 아래 `KIND_ALIAS` 가 받아 준다)
  */
+const PART_MODEL = '/models/OBJ_1.glb';
+const ASM_MODEL = '/models/Assembly.glb';
+
+/**
+ * 색 견본은 **화면에 실제로 보이는 색**이다.
+ *  물들이기가 텍스처를 평균 0.82 밝기의 회색으로 맞춘 뒤 곱하므로, 순색을 주면
+ *  화면에는 그 0.82 배가 나온다(0xff × 0.82 ≈ 0xd1). 견본을 순색으로 찍어 두면
+ *  목록이 화면보다 밝아 서로 다른 색으로 보인다.
+ */
+const shade = (r, g, b) => `#${[r, g, b].map((v) => (v ? 'd1' : '00')).join('')}`;
+
+const payload = (key, name, model, tint, rgb) => ({
+  id: `__${key}`,
+  name,
+  /* 캐시 키는 **표시 이름이 아니라 종류 키**에서 만든다. 이름은 언제든 바뀔 수
+     있는 화면 문구이고, 캐시 키가 그걸 따라 흔들리면 이름을 고칠 때마다 같은
+     모델을 한 벌씩 더 읽게 된다. */
+  modelKey: `tint:${key}`,
+  url: model,
+  /* 조각난 프리미티브를 한 메시로 합쳐서 받는다 — 재질이 하나뿐이라 그림은
+     그대로고 드로우콜만 조각 수만큼 줄어든다. 벨트 하나에 60개까지 올라가는
+     모델이라 이 차이가 크다. 반송물에는 이름으로 찾는 노드가 없어 안전하다.
+     (modelStore 의 mergeByMaterial) */
+  merge: true,
+  tint,
+  color: shade(...rgb),
+});
+
 export const PAYLOAD_ITEMS = {
-  OBJ: {
-    id: '__PAYLOAD',
-    name: '반송물',
-    /* 2026-08-11 OBJ.glb(3.2 MB · 892면) → OBJ_1.glb(23 KB · 76면).
-       바닥에 놓이는 물건이라 화면에 수십 개가 동시에 뜬다 — 면과 텍스처를
-       줄인 쪽이 눈에 띄게 가볍다. 치수는 0.65 × 0.30 × 0.65 m 로 거의 같다. */
-    modelKey: '/models/OBJ_1.glb',
-    url: '/models/OBJ_1.glb',
-    /* 조각(프리미티브) 6개를 한 메시로 합쳐서 받는다 — 재질이 하나뿐이라
-       그림은 그대로고 드로우콜만 1/6 이 된다. 벨트 하나에 60개까지 올라가는
-       모델이라 이 차이가 크다. 반송물에는 이름으로 찾는 노드가 없어 안전하다.
-       (modelStore 의 mergeByMaterial) */
-    merge: true,
-    /* 목록에 찍는 색 견본 — 모델 텍스처의 평균색에 맞춰 둔다.
-       모델을 바꾸면 이 값도 같이 손봐야 화면과 목록이 어긋나지 않는다.
-       (새 텍스처를 디코드해 실제로 잰 값 — 옛 모델은 #4f5558 이었다) */
-    color: '#999999',
-  },
-  OBJ2: {
-    id: '__PAYLOAD2',
-    name: '반송물 2',
-    /* 2026-08-11 OBJ2.glb(8.5 MB) → OBJ_2.glb(24 KB) */
-    modelKey: '/models/OBJ_2.glb',
-    url: '/models/OBJ_2.glb',
-    merge: true,
-    color: '#dddf22',
-  },
-  /**
-   * 조립품 — **모델이 아니라 색이 다르다.**
-   * -------------------------------------------------------------------------
-   *  조립(BOM)이 뜻을 가지려면 "A + B → C" 의 C 가 A·B 와 구분되어야 한다.
-   *  그런데 모델러가 준 반송물은 둘뿐이다. 종류 하나를 늘리자고 모델을 새로
-   *  그리라고 할 일은 아니라서, 회색 반송물을 **물들여** 세 번째로 쓴다.
-   *
-   *  `modelKey` 가 URL 과 다른 것이 핵심이다 — 키가 다르면 같은 파일이 한 번 더
-   *  읽혀 재질이 독립된 사본이 생기고, 그래야 이쪽만 물들일 수 있다
-   *  (modelStore 의 applyTint). 밑바탕이 밝은 회색인 OBJ_1 을 쓰는 것도 이유가
-   *  있다 — 색은 텍스처에 곱해지므로 노란 모델을 물들이면 탁해진다.
-   *
-   *  진짜 조립품 모델이 생기면 `url` 만 그 파일로 바꾸고 `tint` 를 지우면 된다.
-   *  **키(OBJ3)는 그대로 두어야** 이미 그린 도면의 레시피가 살아남는다.
-   */
-  OBJ3: {
-    id: '__PAYLOAD3',
-    name: '조립품',
-    modelKey: 'tint:OBJ3',
-    url: '/models/OBJ_1.glb',
-    merge: true,
-    tint: '#f43f5e',
-    color: '#f43f5e',
-  },
+  PART_R: payload('PART_R', '제작품 1', PART_MODEL, '#ff0000', [1, 0, 0]),
+  PART_G: payload('PART_G', '제작품 2', PART_MODEL, '#00ff00', [0, 1, 0]),
+  PART_B: payload('PART_B', '제작품 3', PART_MODEL, '#0000ff', [0, 0, 1]),
+  ASM_C: payload('ASM_C', '조립품 1', ASM_MODEL, '#00ffff', [0, 1, 1]),
+  ASM_M: payload('ASM_M', '조립품 2', ASM_MODEL, '#ff00ff', [1, 0, 1]),
+  ASM_Y: payload('ASM_Y', '조립품 3', ASM_MODEL, '#ffff00', [1, 1, 0]),
 };
 
-/** 지정이 없을 때의 반송물 */
-export const PAYLOAD_ITEM = PAYLOAD_ITEMS.OBJ;
+/**
+ * 옛 이름 → 지금 이름.
+ * ---------------------------------------------------------------------------
+ *  종류를 여섯으로 다시 짜면서 키가 바뀌었다. 그런데 옛 키는 **이미 저장된 도면
+ *  안에** 들어 있다(레시피의 `in`·`out`, 카트의 `pickKind`). 그대로 두면 도면을
+ *  열었을 때 레시피가 조용히 비고, 설비가 이유 없이 굶는다 — 사용자에게는
+ *  "고쳐 놨더니 라인이 안 돈다" 로만 보인다.
+ *
+ *  갈래가 맞는 쪽으로 옮긴다. 옛 반송물 둘은 제작품이었고, 옛 조립품은 조립품이다.
+ */
+const KIND_ALIAS = { OBJ: 'PART_R', OBJ2: 'PART_G', OBJ3: 'ASM_C' };
+
+/** 아는 종류 이름으로 바꾼다 — 모르는 이름이면 null */
+export const canonKind = (key) =>
+  (PAYLOAD_ITEMS[key] ? key : KIND_ALIAS[key] ?? null);
 
 /**
- * 이 설비가 내보내는 반송물.
- *  설비마다 만들어 내는 물건이 다르므로 라이브러리 항목이 `payload` 로 고른다.
- *  없으면 기본 반송물 — 기존 설비들은 손대지 않아도 그대로 동작한다.
+ * 종류를 알 수 없을 때 쓰는 이름.
+ *  이름을 여기저기 문자열로 박아 두면, 목록에서 사라진 이름이 재고나 레시피에만
+ *  남아 그리는 쪽이 아무것도 못 그리게 된다. 기준을 한 곳에 둔다.
  */
-export const payloadOf = (item) => PAYLOAD_ITEMS[item?.payload] ?? PAYLOAD_ITEM;
+export const DEFAULT_KIND = 'PART_R';
 
-/** 재고에 함께 적어 둘 종류 이름 (simStore 가 개수와 같이 들고 다닌다) */
-export const payloadKeyOf = (item) => (PAYLOAD_ITEMS[item?.payload] ? item.payload : 'OBJ');
+/** 지정이 없을 때의 반송물 (선반 칸 너비를 재는 기준이기도 하다) */
+export const PAYLOAD_ITEM = PAYLOAD_ITEMS[DEFAULT_KIND];
 
 /** 종류 이름 → 반송물 항목. 모르는 이름이면 기본값. */
-export const payloadByKey = (key) => PAYLOAD_ITEMS[key] ?? PAYLOAD_ITEM;
+export const payloadByKey = (key) => PAYLOAD_ITEMS[canonKind(key)] ?? PAYLOAD_ITEM;
+
+/**
+ * 이 설비를 놓을 때 레시피의 산출물로 심어 줄 종류.
+ *  **놓는 순간 한 번만** 쓰인다 — 그 뒤로는 도면(`placed.recipe.out`)이 유일한
+ *  사실이고, 아무도 라이브러리를 되묻지 않는다.
+ */
+export const defaultOutOf = (item) => canonKind(item?.defaultOut) ?? null;
 
 /** 자재 반송용(컨베이어·레일)인가 — 포트 스냅·층 쌓기 대상 */
 export const isMaterialConnector = (item) =>
