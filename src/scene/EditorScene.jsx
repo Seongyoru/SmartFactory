@@ -88,6 +88,7 @@ import { stillageCapacity } from '../core/stillage.js';
 import { addStock, getStock, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
 import { tick } from '../core/clock.js';
 import { accumulate } from '../core/metrics.js';
+import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
 import { isShelf, isStillage, isTruck, isUtility, payloadKeyOf, payloadOf } from '../data/library.js';
 import ShelfView from './ShelfView.jsx';
 import StillageView from './StillageView.jsx';
@@ -110,11 +111,25 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted }) {
+function SimClock({ running, halted, equips }) {
   const shipped = shippedTotal(useShipped());
   useFrame((_, real) => {
     const dt = tick(real, running);
-    if (dt > 0) accumulate(dt, halted, shipped);
+    if (!(dt > 0)) return;
+
+    /* 고장을 굴린다 — 이번 프레임에 고장으로 서 있는 설비가 돌아온다 */
+    const nowDown = stepFaults(dt, equips);
+
+    /**
+     * 막힘과 고장은 **겹쳐 세면 안 된다.**
+     * -----------------------------------------------------------------------
+     *  고장 난 설비는 halted 목록에도 들어 있다(벨트를 세워야 하므로). 그대로
+     *  적분하면 같은 시간을 두 번 빼서 가동률과 성능이 함께 깎이고, 둘을 나눠
+     *  세는 뜻이 사라진다. 고장 중인 시간은 고장 쪽에만 넣는다.
+     */
+    const blockedOnly = new Set();
+    for (const uid of halted) if (!nowDown.has(uid)) blockedOnly.add(uid);
+    accumulate(dt, blockedOnly, shipped);
   });
   return null;
 }
@@ -473,6 +488,16 @@ function SceneContent() {
   const version = useModelsVersion();
   /* 재고가 바뀔 때마다 "가득 찼는가" 를 다시 본다 */
   const stockVersion = useAllStock();
+  /* 고장 난 설비 — 250ms 마다만 알려 오므로 이걸로 다시 그려도 부담이 없다 */
+  const downMap = useFaults();
+
+  /* 설비마다의 고장 성질 — 없으면 고장 나지 않는다(기본값) */
+  const faultParams = useMemo(
+    () => placed.map((p) => ({ uid: p.uid, mtbf: p.mtbf ?? 0, mttr: p.mttr ?? FAULT_DEFAULTS.mttr })),
+    [placed],
+  );
+  /* 지운 설비의 고장 기록까지 들고 있을 이유는 없다 */
+  useEffect(() => { pruneFaults(new Set(placed.map((p) => p.uid))); }, [placed]);
   const { view, tool, gridSize, placed, links, carts, selected, connectFrom, ghostRot, pathDraft } = state;
   const theme = sceneTheme(state.appearance);
 
@@ -669,6 +694,17 @@ function SceneContent() {
     const links = new Set();
     const equips = new Set();
 
+    /**
+     * ⓪ 고장 난 설비.
+     * -----------------------------------------------------------------------
+     *  서는 이유가 하나 더 생겼다. 막힘은 배치를 고쳐 풀 수 있지만 고장은 설비
+     *  자체의 성질이라, 지표에서는 갈라 센다(SimClock). 다만 **화면에서 벌어지는
+     *  일은 같다** — 그 설비가 서고, 내보내던 벨트도 선다. 그래서 여기서는 같은
+     *  목록에 넣고, 아래의 상류 전파도 그대로 태운다.
+     */
+    for (const uid of Object.keys(downMap)) equips.add(uid);
+    for (const f of beltFlows) if (downMap[f.owner.uid]) links.add(f.link.uid);
+
     /* ① 가득 찬 적치대로 들어가는 벨트와, 그 벨트를 먹이던 설비 */
     for (const f of beltFlows) {
       if (!f.sink) continue;
@@ -703,7 +739,7 @@ function SceneContent() {
       }
     }
     return { links, equips };
-  }, [beltFlows, stockVersion]);
+  }, [beltFlows, stockVersion, downMap]);
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
   const cartPaths = useMemo(
@@ -1797,7 +1833,7 @@ function SceneContent() {
 
   return (
     <>
-      <SimClock running={state.running} halted={halted.equips} />
+      <SimClock running={state.running} halted={halted.equips} equips={faultParams} />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />
       <CameraRig view={view} key={view} />
@@ -1985,7 +2021,12 @@ function SceneContent() {
           payload={payloadOf(itemOf(owner.itemId))}
           running={state.running && !halted.links.has(link.uid)}
           /* 종점에 닿은 한 덩어리가 곧 재고 한 묶음이 된다 */
-          onArrive={sink ? (n) => addStock(sink.uid, n, stillageCapacity(sink), payloadKeyOf(itemOf(owner.itemId))) : null}
+          onArrive={sink ? (n) => {
+            /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
+               적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다. */
+            const good = screen(n, owner.scrapRate ?? 0);
+            if (good > 0) addStock(sink.uid, good, stillageCapacity(sink), payloadKeyOf(itemOf(owner.itemId)));
+          } : null}
         />
       ))}
 

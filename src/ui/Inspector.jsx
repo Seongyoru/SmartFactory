@@ -10,7 +10,11 @@ import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import { cartPath, cartStations, nextRole, stationStyle } from '../core/cart.js';
 import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed } from '../core/clock.js';
-import { getBlocked, getRan, getSeries, resetMetrics, uptimeOf, useMetrics } from '../core/metrics.js';
+import { getBlocked, getRan, getSeries, oeeOf, oeeOverall, resetMetrics, uptimeOf, useMetrics } from '../core/metrics.js';
+import {
+  FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
+  getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
+} from '../core/faults.js';
 import { PAYLOAD_ITEMS, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
   MAX_BAYS,
@@ -113,19 +117,88 @@ function StockBreakdown({ uid }) {
  *  전체 순위는 도면 요약의 「이번 실행」에 있고, 여기서는 고른 설비만 본다 —
  *  "이 기계를 손볼까" 를 고민하는 자리에서 바로 근거가 보여야 한다.
  */
+/** 지표 하나를 색 있는 퍼센트로 — 세 기둥을 같은 눈금으로 읽게 한다 */
+const pct = (v) => `${(v * 100).toFixed(0)} %`;
+const tone = (v) => (v < 0.5 ? 'text-rose-500' : v < 0.85 ? 'text-amber-600' : 'text-emerald-600');
+
 function EquipUptime({ uid }) {
   useMetrics();
+  useFaults();
   const ran = getRan();
   if (ran <= 0) return null;
-  const up = uptimeOf(uid);
-  const sec = getBlocked()[uid] ?? 0;
+  const o = oeeOf(uid);
+  if (!o) return null;
+  const fixes = repairsOf(uid);
+
   return (
-    <Row label="가동률">
-      <span className={up < 0.5 ? 'text-rose-500' : up < 0.85 ? 'text-amber-600' : 'text-ink2'}>
-        {(up * 100).toFixed(0)} %
-      </span>
-      {sec > 0 && <span className="ml-1 text-[10px] text-ink4">({formatElapsed(sec)} 막힘)</span>}
-    </Row>
+    <>
+      {/* 세 기둥을 곱한 값이 OEE 다 — 하나만 나빠도 전체가 무너진다 */}
+      <Row label="OEE">
+        <b className={tone(o.oee)}>{pct(o.oee)}</b>
+      </Row>
+      <Row label="· 가동률">
+        <span className={tone(o.availability)}>{pct(o.availability)}</span>
+        {o.downSec > 0 && (
+          <span className="ml-1 text-[10px] text-ink4">
+            ({formatElapsed(o.downSec)} 고장{fixes ? ` · ${fixes}회` : ''})
+          </span>
+        )}
+      </Row>
+      <Row label="· 성능">
+        <span className={tone(o.performance)}>{pct(o.performance)}</span>
+        {o.blockSec > 0 && <span className="ml-1 text-[10px] text-ink4">({formatElapsed(o.blockSec)} 막힘)</span>}
+      </Row>
+      <Row label="· 양품률">
+        <span className={tone(o.quality)}>{pct(o.quality)}</span>
+        {getScrapped() > 0 && <span className="ml-1 text-[10px] text-ink4">({getScrapped()}개 불량)</span>}
+      </Row>
+    </>
+  );
+}
+
+/**
+ * 이 설비의 고장·불량 성질.
+ * ---------------------------------------------------------------------------
+ *  MTBF 를 0 으로 두면 고장 나지 않는다 — 기본값이다. 이미 그린 도면이 갑자기
+ *  서면 안 되므로, 고장은 **켜겠다고 말한 설비에만** 일어난다.
+ */
+function FaultFields({ placed }) {
+  const { dispatch } = useEditor();
+  const set = (patch) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch });
+  const mtbf = placed.mtbf ?? 0;
+
+  return (
+    <Section title="고장 · 불량">
+      <Slider
+        label="평균 고장 간격 (MTBF)"
+        min={MTBF_RANGE[0]} max={MTBF_RANGE[1]} step={MTBF_RANGE[2]}
+        value={mtbf}
+        text={mtbf > 0 ? formatElapsed(mtbf) : '고장 없음'}
+        onChange={(v) => set({ mtbf: v })}
+      />
+      {mtbf > 0 && (
+        <Slider
+          label="평균 수리 시간 (MTTR)"
+          min={MTTR_RANGE[0]} max={MTTR_RANGE[1]} step={MTTR_RANGE[2]}
+          value={placed.mttr ?? FAULT_DEFAULTS.mttr}
+          text={formatElapsed(placed.mttr ?? FAULT_DEFAULTS.mttr)}
+          onChange={(v) => set({ mttr: v })}
+        />
+      )}
+      <Slider
+        label="불량률"
+        min={SCRAP_RANGE[0]} max={SCRAP_RANGE[1]} step={SCRAP_RANGE[2]}
+        value={placed.scrapRate ?? 0}
+        text={`${((placed.scrapRate ?? 0) * 100).toFixed(1)} %`}
+        onChange={(v) => set({ scrapRate: v })}
+      />
+      <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+        고장 시점은 <b className="text-ink2">지수분포</b>로 뽑습니다 — 주기로 두면 여러 대가
+        박자를 맞춰 서서 실제와 다른 그림이 됩니다.
+        <br />불량품은 쌓이지 않고 버려집니다. 적치대에 넣으면 자리를 차지해 멀쩡한 라인을
+        세우게 되니까요.
+      </p>
+    </Section>
   );
 }
 
@@ -149,6 +222,8 @@ function EquipmentPanel({ placed }) {
         <Row label="ID">{placed.uid}</Row>
         <EquipUptime uid={placed.uid} />
       </Section>
+
+      <FaultFields placed={placed} />
 
       <Section title="배치">
         <Row label="위치 X / Z">
@@ -1868,6 +1943,8 @@ function RunReport() {
   const ran = getRan();
   const blocked = getBlocked();
   const series = getSeries();
+  useFaults();
+  const overall = oeeOverall(state.placed.map((p) => p.uid));
 
   if (ran <= 0) return null;
 
@@ -1882,7 +1959,7 @@ function RunReport() {
       title="이번 실행"
       right={
         <button
-          onClick={() => { resetClock(); resetMetrics(); }}
+          onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); }}
           className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
           title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
         >
@@ -1891,6 +1968,28 @@ function RunReport() {
       }
     >
       <Row label="돌린 시간">{formatElapsed(elapsed)}</Row>
+
+      {/* 라인 전체 OEE — 세 기둥을 곱한다. 하나만 나빠도 전체가 무너진다는 뜻이고,
+          그래서 어디를 손봐야 하는지가 세 줄에서 바로 드러난다. */}
+      {overall && (
+        <>
+          <Row label="OEE (라인)">
+            <b className={tone(overall.oee)}>{pct(overall.oee)}</b>
+          </Row>
+          <div className="mb-1 flex gap-1 text-[10px]">
+            {[
+              ['가동률', overall.availability, '고장으로 못 돈 시간 — 정비로 푼다'],
+              ['성능', overall.performance, '막혀서 못 돈 시간 — 배치로 푼다'],
+              ['양품률', overall.quality, '만들었지만 못 쓰는 것 — 공정으로 푼다'],
+            ].map(([label, v, why]) => (
+              <div key={label} className="flex-1 rounded bg-raise px-1.5 py-1 text-center ring-1 ring-edge" title={why}>
+                <div className="text-ink4">{label}</div>
+                <b className={`tabular-nums ${tone(v)}`}>{pct(v)}</b>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <ProductionChart series={series} />
 
