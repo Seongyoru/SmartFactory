@@ -34,7 +34,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import { PAYLOAD_ITEMS, canonKind } from '../data/library.js';
+import { PAYLOAD_ITEMS, allowedOutOf, canonKind } from '../data/library.js';
 
 /** 설비 입력 버퍼의 기본 크기(개) — 도면에 적지 않으면 이 값 */
 export const DEFAULT_INPUT_CAP = 30;
@@ -94,15 +94,22 @@ export const isSource = (recipe) => !recipe?.in?.length;
 /**
  * 이 설비가 내보내는 종류.
  * ---------------------------------------------------------------------------
- *  **도면만 본다.** 예전에는 레시피가 없으면 라이브러리 항목의 `payload` 를
- *  되물었는데, 그러면 같은 기계를 놓은 두 자리가 영영 같은 것만 만들게 되고
- *  무엇을 만드는지가 도면이 아니라 카탈로그에 적혀 있게 된다. 지금은 놓는 순간
- *  `recipe.out` 에 심어 주므로(store 의 PLACE) 되물을 일이 없다.
+ *  **무엇을 만드는지는 도면이 정하고, 어느 갈래인지는 기계가 정한다.**
  *
- *  그래도 기본값은 남겨 둔다 — 손으로 고친 도면이나 아주 옛날 파일에는 `out` 이
- *  없을 수 있고, 그때 아무것도 안 만드는 설비가 되면 왜 안 도는지 알 길이 없다.
+ *  갈래(제작품 / 조립품)는 그 기계가 하는 일 자체다 — 조립기가 제작품을 뱉으면
+ *  두 설비를 나눈 뜻이 없어지고, 도면만 보고 어느 공정인지 읽을 수 없게 된다.
+ *  그래서 라이브러리 항목의 `makes` 가 **고를 수 있는 것의 범위**를 정하고,
+ *  그 안에서의 선택은 온전히 도면의 몫이다(`recipe.out`).
+ *
+ *  범위를 벗어난 값은 갈래의 첫 종류로 되돌린다. 손으로 고친 도면이나, 갈래를
+ *  나누기 전에 그린 도면이 그럴 수 있다 — 그대로 두면 조립기가 제작품을 뱉는
+ *  도면이 조용히 살아남는다.
  */
-export const outputKindOf = (placed) => recipeOf(placed)?.out ?? DEFAULT_KIND;
+export function outputKindOf(placed, item) {
+  const out = canonKind(recipeOf(placed)?.out);
+  const allowed = allowedOutOf(item);
+  return out && allowed.includes(out) ? out : allowed[0] ?? DEFAULT_KIND;
+}
 
 /** 입력 버퍼 크기 */
 export const inputCapOf = (placed) =>
@@ -188,7 +195,7 @@ export function flowEdges(links, byUid, itemOf) {
     const a = l.from?.uid && !l.from.anchor && !l.from.link ? byUid.get(l.from.uid) : null;
     const b = l.to?.uid && !l.to.anchor && !l.to.link ? byUid.get(l.to.uid) : null;
     if (!a || !b) continue;
-    out.push({ from: a.uid, to: b.uid, kind: outputKindOf(a) });
+    out.push({ from: a.uid, to: b.uid, kind: outputKindOf(a, itemOf(a.itemId)) });
   }
   return out;
 }

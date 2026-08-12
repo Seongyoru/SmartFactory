@@ -22,7 +22,7 @@ import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
   getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
 } from '../core/faults.js';
-import { PAYLOAD_ITEMS, canonKind, isShelf, isStillage, isTruck } from '../data/library.js';
+import { PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck } from '../data/library.js';
 import {
   MAX_BAYS,
   MAX_BAY_LENGTH,
@@ -247,13 +247,16 @@ const KIND_KEYS = Object.keys(PAYLOAD_ITEMS);
  *  입력이 비면 원자재 공급원 — 아무것도 안 먹고 계속 만든다. 이미 그린 도면이
  *  이 칸이 생겼다는 이유로 갑자기 서면 안 되므로 그것이 기본값이다.
  */
-function RecipeSection({ placed }) {
+function RecipeSection({ placed, item }) {
   const { dispatch } = useEditor();
   const lots = useLots(placed.uid);
   const stock = useStock(placed.uid);
 
   const recipe = recipeOf(placed) ?? { in: [], out: null };
-  const out = outputKindOf(placed);
+  /* 산출물은 **이 기계의 갈래 안에서만** 고른다 — 제작기는 제작품, 조립기는
+     조립품. 갈래는 그 기계가 하는 일 자체라 자리마다 달라질 값이 아니다. */
+  const outKeys = allowedOutOf(item);
+  const out = outputKindOf(placed, item);
   const source = isSource(recipe);
   const cap = inputCapOf(placed);
   const per = Math.max(1, placed.outputCount ?? 3);
@@ -270,9 +273,8 @@ function RecipeSection({ placed }) {
 
   return (
     <Section title="만드는 것">
-      {/* 산출물은 **도면에만** 적힌다 — 놓을 때 심어 준 값이고, 라이브러리로
-          되돌아가는 「기본값」 같은 선택지는 없다. 무엇을 만드는지가 카탈로그에
-          적혀 있으면 여기서 바꿔도 카탈로그가 이긴다 */}
+      {/* 무엇을 만드는지는 **도면에만** 적힌다 — 라이브러리로 되돌아가는
+          「기본값」 같은 선택지는 없다. 라이브러리가 정하는 것은 갈래뿐이다 */}
       <label className="block py-1">
         <span className="mb-1 block text-[11px] text-ink4">산출물</span>
         <select
@@ -280,7 +282,7 @@ function RecipeSection({ placed }) {
           onChange={(e) => patch({ ...recipe, out: e.target.value })}
           className="w-full rounded-md border border-edge bg-field px-2 py-1.5 text-xs text-ink outline-none focus:border-sky-500/60"
         >
-          {KIND_KEYS.map((k) => (
+          {outKeys.map((k) => (
             <option key={k} value={k}>{PAYLOAD_ITEMS[k].name}</option>
           ))}
         </select>
@@ -388,7 +390,7 @@ function EquipmentPanel({ placed }) {
         <EquipUptime uid={placed.uid} />
       </Section>
 
-      <RecipeSection placed={placed} />
+      <RecipeSection placed={placed} item={item} />
 
       <FaultFields placed={placed} />
 

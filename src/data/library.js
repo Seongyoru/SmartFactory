@@ -40,6 +40,12 @@ export const CATEGORY_META = {
 /** 운송/적재 탭 안의 세부 종류 */
 export const KIND = { CART: 'cart', SHELF: 'shelf', TRUCK: 'truck', STILLAGE: 'stillage' };
 
+/**
+ * 반송물의 갈래 — 어느 설비가 만들 수 있는지를 정한다.
+ *  아래 `BUILTIN_LIBRARY` 가 바로 쓰므로 그보다 위에 있어야 한다.
+ */
+export const FAMILY = { PART: 'PART', ASM: 'ASM' };
+
 export const BUILTIN_LIBRARY = [
   {
     id: 'MACHINE_1',
@@ -49,16 +55,17 @@ export const BUILTIN_LIBRARY = [
     modelKey: '/models/Machine_1.glb',
     url: '/models/Machine_1.glb',
     /**
-     * 배치할 때 레시피의 산출물로 **심어 줄** 종류.
+     * 이 기계가 만들 수 있는 **갈래**. 제작기는 제작품만 낸다.
      * -----------------------------------------------------------------------
-     *  예전에는 `payload` 를 두고 **그릴 때마다** 라이브러리를 되물었다. 그러면
-     *  같은 기계를 놓은 두 자리가 영영 같은 것만 만들게 되고, 무엇을 만드는지가
-     *  도면이 아니라 카탈로그에 적혀 있게 된다.
+     *  갈래는 그 기계가 하는 일 자체라 자리마다 달라질 수 있는 값이 아니다 —
+     *  조립기에게 "제작품을 만들라" 고 시킬 수 있으면 두 설비를 나눈 뜻이
+     *  없어지고, 도면만 보고 어느 공정인지 읽을 수 없게 된다.
      *
-     *  지금은 놓는 순간 `placed.recipe.out` 으로 **한 번 복사되고 끝**이다.
-     *  그 뒤로는 아무도 이 값을 보지 않는다 — 도면이 유일한 사실이다.
+     *  갈래 **안에서** 무엇을 만들지는 온전히 도면의 몫이다(`placed.recipe.out`).
+     *  예전의 `payload` 는 그릴 때마다 되물어 사용자의 선택을 덮어썼지만, 이건
+     *  고를 수 있는 것의 범위만 정한다 — 기본값이 아니라 **제약**이다.
      */
-    defaultOut: 'PART_R',
+    makes: FAMILY.PART,
     color: '#38bdf8',
     source: 'builtin',
   },
@@ -69,7 +76,7 @@ export const BUILTIN_LIBRARY = [
     category: CATEGORY.EQUIPMENT,
     modelKey: '/models/Machine_2.glb',
     url: '/models/Machine_2.glb',
-    defaultOut: 'ASM_C',
+    makes: FAMILY.ASM,
     color: '#38bdf8',
     source: 'builtin',
   },
@@ -225,9 +232,11 @@ const ASM_MODEL = '/models/Assembly.glb';
  */
 const shade = (r, g, b) => `#${[r, g, b].map((v) => (v ? 'd1' : '00')).join('')}`;
 
-const payload = (key, name, model, tint, rgb) => ({
+const payload = (key, name, family, model, tint, rgb) => ({
   id: `__${key}`,
   name,
+  /** 어느 갈래인가 — 어떤 설비가 이걸 만들 수 있는지가 여기서 갈린다 */
+  family,
   /* 캐시 키는 **표시 이름이 아니라 종류 키**에서 만든다. 이름은 언제든 바뀔 수
      있는 화면 문구이고, 캐시 키가 그걸 따라 흔들리면 이름을 고칠 때마다 같은
      모델을 한 벌씩 더 읽게 된다. */
@@ -243,12 +252,12 @@ const payload = (key, name, model, tint, rgb) => ({
 });
 
 export const PAYLOAD_ITEMS = {
-  PART_R: payload('PART_R', '제작품 1', PART_MODEL, '#ff0000', [1, 0, 0]),
-  PART_G: payload('PART_G', '제작품 2', PART_MODEL, '#00ff00', [0, 1, 0]),
-  PART_B: payload('PART_B', '제작품 3', PART_MODEL, '#0000ff', [0, 0, 1]),
-  ASM_C: payload('ASM_C', '조립품 1', ASM_MODEL, '#00ffff', [0, 1, 1]),
-  ASM_M: payload('ASM_M', '조립품 2', ASM_MODEL, '#ff00ff', [1, 0, 1]),
-  ASM_Y: payload('ASM_Y', '조립품 3', ASM_MODEL, '#ffff00', [1, 1, 0]),
+  PART_R: payload('PART_R', '제작품 1', FAMILY.PART, PART_MODEL, '#ff0000', [1, 0, 0]),
+  PART_G: payload('PART_G', '제작품 2', FAMILY.PART, PART_MODEL, '#00ff00', [0, 1, 0]),
+  PART_B: payload('PART_B', '제작품 3', FAMILY.PART, PART_MODEL, '#0000ff', [0, 0, 1]),
+  ASM_C: payload('ASM_C', '조립품 1', FAMILY.ASM, ASM_MODEL, '#00ffff', [0, 1, 1]),
+  ASM_M: payload('ASM_M', '조립품 2', FAMILY.ASM, ASM_MODEL, '#ff00ff', [1, 0, 1]),
+  ASM_Y: payload('ASM_Y', '조립품 3', FAMILY.ASM, ASM_MODEL, '#ffff00', [1, 1, 0]),
 };
 
 /**
@@ -281,11 +290,33 @@ export const PAYLOAD_ITEM = PAYLOAD_ITEMS[DEFAULT_KIND];
 export const payloadByKey = (key) => PAYLOAD_ITEMS[canonKind(key)] ?? PAYLOAD_ITEM;
 
 /**
- * 이 설비를 놓을 때 레시피의 산출물로 심어 줄 종류.
- *  **놓는 순간 한 번만** 쓰인다 — 그 뒤로는 도면(`placed.recipe.out`)이 유일한
- *  사실이고, 아무도 라이브러리를 되묻지 않는다.
+ * 이 설비가 내보낼 수 있는 종류들.
+ * ---------------------------------------------------------------------------
+ *  **제작기는 제작품만, 조립기는 조립품만** 내보낸다. 갈래는 그 기계가 하는 일
+ *  자체라 자리마다 달라질 수 있는 값이 아니다 — 조립기를 놓고 "제작품을 만들라"
+ *  고 시킬 수 있으면 두 설비를 나눈 뜻이 없어지고, 도면만 보고 어느 공정인지
+ *  읽을 수 없게 된다.
+ *
+ *  이건 **기본값이 아니라 제약**이다. 기본값(옛 `payload`)은 사용자가 고른 값을
+ *  덮어써서 도면을 거짓말하게 만들었지만, 제약은 고를 수 있는 것의 범위를 정할
+ *  뿐 그 안에서의 선택은 온전히 도면의 것이다.
+ *
+ *  `makes` 를 말하지 않은 항목(사용자가 올린 GLB)은 제약이 없다 — 무엇을 만드는
+ *  기계인지 우리가 알 수 없으므로 단정하지 않는다.
  */
-export const defaultOutOf = (item) => canonKind(item?.defaultOut) ?? null;
+export const allowedOutOf = (item) => {
+  const all = Object.keys(PAYLOAD_ITEMS);
+  if (!item?.makes) return all;
+  const list = all.filter((k) => PAYLOAD_ITEMS[k].family === item.makes);
+  return list.length ? list : all;
+};
+
+/**
+ * 이 설비를 놓을 때 레시피의 산출물로 심어 줄 종류 — 갈래의 첫 번째.
+ *  **놓는 순간 한 번만** 쓰인다. 그 뒤로는 도면(`placed.recipe.out`)이 사실이고,
+ *  라이브러리는 위의 갈래 제약으로만 관여한다.
+ */
+export const defaultOutOf = (item) => allowedOutOf(item)[0] ?? null;
 
 /** 자재 반송용(컨베이어·레일)인가 — 포트 스냅·층 쌓기 대상 */
 export const isMaterialConnector = (item) =>

@@ -282,7 +282,7 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false, roles
       name: owner?.name ?? port.uid,
       count: Math.max(0, owner?.outputCount ?? 3),
       /* 이 설비가 만드는 물건 — 카트가 실으면 그대로 따라가서 선반에 쌓인다 */
-      payloadKind: outputKindOf(owner),
+      payloadKind: outputKindOf(owner, itemOf(owner?.itemId)),
       /**
        * 이 설비의 레시피 — 카트가 유입부에 내려놓을 때와 유출부에서 실을 때
        * 둘 다 필요하다.
