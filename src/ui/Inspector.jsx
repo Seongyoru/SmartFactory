@@ -7,7 +7,9 @@ import { AlertTriangle, ChevronDown, ChevronUp, RotateCw, Trash2 } from 'lucide-
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
-import { CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, stationStyle } from '../core/cart.js';
+import {
+  CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, pickSet, stationStyle,
+} from '../core/cart.js';
 import { clearStock, dropKind, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import {
@@ -1197,30 +1199,55 @@ function CartPanel({ cart }) {
           선반에는 여러 종류가 섞여 쌓인다. 정해 두지 않으면 위에 있던 것이
           잡히는 대로 실리므로, 특정 물건만 옮기려면 여기서 고른다. */}
       {!truck && (() => {
-        /* 옛 도면에는 옛 종류 이름이 적혀 있다 — 지금 이름으로 바꿔서 견준다.
-           안 바꾸면 골라 둔 버튼이 하나도 안 눌린 것처럼 보인다 */
-        const pick = canonKind(cart.pickKind);
+        /* 고른 종류들. 옛 도면의 `pickKind`(하나짜리)도 여기서 받아 준다 —
+           안 받으면 골라 둔 버튼이 하나도 안 눌린 것처럼 보인다(cart.js 의 pickSet) */
+        const pick = pickSet(cart);
+        /** 눌러서 켜고 끈다 — 저장은 늘 배열이다 */
+        const toggle = (key) => {
+          const next = new Set(pick);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          dispatch({
+            type: 'UPDATE_CART',
+            uid: cart.uid,
+            /* 옛 필드는 지운다 — 둘이 함께 남아 있으면 어느 쪽이 사실인지
+               말할 수 없게 된다 */
+            patch: { pickKinds: [...next], pickKind: null },
+          });
+        };
+        const names = [...pick].map((k) => PAYLOAD_ITEMS[k].name);
         return (
           <Section title="가져올 물건">
             <div className="flex flex-wrap gap-1">
-              <Btn active={!pick} onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: null } })}>
+              <Btn
+                active={!pick.size}
+                onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKinds: [], pickKind: null } })}
+              >
                 가리지 않음
               </Btn>
               {Object.entries(PAYLOAD_ITEMS).map(([key, it]) => (
-                <Btn
-                  key={key}
-                  active={pick === key}
-                  onClick={() => dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { pickKind: key } })}
-                >
+                <Btn key={key} active={pick.has(key)} onClick={() => toggle(key)}>
                   <i className="inline-block h-2 w-2 rounded-[2px]" style={{ background: it.color }} />
                   {it.name}
                 </Btn>
               ))}
             </div>
             <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-              {pick
-                ? `섞여 쌓인 더미에서 ${PAYLOAD_ITEMS[pick].name} 만 골라 옵니다. 다른 것을 만드는 설비 앞은 그냥 지나갑니다.`
-                : '위에 있는 것부터 잡히는 대로 싣습니다.'}
+              {names.length === 0
+                ? '위에 있는 것부터 잡히는 대로 싣습니다.'
+                : (
+                  <>
+                    섞여 쌓인 더미에서 <b className="text-ink3">{names.join(' · ')}</b>
+                    {names.length > 1 ? ' 를 함께' : ' 만'} 골라 옵니다. 그 밖의 것을 만드는 설비
+                    앞은 그냥 지나갑니다.
+                    {names.length > 1 && (
+                      <>
+                        <br />여러 개를 고르면 <b className="text-ink3">한 바퀴에 다 실어 옵니다</b> —
+                        재료 가짓수만큼 카트를 따로 놓을 필요가 없습니다.
+                      </>
+                    )}
+                  </>
+                )}
             </p>
           </Section>
         );

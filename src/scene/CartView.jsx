@@ -18,7 +18,9 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
-import { CART_MARGIN, followDistance, forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
+import {
+  CART_MARGIN, followDistance, forgetStation, loadRoom, pickSet, stationStyle, stepCart,
+} from '../core/cart.js';
 import { simStep } from '../core/clock.js';
 import { accumulateCart } from '../core/metrics.js';
 import { addLots, addLotsShared, addShipped, getLots, takeEach, takeLots } from '../core/simStore.js';
@@ -278,7 +280,7 @@ function CartUnit({
             /* 무엇을 가져올지 정해 두었으면 **그 종류만** 골라 온다.
                선반에는 여러 종류가 섞여 쌓이므로, 정해 두지 않으면 위에 있던
                것이 잡히는 대로 실린다 — 필요한 것만 나르려면 골라야 한다. */
-            const got = takeLots(a.uid, room, canonKind(cart.pickKind));
+            const got = takeLots(a.uid, room, pickSet(cart));
             if (got.length > 0) {
               setCarried(carried + got.length);
               setCarriedKinds([...carriedKinds, ...got]);
@@ -299,10 +301,10 @@ function CartUnit({
            *  곳에서 세게 되고, 화면에 안 보이는 재고가 생긴다.
            */
           if (take > 0 && a.recipe) take = Math.min(take, buildableCount(countKinds(getLots(a.uid)), a.recipe));
-          /* 옛 도면에 적힌 옛 종류 이름을 지금 이름으로 바꿔서 견준다 —
-             안 바꾸면 골라 둔 카트가 아무 설비 앞에서도 안 선다 */
-          const want = canonKind(cart.pickKind);
-          if (take > 0 && (!want || a.payloadKind === want)) {
+          /* 고른 종류들 중 하나여야 싣는다. 아무것도 안 골랐으면 가리지 않는다.
+             (옛 이름으로 적힌 도면도 pickSet 이 지금 이름으로 바꿔 준다) */
+          const want = pickSet(cart);
+          if (take > 0 && (!want.size || want.has(a.payloadKind))) {
             if (!a.recipe || takeEach(a.uid, needFor(a.recipe, take))) {
               setCarried(carried + take);
               setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind)]);

@@ -135,14 +135,19 @@ export function dropKind(uid, kind) {
  * 출고 — 있는 만큼만 내주고, **무엇을 내줬는지** 종류 목록으로 돌려준다.
  *  위(마지막)에서부터 꺼낸다. 아래에서 빼면 쌓여 있던 것이 아래로 주저앉는
  *  그림이 되는데, 실제로 물건을 집어 가는 순서와도 맞지 않는다.
+ *
+ *  @param want 가져갈 종류들(Set). 비어 있거나 없으면 **가리지 않는다**.
+ *              한 종류만 고르던 시절에는 문자열 하나였는데, 카트가 여러 종류를
+ *              고를 수 있게 되면서 집합이 됐다 — "이것 아니면 저것" 을 한 번에
+ *              말할 수 있어야 한 바퀴에 필요한 것을 다 실어 온다.
  */
-export function takeLots(uid, amount, kind = null) {
+export function takeLots(uid, amount, want = null) {
   const cur = getLots(uid);
-  const want = Math.max(0, Math.round(amount));
-  if (!want || !cur.length) return [];
+  const n0 = Math.max(0, Math.round(amount));
+  if (!n0 || !cur.length) return [];
 
-  if (!kind) {
-    const n = Math.min(cur.length, want);
+  if (!want || !want.size) {
+    const n = Math.min(cur.length, n0);
     const taken = cur.slice(cur.length - n);
     commit(uid, cur.slice(0, cur.length - n));
     return taken;
@@ -151,16 +156,16 @@ export function takeLots(uid, amount, kind = null) {
   /**
    * 골라서 집어 가기.
    * -------------------------------------------------------------------------
-   *  섞여 쌓인 더미에서 한 종류만 가져간다. **위에서부터** 훑어 원하는 것만
-   *  빼고 나머지는 순서 그대로 둔다 — 위에서부터인 이유는 종류를 안 가릴 때와
-   *  같다(집는 순서가 그렇다). 사이에서 빠진 자리는 위의 것이 내려앉는다.
+   *  섞여 쌓인 더미에서 **고른 종류들만** 가져간다. **위에서부터** 훑어 원하는
+   *  것만 빼고 나머지는 순서 그대로 둔다 — 위에서부터인 이유는 종류를 안 가릴
+   *  때와 같다(집는 순서가 그렇다). 사이에서 빠진 자리는 위의 것이 내려앉는다.
    *
    *  더미 전체를 뒤져야 하지만 한 선반의 자리 수는 수십 개라 값이 싸다.
    */
   const taken = [];
   const left = [];
   for (let i = cur.length - 1; i >= 0; i--) {
-    if (taken.length < want && cur[i] === kind) taken.push(cur[i]);
+    if (taken.length < n0 && want.has(cur[i])) taken.push(cur[i]);
     else left.push(cur[i]);
   }
   if (!taken.length) return [];

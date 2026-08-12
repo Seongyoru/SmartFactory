@@ -16,7 +16,7 @@
 import { buildFreePath } from './routing.js';
 import { allPorts } from './link.js';
 import { PORT_KIND, PORT_ZONE_REACH } from './ports.js';
-import { isShelf, isStillage } from '../data/library.js';
+import { canonKind, isShelf, isStillage } from '../data/library.js';
 import { inputCapOf, isSource, outputKindOf, recipeOf } from './bom.js';
 import { ZONE, shelfCapacity, shelfZones } from './shelf.js';
 import { stillageCapacity } from './stillage.js';
@@ -187,6 +187,29 @@ export function followDistance(me, others, { length, closed, gap }) {
 export function fleetFits(length, count, gap) {
   const need = Math.max(0, count) * Math.max(0, gap);
   return { fits: !(count > 1) || length > need, need };
+}
+
+/**
+ * 이 카트가 가져올 종류들 — 비어 있으면 **가리지 않는다.**
+ * ---------------------------------------------------------------------------
+ *  처음에는 한 종류만 고를 수 있었다(`pickKind`). 그런데 조립 설비 하나가 재료를
+ *  여럿 먹으므로, 한 종류만 고를 수 있으면 **재료 가짓수만큼 카트를 따로 놓아야**
+ *  한다 — 같은 길을 도는 차가 셋이 되고 서로 막기까지 한다. "이것 아니면 저것"
+ *  을 한 번에 말할 수 있어야 한 바퀴에 필요한 것을 다 실어 온다.
+ *
+ *  옛 도면의 `pickKind`(문자열 하나)도 그대로 읽는다 — 안 받으면 골라 둔 것이
+ *  조용히 풀려 카트가 아무거나 실어 나른다.
+ */
+export function pickSet(cart) {
+  const list = Array.isArray(cart?.pickKinds)
+    ? cart.pickKinds
+    : (cart?.pickKind ? [cart.pickKind] : []);
+  const out = new Set();
+  for (const k of list) {
+    const c = canonKind(k);
+    if (c) out.add(c);
+  }
+  return out;
 }
 
 export function cartPath(cart) {
