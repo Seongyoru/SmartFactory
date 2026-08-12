@@ -490,16 +490,19 @@ function SceneContent() {
   const stockVersion = useAllStock();
   /* 고장 난 설비 — 250ms 마다만 알려 오므로 이걸로 다시 그려도 부담이 없다 */
   const downMap = useFaults();
+  const { view, tool, gridSize, placed, links, carts, selected, connectFrom, ghostRot, pathDraft } = state;
+  const theme = sceneTheme(state.appearance);
 
-  /* 설비마다의 고장 성질 — 없으면 고장 나지 않는다(기본값) */
+  /* 설비마다의 고장 성질 — 없으면 고장 나지 않는다(기본값).
+     **placed 를 쓰는 것은 반드시 위의 구조분해 뒤에 온다.** 의존성 배열은 렌더
+     시점에 평가되므로, 선언보다 위에 두면 매 렌더 TDZ 로 터진다(화면이 통째로
+     ErrorBoundary 로 넘어간다). 빌드는 문법만 보므로 잡아 주지 않는다. */
   const faultParams = useMemo(
     () => placed.map((p) => ({ uid: p.uid, mtbf: p.mtbf ?? 0, mttr: p.mttr ?? FAULT_DEFAULTS.mttr })),
     [placed],
   );
   /* 지운 설비의 고장 기록까지 들고 있을 이유는 없다 */
   useEffect(() => { pruneFaults(new Set(placed.map((p) => p.uid))); }, [placed]);
-  const { view, tool, gridSize, placed, links, carts, selected, connectFrom, ghostRot, pathDraft } = state;
-  const theme = sceneTheme(state.appearance);
 
   const [cursor, setCursor] = useState([0, 0]);
   const lastCursor = useRef([0, 0]);
