@@ -51,6 +51,31 @@ let blocked = {};            // 설비 uid → 막혀서 서 있던 누적 시�
  *  따로 들고 간다.
  */
 let starved = {};
+/**
+ * 설비 uid → **사람이 없어** 서 있던 누적 시간(초).
+ * ---------------------------------------------------------------------------
+ *  막힘·굶음과 달리 이건 **애초에 돌 수 없었던** 시간이라 성능(P)이 아니라
+ *  가동률(A)에서 빠진다 — 고장과 같은 자리다. 둘을 한 칸에 합치지 않는 이유는
+ *  처방이 다르기 때문이다: 고장은 정비로, 무인은 인력으로 푼다.
+ */
+let unmanned = {};
+/**
+ * 카트 경로 uid → 앞차에 막혀 **못 간** 시간(초) · 그리고 달린 시간.
+ * ---------------------------------------------------------------------------
+ *  차간 간격을 넣고 나니 "카트를 몇 대 올려야 하는가" 를 물을 수 있게 됐는데,
+ *  정작 **막힌 시간이 아무 데도 안 남았다.** 설비의 막힘·굶음은 세면서 카트만
+ *  안 세면, 대수를 늘렸을 때 처리량이 왜 더 안 느는지 화면이 답을 못 한다.
+ *
+ *  **정차(dwell)와는 갈라 센다.** 역에 서서 짐을 주고받은 시간은 **일을 한**
+ *  시간이고, 앞차에 막힌 시간은 **아무것도 못 한** 시간이다. 한 칸에 합치면
+ *  "카트가 자주 선다" 는 것만 알고 늘려야 할지 줄여야 할지는 모른다.
+ *
+ *  한 대씩이 아니라 **경로별**로 센다 — 사람이 고치는 단위가 경로(대수·길이)지
+ *  개별 차량이 아니다.
+ */
+let cartBlocked = {};
+let cartRan = {};
+
 let series = [];             // [{ t, shipped }] — 시간축 추이
 let lastSample = 0;
 
@@ -103,10 +128,11 @@ const subscribe = (f) => {
  * 프레임마다 — 흘린 시뮬 시간과 **지금 서 있는 설비들**을 넘긴다.
  *  @param haltedUids  Set<uid> · 막혀서 서 있는 설비
  *  @param shipped     지금까지의 출하 총량 (추이 표본용)
- *  @param starvedUids Set<uid> · 재료가 없어 서 있는 설비. 호출부가 이미 막힘·
- *                     고장과 겹치지 않게 갈라서 넘긴다(EditorScene 의 SimClock)
+ *  @param starvedUids  Set<uid> · 재료가 없어 서 있는 설비. 호출부가 이미 막힘·
+ *                      고장과 겹치지 않게 갈라서 넘긴다(EditorScene 의 SimClock)
+ *  @param unmannedUids Set<uid> · 사람이 없어 서 있는 설비
  */
-export function accumulate(dt, haltedUids, shipped, starvedUids = null) {
+export function accumulate(dt, haltedUids, shipped, starvedUids = null, unmannedUids = null) {
   if (!(dt > 0)) return;
   /* 이번 실행의 기준점 — 분자와 분모가 같은 순간에서 출발해야 한다 */
   if (shippedStart === null) shippedStart = shipped ?? 0;
@@ -120,6 +146,11 @@ export function accumulate(dt, haltedUids, shipped, starvedUids = null) {
     const next = { ...starved };
     for (const uid of starvedUids) next[uid] = (next[uid] ?? 0) + dt;
     starved = next;
+  }
+  if (unmannedUids?.size) {
+    const next = { ...unmanned };
+    for (const uid of unmannedUids) next[uid] = (next[uid] ?? 0) + dt;
+    unmanned = next;
   }
 
   /* 추이는 촘촘히 남길 필요가 없다 — 10 시뮬초에 하나면 그래프로 충분하고,
@@ -136,10 +167,38 @@ export function accumulate(dt, haltedUids, shipped, starvedUids = null) {
   }
 }
 
+/**
+ * 카트 한 대의 한 프레임 — 앞차에 막혀 못 간 시간을 경로 앞으로 달아 둔다.
+ * ---------------------------------------------------------------------------
+ *  씬이 프레임마다 부르므로 **여기서는 알리지 않는다.** 화면 갱신은 `accumulate`
+ *  가 250ms 마다 한 번 하고 있고, 여기서 또 알리면 카트 대수만큼 배로 는다.
+ *
+ *  @param blockedDt 이번 프레임에 **못 간** 몫의 시간(초). 속도가 절반으로
+ *                   깎였으면 dt 의 절반이다 — 완전히 선 것만 세면 "느려졌지만
+ *                   가긴 갔다" 가 통째로 빠진다
+ */
+export function accumulateCart(uid, dt, blockedDt) {
+  if (!(dt > 0) || !uid) return;
+  cartRan = { ...cartRan, [uid]: (cartRan[uid] ?? 0) + dt };
+  if (blockedDt > 0) cartBlocked = { ...cartBlocked, [uid]: (cartBlocked[uid] ?? 0) + blockedDt };
+}
+
+export const getCartBlocked = () => cartBlocked;
+export const getCartRan = () => cartRan;
+
+/** 이 경로의 카트가 앞차에 막혀 있던 시간의 비율 (0~1) */
+export const cartBlockRatio = (uid) => {
+  const t = cartRan[uid] ?? 0;
+  return t > 0 ? Math.min(1, (cartBlocked[uid] ?? 0) / t) : 0;
+};
+
 export function resetMetrics() {
   ran = 0;
   blocked = {};
   starved = {};
+  unmanned = {};
+  cartBlocked = {};
+  cartRan = {};
   series = [];
   lastSample = 0;
   shippedStart = null;
@@ -150,6 +209,7 @@ export function resetMetrics() {
 export const getRan = () => ran;
 export const getBlocked = () => blocked;
 export const getStarved = () => starved;
+export const getUnmanned = () => unmanned;
 export const getSeries = () => series;
 
 /**
@@ -160,8 +220,9 @@ export function lossSplit() {
   const sum = (m) => Object.values(m).reduce((s, n) => s + n, 0);
   const block = sum(blocked);
   const starve = sum(starved);
-  if (!block && !starve) return null;
-  return { block, starve, starvedMore: starve > block };
+  const crew = sum(unmanned);
+  if (!block && !starve && !crew) return null;
+  return { block, starve, crew, starvedMore: starve > block };
 }
 
 /**
@@ -218,16 +279,22 @@ export function throughput(shipped) {
  *  현장에서 라인을 평가하는 표준 지표다. 세 가지를 **곱한다** — 하나만 나빠도
  *  전체가 무너진다는 뜻이고, 그래서 어디를 손봐야 하는지가 드러난다.
  *
- *    가동률 A = 1 − 고장으로 선 시간 / 전체 시간
- *               설비 자체가 못 돈 시간. 정비로 푼다
+ *    가동률 A = 1 − (고장 + 무인) / 전체 시간
+ *               애초에 못 돈 시간. 고장은 정비로, 무인은 인력으로 푼다
  *    성능   P = 1 − (막힘 + 굶음) / (돌 수 있었던 시간)
  *               돌 수 있었는데 보낼 곳이 없거나 받을 것이 없어 못 돈 시간
  *    양품률 Q = 1 − 불량 / 만든 것
  *               만들긴 했는데 못 쓰는 것. 공정으로 푼다
  *
- *  성능의 분모가 전체 시간이 아니라 **고장 시간을 뺀 시간**인 것이 중요하다.
- *  고장으로 선 동안은 애초에 돌 수 없었으므로, 그 시간까지 "막혀서 못 돌았다"
- *  로 세면 같은 손실을 두 번 빼게 된다(SimClock 이 셋을 겹치지 않게 나눠 센다).
+ *  성능의 분모가 전체 시간이 아니라 **못 돌던 시간을 뺀 시간**인 것이 중요하다.
+ *  고장이나 무인으로 선 동안은 애초에 돌 수 없었으므로, 그 시간까지 "막혀서 못
+ *  돌았다" 로 세면 같은 손실을 두 번 빼게 된다(SimClock 이 넷을 겹치지 않게
+ *  나눠 센다).
+ *
+ *  ── 고장과 무인을 A 안에서도 갈라 둔다 ───────────────────────────────────
+ *  잃은 시간은 같지만 **살 것이 다르다** — 고장은 정비(또는 더 나은 설비)로,
+ *  무인은 사람으로 푼다. A 하나만 보고 정비 예산을 잡으면 정작 필요한 건
+ *  야간 인원인 경우가 생긴다.
  *
  *  ── 굶음도 성능 손실이다. 다만 처방이 반대다 ─────────────────────────────
  *  잃은 시간으로 보면 막힘과 굶음은 같다 — 돌 수 있었는데 못 돌았다. 그래서 P
@@ -238,17 +305,18 @@ export function throughput(shipped) {
 export function oeeOf(uid) {
   if (ran <= 0) return null;
   const downSec = downTimeOf(uid);
-  const able = Math.max(0, ran - downSec);          // 돌 수 있었던 시간
+  const crewSec = Math.min(Math.max(0, ran - downSec), unmanned[uid] ?? 0);
+  const able = Math.max(0, ran - downSec - crewSec);   // 돌 수 있었던 시간
   const blockSec = Math.min(able, blocked[uid] ?? 0);
   const starveSec = Math.min(Math.max(0, able - blockSec), starved[uid] ?? 0);
 
-  const availability = Math.max(0, 1 - downSec / ran);
+  const availability = Math.max(0, 1 - (downSec + crewSec) / ran);
   const performance = able > 0 ? Math.max(0, 1 - (blockSec + starveSec) / able) : 1;
   const q = quality();
   return {
     availability, performance, quality: q,
     oee: availability * performance * q,
-    downSec, blockSec, starveSec,
+    downSec, crewSec, blockSec, starveSec,
   };
 }
 

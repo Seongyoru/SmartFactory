@@ -34,6 +34,8 @@ export const layoutSnapshot = (state) => ({
   pillars: state.pillars,
   zones: state.zones,
   openings: state.openings,
+  /** 교대조 — 배치와 함께 저장한다. 인원이 몇 명인지는 그 도면의 성질이다 */
+  shifts: state.shifts,
   seq: state.seq,
 });
 
@@ -179,12 +181,47 @@ export const deleteModelBuffer = (id) => tx('readwrite', (s) => s.delete(id));
 
 /* ---- 파일 내보내기/가져오기 --------------------------------------------- */
 
-export function downloadJSON(data, filename) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+function saveBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function downloadJSON(data, filename) {
+  saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), filename);
+}
+
+/**
+ * 표 한 장을 CSV 로.
+ * ---------------------------------------------------------------------------
+ *  시나리오 JSON 은 **이 도구가 다시 읽으려고** 만드는 것이고, CSV 는 **밖으로
+ *  들고 나가려고** 만드는 것이다. 성적을 보고서에 붙이거나 엑셀에서 그래프를
+ *  다시 그리는 일은 JSON 으로 못 한다.
+ *
+ *  ── 엑셀이 한글을 깨뜨리지 않게 ──────────────────────────────────────────
+ *  엑셀은 CSV 를 열 때 UTF-8 이라고 **말해 주지 않으면** 시스템 코드페이지로
+ *  읽는다. 그러면 설비 이름이 통째로 깨진다. 맨 앞에 BOM(`﻿`)을 붙이는 것이
+ *  그 신호다 — 한 글자로 끝나는 일이라 안 붙일 이유가 없다.
+ *
+ *  값 감싸기도 마찬가지다. 이름에 쉼표가 하나 들어가면 그 줄의 칸이 전부 밀린다.
+ *  쉼표·따옴표·줄바꿈이 있으면 따옴표로 감싸고, 안의 따옴표는 두 번 적는다(RFC 4180).
+ *
+ *  @param rows 첫 줄이 머리글인 2차원 배열
+ */
+export function downloadCSV(rows, filename) {
+  const cell = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const text = (rows ?? []).map((r) => r.map(cell).join(',')).join('\r\n');
+  saveBlob(new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' }), filename);
+}
+
+/** 파일 이름에 붙일 시각 — `2026-08-12_1430` */
+export function stamp(d = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`;
 }

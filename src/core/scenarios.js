@@ -82,6 +82,57 @@ export function makeScenario(uid, name, layout, run) {
  */
 export const LOWER_IS_BETTER = new Set(['neck', 'wip', 'scrapped']);
 
+/**
+ * 비교표를 CSV 한 장으로.
+ * ---------------------------------------------------------------------------
+ *  **화면과 같은 값을 같은 순서로** 내보낸다. 표에는 없는 값을 CSV 에만 넣거나
+ *  반대로 빼면, 붙여 놓고 보는 사람이 화면과 파일 중 어느 쪽을 믿어야 할지
+ *  모르게 된다.
+ *
+ *  숫자는 **가공하지 않고** 그대로 넣는다. 화면은 "97 %" 로 보여 주지만 파일에는
+ *  0.9712 가 들어가야 엑셀에서 다시 계산할 수 있다 — 반올림해서 내보내면 받는
+ *  사람이 원래 값을 되찾을 수 없다.
+ *
+ *  아직 안 돌린 시나리오도 **줄은 남긴다.** 빼 버리면 "이 배치는 왜 없지" 가
+ *  되는데, 답은 "안 돌렸다" 이고 그게 보여야 한다.
+ */
+export function scenarioCSV(rows) {
+  const head = [
+    '이름', '기록 시각', '돌린 시간(초)', '견줄 만한가',
+    '출하(개)', '처리량(개/시간)', '재공(개)', '불량(개)',
+    'OEE', '가동률', '성능', '양품률',
+    '병목', '병목 비율', '설비 수',
+  ];
+  const body = (rows ?? []).map((r) => {
+    const n = r.run;
+    if (!n) return [r.name, new Date(r.at).toLocaleString('ko-KR'), '', '안 돌림'];
+    return [
+      r.name,
+      new Date(r.at).toLocaleString('ko-KR'),
+      n.ran.toFixed(1),
+      n.ran >= SHORT_RUN ? '예' : `아니오 (${SHORT_RUN}초 미만)`,
+      n.shipped,
+      n.throughput.toFixed(1),
+      n.wip,
+      n.scrapped,
+      n.oee ?? '', n.availability ?? '', n.performance ?? '', n.quality ?? '',
+      n.neck?.name ?? '없음',
+      n.neck?.ratio ?? '',
+      n.equips,
+    ];
+  });
+  return [head, ...body];
+}
+
+/**
+ * 생산 추이를 CSV 로 — 시간축 한 줄에 한 표본.
+ *  화면의 SVG 그래프는 눈으로 보는 것이고, 이건 엑셀에서 다시 그리거나 다른
+ *  실행과 겹쳐 보려고 내보내는 것이다.
+ */
+export function seriesCSV(series) {
+  return [['시뮬 시간(초)', '누적 출하(개)'], ...(series ?? []).map((s) => [s.t.toFixed(1), s.shipped])];
+}
+
 export function bestOf(rows, key) {
   const vals = rows
     /* 너무 짧게 돌린 기록은 **우승 후보에서 뺀다.** 1분짜리 기록은 라인이 아직

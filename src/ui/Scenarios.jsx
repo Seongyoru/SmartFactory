@@ -25,9 +25,9 @@ import { useEditor } from '../core/store.jsx';
 import { useShipped } from '../core/simStore.js';
 import { getRan, useMetrics } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
-import { SHORT_RUN, bestOf, captureRun } from '../core/scenarios.js';
+import { SHORT_RUN, bestOf, captureRun, scenarioCSV } from '../core/scenarios.js';
 import { formatElapsed } from '../core/clock.js';
-import { downloadJSON } from '../core/persistence.js';
+import { downloadCSV, downloadJSON, stamp } from '../core/persistence.js';
 import { Btn } from './common.jsx';
 
 const pct = (v) => (typeof v === 'number' ? `${(v * 100).toFixed(0)}%` : '—');
@@ -200,15 +200,27 @@ export default function Scenarios() {
             <b className="text-ink2">처리량</b>과 비율은 돌린 길이가 달라도 견줄 수 있습니다.
             누적 개수는 오래 돌린 쪽이 이기므로 표에 두지 않았습니다.
           </p>
+          {/* CSV 와 JSON 을 나란히 둔다 — 하는 일이 다르다.
+              CSV 는 **밖으로 들고 나가는** 것(보고서·엑셀 그래프),
+              JSON 은 **이 도구가 다시 읽는** 것(도면까지 통째로 들어 있다). */}
           {rows.length > 0 && (
-            <Btn
-              onClick={() => downloadJSON(
-                rows.map(({ name: n, at, run }) => ({ name: n, at, ...run })),
-                `배치비교-${new Date().toISOString().slice(0, 10)}.json`,
-              )}
-            >
-              <Download size={13} /> 내보내기
-            </Btn>
+            <>
+              <Btn
+                onClick={() => downloadCSV(scenarioCSV(rows), `배치비교-${stamp()}.csv`)}
+                title="엑셀·보고서용. 화면의 표와 같은 값을 반올림 없이 담는다"
+              >
+                <Download size={13} /> CSV
+              </Btn>
+              <Btn
+                onClick={() => downloadJSON(
+                  rows.map(({ name: n, at, run }) => ({ name: n, at, ...run })),
+                  `배치비교-${stamp()}.json`,
+                )}
+                title="이 도구가 다시 읽는 형식"
+              >
+                <Download size={13} /> JSON
+              </Btn>
+            </>
           )}
         </div>
       </div>

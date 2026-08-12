@@ -86,8 +86,9 @@ import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import { addStock, getLots, getStock, shippedTotal, takeEach, useAllStock, useShipped } from '../core/simStore.js';
-import { tick } from '../core/clock.js';
+import { tick, useElapsed } from '../core/clock.js';
 import { accumulate } from '../core/metrics.js';
+import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
 import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
 import { isShelf, isStillage, isTruck, isUtility, payloadByKey } from '../data/library.js';
 import {
@@ -96,6 +97,7 @@ import {
 import ShelfView from './ShelfView.jsx';
 import StillageView from './StillageView.jsx';
 import ZoneMarks from './ZoneMarks.jsx';
+import WorkerView from './WorkerView.jsx';
 import { sceneTheme } from '../theme.js';
 
 /** 카트 경로를 그릴 때 첫 점을 다시 눌러 고리를 닫는 거리(m) */
@@ -114,7 +116,7 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, jammed, starved, equips }) {
+function SimClock({ running, halted, jammed, starved, unmanned, equips }) {
   const shipped = shippedTotal(useShipped());
   useFrame((_, real) => {
     const dt = tick(real, running);
@@ -127,23 +129,32 @@ function SimClock({ running, halted, jammed, starved, equips }) {
      * 서 있는 이유는 **한 프레임에 하나만** 센다.
      * -----------------------------------------------------------------------
      *  한 설비가 동시에 여러 목록에 들어갈 수 있다. 고장 난 설비는 벨트를 세워야
-     *  하니 halted 에도 있고, 막힌 설비가 마침 재료도 없을 수 있다. 그대로 다
-     *  적분하면 같은 시간을 두 번 빼서 지표가 함께 깎이고, 이유를 나눠 세는 뜻이
-     *  사라진다.
+     *  하니 halted 에도 있고, 사람이 없는 설비가 마침 재료도 없을 수 있다. 그대로
+     *  다 적분하면 같은 시간을 두 번 빼서 지표가 함께 깎이고, 이유를 나눠 세는
+     *  뜻이 사라진다.
      *
-     *  순서는 **고칠 수 있는 것이 앞**이다. 고장 중에는 재료가 있든 없든 못 도니
-     *  고장이 먼저고, 보낼 곳이 없으면 재료가 와도 못 도니 막힘이 그다음이다.
-     *  굶음은 앞의 둘 중 어느 것도 아닐 때만 굶음이다.
+     *  순서는 **더 근본적인 것이 앞**이다.
+     *
+     *    고장 → 무인 → 막힘 → 굶음
+     *
+     *  고장 중에는 사람이 있어도 못 돈다. 사람이 없으면 재료가 와도 못 돈다.
+     *  보낼 곳이 없으면 재료가 와도 못 돈다. 굶음은 앞의 셋 중 어느 것도 아닐
+     *  때만 굶음이다.
+     *
+     *  고장·무인은 **애초에 못 돈** 시간이라 가동률(A)에서 빠지고, 막힘·굶음은
+     *  **돌 수 있었는데 못 돈** 시간이라 성능(P)에서 빠진다(metrics 의 oeeOf).
      */
+    const downOnly = new Set();
     const blockedOnly = new Set();
     const starvedOnly = new Set();
     for (const uid of halted) {
       if (nowDown.has(uid)) continue;
-      if (jammed?.has(uid)) blockedOnly.add(uid);
+      if (unmanned?.has(uid)) downOnly.add(uid);
+      else if (jammed?.has(uid)) blockedOnly.add(uid);
       else if (starved?.has(uid)) starvedOnly.add(uid);
       else blockedOnly.add(uid);
     }
-    accumulate(dt, blockedOnly, shipped, starvedOnly);
+    accumulate(dt, blockedOnly, shipped, starvedOnly, downOnly);
   });
   return null;
 }
@@ -518,6 +529,24 @@ function SceneContent() {
   /* 지운 설비의 고장 기록까지 들고 있을 이유는 없다 */
   useEffect(() => { pruneFaults(new Set(placed.map((p) => p.uid))); }, [placed]);
 
+  /**
+   * 인력 — 지금 몇 조이고, 있는 사람이 어느 설비에 붙는가.
+   * -------------------------------------------------------------------------
+   *  `useElapsed` 는 250ms 에 한 번만 알려 오므로(clock.js) 교대가 바뀌는 것을
+   *  쫓으면서도 매 프레임 다시 그리지 않는다. 배정은 **배치 순서**를 따르므로
+   *  `placed` 의 순서가 곧 우선순위다(crew.js 의 assignCrew).
+   *
+   *  **`placed` 구조분해 뒤에 와야 한다** — 의존성 배열은 렌더 시점에 평가되므로
+   *  선언보다 위에 두면 매 렌더 TDZ 로 터진다(이 파일에서 두 번 밟은 함정이다).
+   */
+  const elapsedSec = useElapsed();
+  const shiftNow = useMemo(() => shiftAt(state.shifts, elapsedSec), [state.shifts, elapsedSec]);
+  const headcount = shiftNow.shift.headcount;
+  const crew = useMemo(
+    () => assignCrew(crewRows(placed, (p) => isWorkable(itemOf(p.itemId))), headcount),
+    [placed, itemOf, headcount],
+  );
+
   const [cursor, setCursor] = useState([0, 0]);
   const lastCursor = useRef([0, 0]);
   const drag = useRef(null);
@@ -722,18 +751,24 @@ function SceneContent() {
   /**
    * 서 있는 것들 — 그리고 **왜** 서 있는가.
    * -------------------------------------------------------------------------
-   *  설비가 서는 이유는 이제 셋이다. 화면에서 벌어지는 일은 같지만(붉게 서고
+   *  설비가 서는 이유는 이제 넷이다. 화면에서 벌어지는 일은 같지만(붉게 서고
    *  벨트도 선다) 푸는 방법이 다르고, 무엇보다 **전파 방향이 다르다.**
    *
-   *    고장(down)     설비 자체가 못 돈다        → 정비로 푼다
-   *    막힘(jammed)   보낼 곳이 가득 찼다        → **상류**로 번진다
-   *    굶음(starved)  먹을 재료가 없다           → **하류**로 번진다
+   *    고장(down)      설비 자체가 못 돈다       정비로 푼다   → 상류로 번진다
+   *    무인(unmanned)  돌릴 사람이 없다          인력으로 푼다 → 안 번진다
+   *    막힘(jammed)    보낼 곳이 가득 찼다       배치로 푼다   → **상류**로 번진다
+   *    굶음(starved)   먹을 재료가 없다          투입으로 푼다 → 안 번진다
    *
    *  막힘과 굶음을 한 목록에 담아 상류 전파를 태우면 **교착이 난다.** 굶은 설비로
    *  들어가는 벨트까지 세워 버리면, 재료를 실어다 줄 바로 그 벨트가 멈춘 채
    *  영영 풀리지 않는다 — 굶주림은 "못 받는 상태" 가 아니라 "아직 안 온 상태" 다.
    *  그래서 전파의 씨앗은 `jammed` 뿐이고, 굶음은 자기 유출 벨트만 세운다.
    *  (하류로는 저절로 번진다 — 아무것도 안 오면 다음 설비도 스스로 굶는다)
+   *
+   *  **무인도 상류로 안 번진다.** 사람이 없어도 **받기는 받는다** — 자재는 입력
+   *  버퍼에 그대로 쌓인다. 버퍼가 차면 그때 위의 ① 이 알아서 상류를 세운다.
+   *  처음부터 상류를 세우면 "사람이 없으니 앞 공정도 멈춘다" 가 되는데, 실제로는
+   *  앞 공정이 계속 밀어 넣어 재고가 쌓이는 것이 사실이고 그게 보여야 한다.
    */
   const halted = useMemo(() => {
     const links = new Set();
@@ -742,6 +777,10 @@ function SceneContent() {
     const jammed = new Set();
     /** 재료가 없어 서 있는 설비 — 지표에서 막힘과 갈라 센다 */
     const starved = new Set();
+    /** 사람이 안 붙어 서 있는 설비 */
+    const unmanned = new Set(crew.unmanned);
+    for (const uid of unmanned) equips.add(uid);
+    for (const f of beltFlows) if (unmanned.has(f.owner.uid)) links.add(f.link.uid);
 
     /**
      * ⓪ 고장 난 설비.
@@ -811,8 +850,8 @@ function SceneContent() {
         grew = true;
       }
     }
-    return { links, equips, jammed, starved };
-  }, [beltFlows, placed, itemOf, stockVersion, downMap]);
+    return { links, equips, jammed, starved, unmanned };
+  }, [beltFlows, placed, itemOf, stockVersion, downMap, crew]);
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
   const cartPaths = useMemo(
@@ -1911,6 +1950,7 @@ function SceneContent() {
         halted={halted.equips}
         jammed={halted.jammed}
         starved={halted.starved}
+        unmanned={halted.unmanned}
         equips={faultParams}
       />
       <color attach="background" args={[theme.bg]} />
@@ -2088,6 +2128,24 @@ function SceneContent() {
 
       {/* 비어 있는 설비 포트의 입출고 표시 (선반은 ShelfView 가 직접 그린다) */}
       <ZoneMarks zones={openPortZones} />
+
+      {/* 작업자 — **사람이 붙은 설비에만** 선다. 빈자리가 곧 "사람이 없다" 는
+          말이고, 그게 그 설비가 왜 서 있는지의 답이다(WorkerView 참고). */}
+      {placed.map((p) => {
+        const n = crewOf(p);
+        if (n <= 0 || !crew.manned.has(p.uid)) return null;
+        const bb = boxFor(p);
+        return (
+          <WorkerView
+            key={`w${p.uid}`}
+            at={p.pos}
+            rot={p.rot}
+            halfX={bb ? (bb.max[0] - bb.min[0]) / 2 : 1.5}
+            count={n}
+            y={p.y ?? 0}
+          />
+        );
+      })}
 
       {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차거나 재료가 떨어지면 선다 */}
       {beltFlows.map(({ link, path, owner, sink, recipe, outKind }) => (

@@ -14,6 +14,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { DEFAULT_GRID, clean } from './grid.js';
 import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
+import { normalizeShifts } from './crew.js';
 import {
   OPENING_DEFAULTS,
   PILLAR_DEFAULTS,
@@ -142,6 +143,14 @@ const initialState = {
   /** 벨트 UV 애니메이션 구동 여부 · 기본 속도(m/s) */
   running: true,
   beltSpeed: 0.6,
+
+  /**
+   * 교대조 — [{ name, hours, headcount }].
+   *  기본은 「상시」 한 조에 인원 제한 없음(headcount 0)이다. 이미 그린 도면이
+   *  인력이 생겼다는 이유로 갑자기 서면 안 된다 — 인력을 따지겠다고 말한
+   *  도면에서만 따진다.
+   */
+  shifts: [{ name: '상시', hours: 24, headcount: 0 }],
 
   /** 선반을 놓을 때의 길이(칸 수). 배치 중 [ ] 로 바꾼다 */
   shelfBays: DEFAULT_BAYS,
@@ -1010,6 +1019,9 @@ function reducer(state, action) {
         walls: action.data.walls ?? [],
         pillars: action.data.pillars ?? [],
         zones: action.data.zones ?? [],
+        /* 교대조가 없는 옛 도면은 「상시·제한 없음」으로 — 인력이 생겼다고
+           예전 도면이 갑자기 서면 안 된다 (crew.js 의 normalizeShifts) */
+        shifts: normalizeShifts(action.data.shifts),
         seq: action.data.seq ?? 1,
         selected: null,
         connectFrom: null,
@@ -1018,11 +1030,15 @@ function reducer(state, action) {
         wallDraft: null,
       };
 
+    case 'SET_SHIFTS':
+      return { ...state, shifts: normalizeShifts(action.shifts) };
+
     case 'CLEAR':
       return {
         ...state,
         placed: [], links: [], carts: [],
         areas: [], walls: [], pillars: [], zones: [], openings: [],
+        shifts: normalizeShifts(null),
         selected: null, connectFrom: null, pathDraft: null, polyDraft: null, wallDraft: null,
       };
 
@@ -1051,7 +1067,9 @@ function reducer(state, action) {
  * ======================================================================== */
 
 /** 되돌릴 대상 — 도면을 이루는 값들 */
-const DOC_KEYS = ['placed', 'links', 'carts', 'areas', 'walls', 'pillars', 'zones', 'openings', 'seq'];
+/* 교대조도 도면의 일부다 — 인원을 고치는 것도 되돌릴 수 있어야 하고, 자동 저장이
+   따라와야 한다. `normalizeShifts` 가 늘 새 배열을 주므로 참조 비교로도 잡힌다. */
+const DOC_KEYS = ['placed', 'links', 'carts', 'areas', 'walls', 'pillars', 'zones', 'openings', 'shifts', 'seq'];
 const HISTORY_LIMIT = 100;
 /** 같은 조작으로 묶는 시간(ms) */
 const COALESCE_MS = 500;

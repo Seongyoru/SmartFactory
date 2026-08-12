@@ -20,6 +20,7 @@ import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { CART_MARGIN, followDistance, forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
 import { simStep } from '../core/clock.js';
+import { accumulateCart } from '../core/metrics.js';
 import { addLots, addShipped, getLots, takeEach, takeLots } from '../core/simStore.js';
 import { buildableCount, countKinds, needFor } from '../core/bom.js';
 import { usePayloadSpecs } from '../core/payload.js';
@@ -198,6 +199,19 @@ function CartUnit({
       if (fleet && gap > 0) {
         const room = followDistance(me, fleet.current, { length: path.length, closed: cart.closed, gap });
         if (room !== Infinity && dt > 1e-6) capped = Math.min(speed, room / dt);
+      }
+      /**
+       * 앞차 때문에 **못 간 몫**을 시간으로 환산해 남긴다.
+       * ---------------------------------------------------------------------
+       *  완전히 선 것만 세면 "느려졌지만 가긴 갔다" 가 통째로 빠진다. 속도가
+       *  절반으로 깎였으면 그 프레임의 절반은 못 간 것이다 — 잃은 거리를 원래
+       *  속도로 나누면 그대로 잃은 시간이 된다.
+       *
+       *  정차(dwell)는 안 센다. 역에 서서 주고받은 시간은 **일을 한** 시간이고
+       *  여기서 세는 것은 **아무것도 못 한** 시간이다(metrics 의 accumulateCart).
+       */
+      if (speed > 0 && pauseRef.current <= 0) {
+        accumulateCart(cart.uid, dt, dt * (1 - capped / speed));
       }
 
       const next = stepCart(

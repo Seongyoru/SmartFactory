@@ -11,7 +11,12 @@ import { CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, stationStyle 
 import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed } from '../core/clock.js';
 import {
-  LOSS_FLOOR, getBlocked, getRan, getSeries, getStarved, lossSplit, oeeOf, oeeOverall,
+  CREW_RANGE, HEADCOUNT_RANGE, HOURS_RANGE,
+  assignCrew, crewOf, crewRows, isWorkable, normalizeShifts, shiftAt,
+} from '../core/crew.js';
+import {
+  LOSS_FLOOR, cartBlockRatio, getBlocked, getCartBlocked, getCartRan, getRan, getSeries,
+  getStarved, getUnmanned, lossSplit, oeeOf, oeeOverall,
   resetMetrics, useMetrics,
 } from '../core/metrics.js';
 import {
@@ -62,6 +67,8 @@ import {
   wallLines,
 } from '../core/area.js';
 import { focusOn } from '../core/focusStore.js';
+import { downloadCSV, stamp } from '../core/persistence.js';
+import { seriesCSV } from '../core/scenarios.js';
 import { sliceCountFor, tileCount } from '../scene/connectorGeometry.js';
 import { Btn, ColorField, Field, Row, Section, Slider } from './common.jsx';
 
@@ -143,11 +150,16 @@ function EquipUptime({ uid }) {
       <Row label="OEE">
         <b className={tone(o.oee)}>{pct(o.oee)}</b>
       </Row>
+      {/* 고장과 무인은 둘 다 「애초에 못 돈」 시간이라 A 에서 함께 빠지지만,
+          사는 것이 다르다 — 하나는 정비, 하나는 사람이다. 그래서 따로 적는다 */}
       <Row label="· 가동률">
         <span className={tone(o.availability)}>{pct(o.availability)}</span>
-        {o.downSec > 0 && (
+        {(o.downSec > LOSS_FLOOR || o.crewSec > LOSS_FLOOR) && (
           <span className="ml-1 text-[10px] text-ink4">
-            ({formatElapsed(o.downSec)} 고장{fixes ? ` · ${fixes}회` : ''})
+            ({[
+              o.downSec > LOSS_FLOOR ? `${formatElapsed(o.downSec)} 고장${fixes ? ` · ${fixes}회` : ''}` : null,
+              o.crewSec > LOSS_FLOOR ? `${formatElapsed(o.crewSec)} 무인` : null,
+            ].filter(Boolean).join(' · ')})
           </span>
         )}
       </Row>
@@ -170,6 +182,60 @@ function EquipUptime({ uid }) {
         {getScrapped() > 0 && <span className="ml-1 text-[10px] text-ink4">({getScrapped()}개 불량)</span>}
       </Row>
     </>
+  );
+}
+
+/**
+ * 이 설비를 돌릴 사람.
+ * ---------------------------------------------------------------------------
+ *  기본은 0 = **무인 설비**다. 이미 그린 도면이 인력이 생겼다는 이유로 갑자기
+ *  서면 안 되므로, 사람이 필요하다고 말한 설비에만 사람을 붙인다.
+ */
+function CrewFields({ placed }) {
+  const { state, dispatch, itemOf } = useEditor();
+  const elapsed = useElapsed();
+  const need = crewOf(placed);
+
+  /* 지금 이 설비에 사람이 붙었는가 — 씬과 **같은 함수**로 다시 잰다.
+     화면과 인스펙터가 각자 정하면 언젠가 서로 다른 말을 한다(crew.js 의 crewRows). */
+  const { shift } = shiftAt(state.shifts, elapsed);
+  const rows = crewRows(state.placed, (p) => isWorkable(itemOf(p.itemId)));
+  const { manned, unlimited } = assignCrew(rows, shift.headcount);
+  const on = manned.has(placed.uid);
+  const rank = rows.filter((r) => r.need > 0).findIndex((r) => r.uid === placed.uid) + 1;
+
+  return (
+    <Section title="작업자">
+      <Slider
+        label="필요 인원"
+        min={CREW_RANGE[0]} max={CREW_RANGE[1]} step={CREW_RANGE[2]}
+        value={need}
+        text={need > 0 ? `${need} 명` : '무인'}
+        onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { crew: v } })}
+      />
+      {need > 0 && (
+        <>
+          <Row label="지금">
+            {unlimited
+              ? <span className="text-ink3">인원을 안 따집니다</span>
+              : on
+                ? <span className="text-emerald-600">사람이 붙어 있습니다</span>
+                : <span className="text-rose-500">사람이 없어 섰습니다</span>}
+          </Row>
+          <Row label="배정 순서">{rank} 번째</Row>
+        </>
+      )}
+      <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+        {need > 0
+          ? <>
+              사람이 모자라면 <b className="text-ink3">배치한 순서대로</b> 배정합니다 —
+              병목 순서로 주면 배정이 매 프레임 흔들려 같은 도면이 매번 다른 답을 냅니다.
+              <br /><b className="text-ink3">부분 배정은 없습니다</b> — 2명이 필요한데 1명만
+              남았으면 그 1명은 다음 설비로 갑니다.
+            </>
+          : '0 이면 무인 설비입니다 — 사람을 쓰지 않고 계속 돕니다.'}
+      </p>
+    </Section>
   );
 }
 
@@ -391,6 +457,8 @@ function EquipmentPanel({ placed }) {
       </Section>
 
       <RecipeSection placed={placed} item={item} />
+
+      <CrewFields placed={placed} />
 
       <FaultFields placed={placed} />
 
@@ -855,6 +923,42 @@ function ShelfPanel({ placed }) {
   );
 }
 
+/**
+ * 이 경로의 카트가 앞차에 막혀 있던 비율.
+ * ---------------------------------------------------------------------------
+ *  대수를 늘렸는데 처리량이 안 느는 이유가 대개 여기 있다. 막힘이 크면 **대수가
+ *  아니라 경로가 모자란** 것이다 — 한 대를 더 넣어도 그 한 대도 같이 서 있는다.
+ *
+ *  정차(dwell)는 안 들어간다. 역에서 주고받은 시간은 **일을 한** 시간이라, 그것을
+ *  합쳐 세면 잘 도는 라인일수록 숫자가 나빠 보인다.
+ */
+function CartQueue({ cart }) {
+  useMetrics();
+  const ran = getCartRan()[cart.uid] ?? 0;
+  if (ran <= LOSS_FLOOR) return null;
+  const sec = getCartBlocked()[cart.uid] ?? 0;
+  if (sec <= LOSS_FLOOR) {
+    return <Row label="앞차에 막힘"><span className="text-emerald-600">없음</span></Row>;
+  }
+  const r = cartBlockRatio(cart.uid);
+  return (
+    <>
+      <Row label="앞차에 막힘">
+        <span className={r > 0.35 ? 'text-rose-500' : r > 0.15 ? 'text-amber-600' : 'text-ink2'}>
+          {(r * 100).toFixed(0)} %
+        </span>
+        <span className="ml-1 text-[10px] font-normal text-ink4">({formatElapsed(sec)})</span>
+      </Row>
+      {r > 0.35 && (
+        <p className="mt-1 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+          도는 시간의 {(r * 100).toFixed(0)}% 를 앞차 뒤에서 보냅니다 — <b>대수를 늘려도
+          처리량은 거의 안 늘어납니다.</b> 경로를 늘리거나 대수를 줄이세요.
+        </p>
+      )}
+    </>
+  );
+}
+
 function CartPanel({ cart }) {
   const { state, dispatch, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -912,6 +1016,9 @@ function CartPanel({ cart }) {
         <Row label="경로 길이">{path ? `${path.length.toFixed(2)} m` : '—'}</Row>
         <Row label="경유점">{cart.points.length} 개</Row>
         <Row label="주행 방식">{cart.closed ? '고리 (계속 순환)' : '왕복'}</Row>
+        {/* 앞차에 막혀 못 간 시간 — 대수를 정하는 데 쓰는 값이다.
+            정차(dwell)는 안 들어간다. 그건 일을 한 시간이다 */}
+        <CartQueue cart={cart} />
         {/* 차끼리 겹치지 못하게 막고 나면 짧은 경로에 여러 대를 올릴 수 없다.
             얼어붙고 나서 이유를 찾게 두지 않는다 */}
         {path && !fleetFits(path.length, cart.count ?? 1, gap).fits && (
@@ -2143,19 +2250,22 @@ function RunReport() {
    *  잃은 시간은 합쳐서 줄을 세우고, **어느 쪽으로 잃었는지는 줄마다 적는다.**
    */
   const starved = getStarved();
+  const unmanned = getUnmanned();
   const rows = state.placed
     .map((p) => {
       const sec = blocked[p.uid] ?? 0;
       const starve = starved[p.uid] ?? 0;
+      const crew = unmanned[p.uid] ?? 0;
       return {
         uid: p.uid,
         name: p.name ?? p.uid,
         sec,
         starve,
-        run: Math.max(0, 1 - Math.min(1, (sec + starve) / ran)),
+        crew,
+        run: Math.max(0, 1 - Math.min(1, (sec + starve + crew) / ran)),
       };
     })
-    .filter((r) => r.sec > LOSS_FLOOR || r.starve > LOSS_FLOOR)
+    .filter((r) => r.sec > LOSS_FLOOR || r.starve > LOSS_FLOOR || r.crew > LOSS_FLOOR)
     .sort((a, b) => a.run - b.run);
   const split = lossSplit();
 
@@ -2163,13 +2273,26 @@ function RunReport() {
     <Section
       title="이번 실행"
       right={
-        <button
-          onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); }}
-          className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
-          title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
-        >
-          다시 재기
-        </button>
+        <span className="flex items-center gap-1">
+          {/* 추이를 엑셀에서 다시 그리거나 다른 실행과 겹쳐 보려고 내보낸다.
+              화면의 그래프는 눈으로 보는 것이고 이건 들고 나가는 것이다 */}
+          {series.length > 1 && (
+            <button
+              onClick={() => downloadCSV(seriesCSV(series), `생산추이-${stamp()}.csv`)}
+              className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+              title="생산 추이를 CSV 로 — 엑셀에서 다시 그릴 수 있다"
+            >
+              CSV
+            </button>
+          )}
+          <button
+            onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); }}
+            className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+            title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
+          >
+            다시 재기
+          </button>
+        </span>
       }
     >
       <Row label="돌린 시간">{formatElapsed(elapsed)}</Row>
@@ -2183,7 +2306,7 @@ function RunReport() {
           </Row>
           <div className="mb-1 flex gap-1 text-[10px]">
             {[
-              ['가동률', overall.availability, '고장으로 못 돈 시간 — 정비로 푼다'],
+              ['가동률', overall.availability, '고장·무인으로 못 돈 시간 — 정비·인력으로 푼다'],
               ['성능', overall.performance, '막혀서·굶어서 못 돈 시간 — 배치로 푼다'],
               ['양품률', overall.quality, '만들었지만 못 쓰는 것 — 공정으로 푼다'],
             ].map(([label, v, why]) => (
@@ -2225,6 +2348,7 @@ function RunReport() {
                 </div>
                 <div className="text-[10px] tabular-nums text-ink4">
                   {[
+                    r.crew > LOSS_FLOOR ? `${formatElapsed(r.crew)} 무인` : null,
                     r.sec > LOSS_FLOOR ? `${formatElapsed(r.sec)} 막힘` : null,
                     r.starve > LOSS_FLOOR ? `${formatElapsed(r.starve)} 굶음` : null,
                   ].filter(Boolean).join(' · ')}
@@ -2239,6 +2363,14 @@ function RunReport() {
            *  것이고(하류를 늘린다), 굶음이 많으면 앞이 못 대는 것이다(상류를
            *  늘린다). 숫자만 늘어놓고 방향을 안 말하면 반대로 손보게 된다.
            */}
+          {/* 사람이 없어 선 시간이 있으면 그게 먼저다 — 배치를 아무리 고쳐도
+              사람이 없으면 안 돈다 */}
+          {split?.crew > LOSS_FLOOR && (
+            <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+              <b>사람이 없어 선 시간이 {formatElapsed(split.crew)}</b> 있습니다. 배치를 고쳐도
+              풀리지 않습니다 — 「인력」에서 교대 인원을 먼저 보세요.
+            </p>
+          )}
           <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
             {split?.starvedMore ? (
               <>
@@ -2363,6 +2495,110 @@ function BomReport() {
   );
 }
 
+/**
+ * 인력 — 교대조를 짜고, 지금 사람이 어디에 붙어 있는지 본다.
+ * ---------------------------------------------------------------------------
+ *  기본은 「상시」 한 조에 **인원 제한 없음**이다. 인력을 따지겠다고 말한 도면에서만
+ *  따진다 — 이미 그린 도면이 이 칸이 생겼다는 이유로 갑자기 서면 안 된다.
+ *
+ *  총원을 0 으로 두면 "사람이 없다" 가 아니라 **"인력을 안 따진다"** 는 뜻이다.
+ *  0 을 "아무도 없음" 으로 읽으면 기본값이 곧 전면 정지가 되어 버린다.
+ */
+function CrewPanel() {
+  const { state, dispatch, itemOf } = useEditor();
+  const elapsed = useElapsed();
+
+  const shifts = normalizeShifts(state.shifts);
+  const { index, shift, endsIn } = shiftAt(shifts, elapsed);
+  const rows = crewRows(state.placed, (p) => isWorkable(itemOf(p.itemId)));
+  const { manned, unmanned, idle, need, unlimited } = assignCrew(rows, shift.headcount);
+
+  const set = (i, patch) =>
+    dispatch({ type: 'SET_SHIFTS', shifts: shifts.map((s, k) => (k === i ? { ...s, ...patch } : s)) });
+  const add = () =>
+    dispatch({ type: 'SET_SHIFTS', shifts: [...shifts, { name: `${shifts.length + 1}조`, hours: 8, headcount: shift.headcount }] });
+  const drop = (i) => dispatch({ type: 'SET_SHIFTS', shifts: shifts.filter((_, k) => k !== i) });
+
+  const nameOf = (uid) => state.placed.find((p) => p.uid === uid)?.name ?? uid;
+
+  return (
+    <Section title="인력">
+      <Row label="이 도면에 필요한 인원">{need} 명 / 조</Row>
+      {!unlimited && (
+        <>
+          <Row label="지금 조">
+            {shift.name}
+            <span className="ml-1 text-[10px] font-normal text-ink4">
+              ({Number.isFinite(endsIn) ? `${formatElapsed(endsIn)} 남음` : '계속'})
+            </span>
+          </Row>
+          <Row label="배정">
+            <span className={unmanned.size ? 'text-rose-500' : 'text-emerald-600'}>
+              {shift.headcount - idle} / {shift.headcount} 명
+            </span>
+            {idle > 0 && <span className="ml-1 text-[10px] font-normal text-ink4">({idle}명 놀고 있음)</span>}
+          </Row>
+        </>
+      )}
+
+      <p className="mb-1 mt-3 text-[10.5px] text-ink4">교대조</p>
+      <ul className="space-y-1">
+        {shifts.map((s, i) => (
+          <li
+            key={i}
+            className={`flex items-center gap-1 rounded px-1 py-0.5 text-[11px] ${
+              i === index && !unlimited ? 'bg-sky-500/10 ring-1 ring-sky-500/30' : ''
+            }`}
+          >
+            <input
+              value={s.name}
+              onChange={(e) => set(i, { name: e.target.value })}
+              className="min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink outline-none focus:border-sky-500/60"
+            />
+            <input
+              type="number" min={HOURS_RANGE[0]} max={HOURS_RANGE[1]}
+              value={s.hours}
+              onChange={(e) => set(i, { hours: Number(e.target.value) })}
+              className="w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+            />
+            <span className="text-ink4">h</span>
+            <input
+              type="number" min={HEADCOUNT_RANGE[0]} max={HEADCOUNT_RANGE[1]}
+              value={s.headcount}
+              onChange={(e) => set(i, { headcount: Number(e.target.value) })}
+              className="w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+            />
+            <span className="text-ink4">명</span>
+            {shifts.length > 1 && (
+              <button onClick={() => drop(i)} className="rounded px-0.5 text-ink4 hover:text-rose-500" title="이 조를 뺀다">
+                <Trash2 size={11} />
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <Btn className="mt-1.5 w-full justify-center" onClick={add}>+ 조 추가</Btn>
+
+      {unmanned.size > 0 && (
+        <p className="mt-2 rounded bg-rose-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-rose-500 ring-1 ring-rose-500/25">
+          사람이 없어 선 설비 {unmanned.size}대 — {[...unmanned].slice(0, 3).map(nameOf).join(' · ')}
+          {unmanned.size > 3 ? ` 외 ${unmanned.size - 3}대` : ''}.
+          {' '}{need - (shift.headcount - idle)}명이 더 있으면 전부 돕니다.
+        </p>
+      )}
+
+      <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+        인원 <b className="text-ink3">0</b> 은 사람이 없다는 뜻이 아니라{' '}
+        <b className="text-ink3">인력을 안 따진다</b>는 뜻입니다.
+        <br />작업자는 <b className="text-ink3">걸어 다니지 않습니다</b> — 걷는 시간을 지어내는
+        대신 설비에 붙는 자원으로 둡니다. 답하려는 질문은 &ldquo;몇 명이면 도는가&rdquo;니까요.
+        <br />모자라면 <b className="text-ink3">배치한 순서대로</b> 배정하고, 못 채우는 설비는
+        건너뛰어 다음 설비가 그 사람을 씁니다.
+      </p>
+    </Section>
+  );
+}
+
 function Summary() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -2394,6 +2630,8 @@ function Summary() {
           <Row key={kind} label={`· ${PAYLOAD_ITEMS[kind]?.name ?? kind}`}>{n} 개</Row>
         ))}
       </Section>
+
+      <CrewPanel />
 
       <BomReport />
 
