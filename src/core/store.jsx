@@ -14,7 +14,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { DEFAULT_GRID, clean } from './grid.js';
 import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
-import { normalizeShifts } from './crew.js';
+import { DEFAULT_SHIFT, normalizeShifts } from './crew.js';
 import {
   OPENING_DEFAULTS,
   PILLAR_DEFAULTS,
@@ -145,12 +145,12 @@ const initialState = {
   beltSpeed: 0.6,
 
   /**
-   * 교대조 — [{ name, hours, headcount }].
+   * 교대조 — [{ name, minutes, headcount }].
    *  기본은 「상시」 한 조에 인원 제한 없음(headcount 0)이다. 이미 그린 도면이
    *  인력이 생겼다는 이유로 갑자기 서면 안 된다 — 인력을 따지겠다고 말한
    *  도면에서만 따진다.
    */
-  shifts: [{ name: '상시', hours: 24, headcount: 0 }],
+  shifts: [{ ...DEFAULT_SHIFT }],
 
   /** 선반을 놓을 때의 길이(칸 수). 배치 중 [ ] 로 바꾼다 */
   shelfBays: DEFAULT_BAYS,

@@ -9,10 +9,10 @@ import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import { CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, stationStyle } from '../core/cart.js';
 import { clearStock, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
-import { formatElapsed, resetClock, useElapsed } from '../core/clock.js';
+import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import {
-  CREW_RANGE, HEADCOUNT_RANGE, HOURS_RANGE,
-  assignCrew, crewOf, crewRows, isWorkable, normalizeShifts, shiftAt,
+  CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE, SHIFT_PRESETS,
+  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, normalizeShifts, shiftAt, shiftLabel,
 } from '../core/crew.js';
 import {
   LOSS_FLOOR, cartBlockRatio, getBlocked, getCartBlocked, getCartRan, getRan, getSeries,
@@ -2507,6 +2507,7 @@ function BomReport() {
 function CrewPanel() {
   const { state, dispatch, itemOf } = useEditor();
   const elapsed = useElapsed();
+  const speed = useSimSpeed();
 
   const shifts = normalizeShifts(state.shifts);
   const { index, shift, endsIn } = shiftAt(shifts, elapsed);
@@ -2515,8 +2516,16 @@ function CrewPanel() {
 
   const set = (i, patch) =>
     dispatch({ type: 'SET_SHIFTS', shifts: shifts.map((s, k) => (k === i ? { ...s, ...patch } : s)) });
-  const add = () =>
-    dispatch({ type: 'SET_SHIFTS', shifts: [...shifts, { name: `${shifts.length + 1}조`, hours: 8, headcount: shift.headcount }] });
+  /* 새 조는 **바로 위 조와 같은 길이**로 시작한다 — 3교대를 짤 때 8시간을 세 번
+     적게 하지 않는다. 인원만 바꾸면 되는 경우가 대부분이다 */
+  const add = () => dispatch({
+    type: 'SET_SHIFTS',
+    shifts: [...shifts, {
+      name: `${shifts.length + 1}조`,
+      minutes: shifts[shifts.length - 1].minutes,
+      headcount: shift.headcount,
+    }],
+  });
   const drop = (i) => dispatch({ type: 'SET_SHIFTS', shifts: shifts.filter((_, k) => k !== i) });
 
   const nameOf = (uid) => state.placed.find((p) => p.uid === uid)?.name ?? uid;
@@ -2541,39 +2550,64 @@ function CrewPanel() {
         </>
       )}
 
-      <p className="mb-1 mt-3 text-[10.5px] text-ink4">교대조</p>
-      <ul className="space-y-1">
+      <p className="mb-1 mt-3 flex items-center justify-between text-[10.5px] text-ink4">
+        교대조
+        <span className="tabular-nums">한 바퀴 {formatElapsed(cycleSeconds(shifts))}</span>
+      </p>
+      <ul className="space-y-1.5">
         {shifts.map((s, i) => (
           <li
             key={i}
-            className={`flex items-center gap-1 rounded px-1 py-0.5 text-[11px] ${
-              i === index && !unlimited ? 'bg-sky-500/10 ring-1 ring-sky-500/30' : ''
-            }`}
+            className={`rounded px-1 py-1 ${i === index && !unlimited ? 'bg-sky-500/10 ring-1 ring-sky-500/30' : ''}`}
           >
-            <input
-              value={s.name}
-              onChange={(e) => set(i, { name: e.target.value })}
-              className="min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink outline-none focus:border-sky-500/60"
-            />
-            <input
-              type="number" min={HOURS_RANGE[0]} max={HOURS_RANGE[1]}
-              value={s.hours}
-              onChange={(e) => set(i, { hours: Number(e.target.value) })}
-              className="w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
-            />
-            <span className="text-ink4">h</span>
-            <input
-              type="number" min={HEADCOUNT_RANGE[0]} max={HEADCOUNT_RANGE[1]}
-              value={s.headcount}
-              onChange={(e) => set(i, { headcount: Number(e.target.value) })}
-              className="w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
-            />
-            <span className="text-ink4">명</span>
-            {shifts.length > 1 && (
-              <button onClick={() => drop(i)} className="rounded px-0.5 text-ink4 hover:text-rose-500" title="이 조를 뺀다">
-                <Trash2 size={11} />
-              </button>
-            )}
+            <div className="flex items-center gap-1 text-[11px]">
+              <input
+                value={s.name}
+                onChange={(e) => set(i, { name: e.target.value })}
+                className="min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink outline-none focus:border-sky-500/60"
+              />
+              {/* 길이는 **분**이다 — 10분씩 끊어 올린다. 8시간 조는 480 */}
+              <input
+                type="number"
+                min={MINUTES_RANGE[0]} max={MINUTES_RANGE[1]} step={MINUTES_RANGE[2]}
+                value={s.minutes}
+                onChange={(e) => set(i, { minutes: Number(e.target.value) })}
+                title={shiftLabel(s.minutes)}
+                className="w-14 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+              />
+              <span className="text-ink4">분</span>
+              <input
+                type="number" min={HEADCOUNT_RANGE[0]} max={HEADCOUNT_RANGE[1]}
+                value={s.headcount}
+                onChange={(e) => set(i, { headcount: Number(e.target.value) })}
+                className="w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+              />
+              <span className="text-ink4">명</span>
+              {shifts.length > 1 && (
+                <button onClick={() => drop(i)} className="rounded px-0.5 text-ink4 hover:text-rose-500" title="이 조를 뺀다">
+                  <Trash2 size={11} />
+                </button>
+              )}
+            </div>
+            {/* 480 이 8시간이라는 것을 암산하게 두지 않는다. 자주 쓰는 길이는
+                눌러서 바로 넣는다 — 실제 시간이 얼마나 걸리는지도 함께 */}
+            <div className="mt-0.5 flex items-center gap-1 pl-1 text-[10px] text-ink4">
+              <span className="tabular-nums">{shiftLabel(s.minutes)}</span>
+              <span className="text-ink4/60">·</span>
+              <span className="tabular-nums" title="지금 배속으로 이 조가 끝나기까지 걸리는 실제 시간">
+                {speed}× 로 {formatElapsed((s.minutes * 60) / speed)}
+              </span>
+              <span className="flex-1" />
+              {SHIFT_PRESETS.map((p) => (
+                <button
+                  key={p.minutes}
+                  onClick={() => set(i, { minutes: p.minutes })}
+                  className={`rounded px-1 ${s.minutes === p.minutes ? 'bg-sky-500/20 text-sky-600' : 'hover:bg-raiseh hover:text-ink2'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
           </li>
         ))}
       </ul>

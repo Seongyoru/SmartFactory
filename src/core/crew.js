@@ -27,8 +27,16 @@
  * ---------------------------------------------------------------------------
  */
 
-/** 교대조를 안 정했을 때 — 하루 한 조, 인원 제한 없음 */
-export const DEFAULT_SHIFT = { name: '상시', hours: 24, headcount: 0 };
+/**
+ * 한 조의 길이는 **분**으로 저장한다.
+ * ---------------------------------------------------------------------------
+ *  처음에는 시간(`hours`)으로 뒀는데, 8시간 조는 최고 배속(20×)으로도 24분을
+ *  기다려야 넘어가서 교대가 바뀌는 것을 눈으로 볼 수가 없었다. 그렇다고 시간에
+ *  소수를 넣으면(10분 = 0.16666…) 도면 파일에 부동소수 찌꺼기가 남는다.
+ *
+ *  분은 **정수로 딱 떨어지고** 실제 교대(480분 = 8시간)도 그대로 적힌다.
+ */
+export const DEFAULT_SHIFT = { name: '상시', minutes: 1440, headcount: 0 };
 
 /** 인원 0 = **제한 없음**. "사람이 없다" 가 아니라 "인력을 안 따진다" 는 뜻이다 */
 export const UNLIMITED = 0;
@@ -36,7 +44,25 @@ export const UNLIMITED = 0;
 /** 인스펙터 슬라이더 범위 */
 export const CREW_RANGE = [0, 8, 1];          // 설비 한 대에 붙는 인원
 export const HEADCOUNT_RANGE = [0, 60, 1];    // 한 조의 총원
-export const HOURS_RANGE = [1, 24, 1];        // 한 조의 길이(시간)
+/** 한 조의 길이(분) — 10분씩 끊어 올린다. 24시간까지 */
+export const MINUTES_RANGE = [10, 1440, 10];
+
+/** 자주 쓰는 길이 — 눌러서 바로 넣는다 */
+export const SHIFT_PRESETS = [
+  { label: '10분', minutes: 10 },
+  { label: '30분', minutes: 30 },
+  { label: '1시간', minutes: 60 },
+  { label: '8시간', minutes: 480 },
+];
+
+/** 분 → 읽히는 문자열 ("8시간" · "1시간 30분" · "20분") */
+export function shiftLabel(minutes) {
+  const m = Math.max(0, Math.round(minutes));
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  if (!h) return `${r}분`;
+  return r ? `${h}시간 ${r}분` : `${h}시간`;
+}
 
 /** 이 설비에 필요한 인원 */
 export const crewOf = (placed) => Math.max(0, Math.round(placed?.crew ?? 0));
@@ -55,20 +81,31 @@ export const isWorkable = (item) => !!item && item.kind !== 'shelf' && item.kind
 /**
  * 저장된 교대표를 믿을 수 있는 모양으로.
  *  비어 있으면 「상시」 한 조 — 이미 그린 도면이 인력 때문에 갑자기 서면 안 된다.
+ *
+ *  ── 옛 도면은 `hours` 로 적혀 있다 ───────────────────────────────────────
+ *  분으로 바꾸기 전에 저장한 도면이 있다. 그대로 두면 길이를 못 읽어 기본값으로
+ *  떨어지고, 8시간 조를 짜 둔 사람은 이유도 모른 채 교대표가 초기화된다.
+ *  `minutes` 가 없으면 `hours` 를 60배 해서 받는다.
+ *
+ *  10분 단위로 **강제하지는 않는다.** 화면에서 10분씩 끊어 올릴 뿐이고, 손으로
+ *  45분을 적은 도면은 45분이 맞다 — 우리가 조용히 40이나 50으로 바꿀 일이 아니다.
  */
 export function normalizeShifts(list) {
-  const rows = (Array.isArray(list) ? list : [])
-    .map((s, i) => ({
+  const rows = (Array.isArray(list) ? list : []).map((s, i) => {
+    const raw = Number(s?.minutes);
+    const mins = Number.isFinite(raw) && raw > 0 ? raw : (Number(s?.hours) || 0) * 60;
+    return {
       name: typeof s?.name === 'string' && s.name.trim() ? s.name.trim() : `${i + 1}조`,
-      hours: Math.min(24, Math.max(1, Math.round(Number(s?.hours) || 0) || 8)),
+      minutes: Math.min(MINUTES_RANGE[1], Math.max(MINUTES_RANGE[0], Math.round(mins) || 480)),
       headcount: Math.max(0, Math.round(Number(s?.headcount) || 0)),
-    }));
+    };
+  });
   return rows.length ? rows : [{ ...DEFAULT_SHIFT }];
 }
 
 /** 한 바퀴(전체 교대를 다 도는 데 걸리는) 시간(초) */
 export const cycleSeconds = (shifts) =>
-  normalizeShifts(shifts).reduce((s, r) => s + r.hours * 3600, 0);
+  normalizeShifts(shifts).reduce((s, r) => s + r.minutes * 60, 0);
 
 /**
  * 시뮬 시간이 이만큼 흘렀을 때 **지금 몇 조인가**.
@@ -77,12 +114,12 @@ export const cycleSeconds = (shifts) =>
  */
 export function shiftAt(shifts, elapsed) {
   const rows = normalizeShifts(shifts);
-  const total = rows.reduce((s, r) => s + r.hours * 3600, 0);
+  const total = rows.reduce((s, r) => s + r.minutes * 60, 0);
   if (!(total > 0)) return { index: 0, shift: rows[0], endsIn: Infinity };
 
   let t = ((elapsed % total) + total) % total;
   for (let i = 0; i < rows.length; i++) {
-    const len = rows[i].hours * 3600;
+    const len = rows[i].minutes * 60;
     if (t < len) return { index: i, shift: rows[i], endsIn: len - t };
     t -= len;
   }
