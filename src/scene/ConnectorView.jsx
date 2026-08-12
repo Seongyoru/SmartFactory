@@ -25,6 +25,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { useModelSpec } from '../core/modelStore.js';
+import { simStep } from '../core/clock.js';
 import { buildHitGeometry, buildTiledGeometry, buildTubeGeometry } from './connectorGeometry.js';
 
 const SELECT_COLOR = '#38bdf8';
@@ -119,6 +120,7 @@ export default function ConnectorView({
     const v = driveRef.current;
     if (!v || !beltMaps.length || !belt) return;
     // 진행 방향으로 흐르게 하려면 UV 기울기의 반대 부호로 오프셋을 움직인다
+    /* 배속을 반영한 시뮬 시간 — 프레임 상한도 여기서 걸린다 */
     const d = -belt.uvGradient * v * simStep(dt);
     for (const map of beltMaps) map.offset.x = (map.offset.x + d) % 1;
   });

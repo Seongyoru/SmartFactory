@@ -328,10 +328,11 @@ selected = { kind, uid, edge?, items: [{kind, uid, edge?}, …] }
 
 **브라우저 패널이 표시되지 않는다.** 이번에 원인을 정확히 짚었다.
 
-> **한 줄 요약** — shim 을 넣으면 **씬이 마운트되는지**는 볼 수 있지만,
-> `requestAnimationFrame` 이 아예 안 돌아(컴포지팅이 없다) **시뮬레이션이 도는 모습은
-> 끝내 못 본다.** 즉 렌더 시점 오류(TDZ 같은 것)는 잡히고, 시계·벨트·카트가 실제로
-> 움직이는지는 사람이 봐야 한다.
+> **한 줄 요약** — shim 으로 `ResizeObserver` 와 **`requestAnimationFrame` 을 함께**
+> 대체하면 씬이 뜨고 **시뮬레이션이 실제로 돈다.** 프레임 루프에서만 드러나는 오류
+> (import 를 빠뜨린 식별자 같은 것)까지 잡힌다 — 실제로 이 방법으로 "컨베이어를
+> 그리면 화면이 멈추는" 버그를 찾았다. 그림은 여전히 못 보지만(컴포지팅 없음),
+> **값과 오류는 전부 볼 수 있다.**
 
 1. **`ResizeObserver` 가 한 번도 발화하지 않는다.** 객체는 있고 `observe()` 도 받지만
    콜백이 영영 안 온다(창 크기를 바꿔도). R3F 의 `Canvas` 는 react-use-measure 로 크기를
@@ -364,6 +365,15 @@ class ShimRO {
 }
 window.ResizeObserver = ShimRO;
 setInterval(() => all.forEach((o) => o.fire()), 500);
+
+/* rAF 도 안 돈다 — 타이머로 대체하면 시뮬레이션이 실제로 흐른다.
+   콜백을 try 로 감싸 두면 프레임 루프에서 터진 오류가 __rafError 에 남는다. */
+window.__frames = 0;
+window.requestAnimationFrame = (cb) => setTimeout(() => {
+  window.__frames++;
+  try { cb(performance.now()); } catch (e) { window.__rafError = String(e); }
+}, 16);
+window.cancelAnimationFrame = (id) => clearTimeout(id);
 ```
 
 `__THREE_DEVTOOLS__` 를 **three 보다 먼저** 심어 두면 three 가 Scene·렌더러를 넘겨준다
