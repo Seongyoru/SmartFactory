@@ -23,6 +23,8 @@ import {
   Undo2,
   Upload,
 } from 'lucide-react';
+import { SPEEDS, formatElapsed, resetClock, setSpeed, useElapsed, useSimSpeed } from '../core/clock.js';
+import { resetMetrics } from '../core/metrics.js';
 import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
 import { downloadJSON, layoutSnapshot, saveLayout } from '../core/persistence.js';
@@ -30,6 +32,8 @@ import { Btn, IconBtn } from './common.jsx';
 
 export default function Toolbar() {
   const { state, dispatch } = useEditor();
+  const simSpeed = useSimSpeed();
+  const elapsed = useElapsed();
   const fileRef = useRef(null);
 
   const setView = (view) => dispatch({ type: 'SET', patch: { view } });
@@ -164,6 +168,31 @@ export default function Toolbar() {
       >
         {state.running ? <Pause size={14} /> : <Play size={14} />}
       </IconBtn>
+      {/* 배속 — 지표는 시간으로 나눈 값이라, 시간을 빨리 못 감으면 답이 안 나온다.
+          1시간짜리 라인을 실시간으로 보고 있을 수는 없다. */}
+      <div className="flex items-center rounded-md bg-raise p-0.5 ring-1 ring-edge" title="시뮬레이션 배속">
+        {SPEEDS.map((v) => (
+          <button
+            key={v}
+            onClick={() => setSpeed(v)}
+            className={`rounded px-1.5 py-0.5 text-[10.5px] font-medium tabular-nums transition-colors ${
+              simSpeed === v ? 'bg-sky-500 text-white' : 'text-ink4 hover:text-ink2'
+            }`}
+          >
+            {v}×
+          </button>
+        ))}
+      </div>
+      {/* 경과 시간 — 누르면 지표를 처음부터 다시 잰다.
+          배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다. */}
+      <button
+        onClick={() => { resetClock(); resetMetrics(); }}
+        title="시뮬레이션 안에서 흐른 시간 (▶ 를 켜 둔 동안만 흐른다) — 눌러서 지표 초기화"
+        className="w-[86px] rounded px-1 py-0.5 text-left text-[11px] tabular-nums text-ink3 hover:bg-raiseh hover:text-ink"
+      >
+        ⏱ {formatElapsed(elapsed)}
+      </button>
+
       <label className="flex items-center gap-1.5 text-[11px] text-ink3" title="개별 지정이 없는 벨트의 기본 속도">
         <input
           type="range"

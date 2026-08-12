@@ -16,7 +16,8 @@ import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, 
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { loadModel } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
-import { useShipped } from './core/simStore.js';
+import { shippedTotal, useAllStock, useShipped } from './core/simStore.js';
+import { bottleneck, getRan, throughput, useMetrics } from './core/metrics.js';
 import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
@@ -257,12 +258,23 @@ function ModeBanner() {
  *  아무것도 안 나갔으면 띄우지 않는다 — 0 만 적힌 상자는 화면만 가린다.
  */
 function ShippedHUD() {
+  const { state, itemOf } = useEditor();
   const shipped = useShipped();
+  useMetrics();                       // 지표가 갱신되면 다시 그린다
+  const stock = useAllStock();
+  const ran = getRan();
+
   const kinds = Object.entries(shipped).filter(([, n]) => n > 0);
-  if (!kinds.length) return null;
+  const total = shippedTotal(shipped);
+  /** 재공(WIP) — 아직 공장 안에 있는 것. 적치대·선반에 쌓인 것을 센다 */
+  const wip = Object.values(stock).reduce((s, n) => s + n, 0);
+  const neck = bottleneck();
+  const neckName = neck ? state.placed.find((p) => p.uid === neck.uid)?.name ?? neck.uid : null;
+
+  if (!kinds.length && !wip && !neck) return null;
 
   return (
-    <div className="pointer-events-none absolute left-3 top-3 z-10 flex flex-col gap-1">
+    <div className="pointer-events-none absolute left-3 top-3 z-10 flex w-[186px] flex-col gap-1">
       {kinds.map(([kind, n]) => {
         const it = PAYLOAD_ITEMS[kind];
         return (
@@ -280,6 +292,33 @@ function ShippedHUD() {
           </div>
         );
       })}
+
+      {/**
+       * 성과 — 도면이 잘 도는지는 이 세 줄로 갈린다.
+       *  처리량은 **시간으로 나눈 값**이라 시뮬 시계가 있어야 의미가 있다.
+       *  재공은 공장 안에 붙들려 있는 양이고, 병목은 가장 오래 막혀 선 설비다.
+       *  아직 아무것도 안 돌았으면(ran = 0) 나눗셈이 성립하지 않으므로 안 띄운다.
+       */}
+      {ran > 0 && (
+        <div className="rounded-lg bg-float px-2.5 py-1.5 text-[11px] ring-1 ring-edge backdrop-blur">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-ink4">처리량</span>
+            <b className="tabular-nums text-ink">{throughput(total).toFixed(1)} 개/시간</b>
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-ink4">재공</span>
+            <b className="tabular-nums text-ink">{wip.toLocaleString()} 개</b>
+          </div>
+          {neck && (
+            <div className="mt-0.5 flex items-center justify-between gap-2 border-t border-line pt-0.5">
+              <span className="shrink-0 text-rose-500">병목</span>
+              <span className="truncate text-right text-ink2" title={`${neckName} — 전체 시간의 ${(neck.ratio * 100).toFixed(0)}% 를 막혀서 서 있었다`}>
+                {neckName} <b className="tabular-nums text-rose-500">{(neck.ratio * 100).toFixed(0)}%</b>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -85,7 +85,9 @@ import EditHandles from './EditHandles.jsx';
 import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
-import { addStock, getStock, useAllStock } from '../core/simStore.js';
+import { addStock, getStock, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
+import { tick } from '../core/clock.js';
+import { accumulate } from '../core/metrics.js';
 import { isShelf, isStillage, isTruck, isUtility, payloadKeyOf, payloadOf } from '../data/library.js';
 import ShelfView from './ShelfView.jsx';
 import StillageView from './StillageView.jsx';
@@ -98,6 +100,24 @@ const CLOSE_DIST = 1.2;
 const BRANCH_SNAP_DIST = 1.0;
 /** 배관·전선이 설비에 붙는 것으로 보는 여유 폭(m) */
 const ANCHOR_MARGIN = 0.8;
+
+/**
+ * 시뮬 시계를 돌리고, 그 시간으로 지표를 쌓는다.
+ * ---------------------------------------------------------------------------
+ *  시계는 **프레임마다 딱 한 번** 흘러야 해서 전용 컴포넌트로 둔다(벨트·카트는
+ *  각자 `simStep(dt)` 으로 같은 값을 읽어 가되, 경과 시간을 더하지는 않는다).
+ *
+ *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
+ *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
+ */
+function SimClock({ running, halted }) {
+  const shipped = shippedTotal(useShipped());
+  useFrame((_, real) => {
+    const dt = tick(real, running);
+    if (dt > 0) accumulate(dt, halted, shipped);
+  });
+  return null;
+}
 
 /** 모델 캐시가 갱신될 때(로드 완료) 다시 그리기 위한 버전 카운터 */
 function useModelsVersion() {
@@ -1777,6 +1797,7 @@ function SceneContent() {
 
   return (
     <>
+      <SimClock running={state.running} halted={halted.equips} />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />
       <CameraRig view={view} key={view} />

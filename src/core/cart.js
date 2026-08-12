@@ -405,7 +405,9 @@ export function stepCart(st, { length, closed, oneWay, speed, dwell }, stations,
   if (st.pause > 0) return { s: st.s, dir: st.dir, pause: st.pause - dt, arrived: null };
 
   const dir0 = st.dir;
-  const step = speed * Math.min(dt, 0.1) * dir0;
+  /* dt 는 **시뮬 시간**이다 — 배속과 프레임 상한은 clock.simStep 이 이미 적용했다.
+     여기서 또 자르면 배속이 통째로 무시된다. */
+  const step = speed * dt * dir0;
   let s1 = st.s + step;
   let dir = st.dir;
 

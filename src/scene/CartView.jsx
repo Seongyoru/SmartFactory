@@ -19,6 +19,7 @@ import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { forgetStation, loadRoom, stationStyle, stepCart } from '../core/cart.js';
+import { simStep } from '../core/clock.js';
 import { addLots, addShipped, takeLots } from '../core/simStore.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
@@ -152,7 +153,10 @@ function CartUnit({ cart, spec, path, stations, running, selected, startS, shipO
   /* 차체 위 — 모델 높이를 알면 그 위로, 모르면 넉넉히 */
   const loadLabelY = (spec?.bbox?.size?.[1] ?? 3.3) + 0.6;
 
-  useFrame((_, dt) => {
+  useFrame((_, real) => {
+    /* 배속을 반영한 **시뮬 시간**으로 바꿔서 쓴다. 프레임이 길어졌을 때의
+       상한도 여기서 이미 걸린다(clock.simStep). */
+    const dt = simStep(real);
     const g = groupRef.current;
     if (!g || !path) return;
 

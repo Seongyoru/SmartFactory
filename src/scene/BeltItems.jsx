@@ -23,6 +23,7 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
+import { simStep } from '../core/clock.js';
 import { PAYLOAD_ITEM } from '../data/library.js';
 
 /** 한 벨트에 올릴 수 있는 최대 개수 — 짧은 간격으로 긴 벨트를 채울 때의 안전선 */
@@ -76,7 +77,7 @@ export default function BeltItems({ path, speed = 0.6, gap = 3, layers = 1, runn
 
     if (running && speed > 0) {
       const prev = offsetRef.current;
-      const next = prev + speed * Math.min(dt, 0.1);
+      const next = prev + speed * simStep(dt);
 
       /**
        * 물건이 벨트 끝을 넘어가는 순간을 잡는다.

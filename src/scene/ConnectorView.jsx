@@ -119,7 +119,7 @@ export default function ConnectorView({
     const v = driveRef.current;
     if (!v || !beltMaps.length || !belt) return;
     // 진행 방향으로 흐르게 하려면 UV 기울기의 반대 부호로 오프셋을 움직인다
-    const d = -belt.uvGradient * v * Math.min(dt, 0.1);
+    const d = -belt.uvGradient * v * simStep(dt);
     for (const map of beltMaps) map.offset.x = (map.offset.x + d) % 1;
   });
 
