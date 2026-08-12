@@ -789,9 +789,22 @@ function SceneContent() {
    *  버퍼에 그대로 쌓인다. 버퍼가 차면 그때 위의 ① 이 알아서 상류를 세운다.
    *  처음부터 상류를 세우면 "사람이 없으니 앞 공정도 멈춘다" 가 되는데, 실제로는
    *  앞 공정이 계속 밀어 넣어 재고가 쌓이는 것이 사실이고 그게 보여야 한다.
+   *
+   *  ── 벨트가 **서는 것**과 **마르는 것**은 다르다 ──────────────────────────
+   *  예전에는 둘을 한 목록에 담았다. 그래서 설비가 고장 나는 순간 이미 벨트 위에
+   *  올라타 있던 물건까지 그 자리에 얼어붙었다 — 실제 라인은 그렇지 않다.
+   *  컨베이어는 자기 모터로 돈다. 앞 설비가 서면 **앞머리가 비어 갈 뿐** 위에
+   *  있던 것은 끝까지 가서 다음 설비나 적치대로 들어간다.
+   *
+   *    links  벨트가 **선다** — 보낼 곳이 없다(종점이 가득 참 · 상류 전파).
+   *           위에 있던 물건도 멈춘다. 레일 애니메이션도 여기서 멈춘다.
+   *    dry    벨트는 **돈다** — 다만 새로 올라탈 것이 없다(고장 · 무인 · 굶음).
    */
   const halted = useMemo(() => {
+    /** 서 있는 벨트 — 보낼 곳이 없다 */
     const links = new Set();
+    /** 마른 벨트 — 돌기는 도는데 새 자재가 안 올라탄다 */
+    const dry = new Set();
     const equips = new Set();
     /** 받을 수 없는 설비 — 상류 전파의 씨앗 (고장 · 막힘) */
     const jammed = new Set();
@@ -800,7 +813,7 @@ function SceneContent() {
     /** 사람이 안 붙어 서 있는 설비 */
     const unmanned = new Set(crew.unmanned);
     for (const uid of unmanned) equips.add(uid);
-    for (const f of beltFlows) if (unmanned.has(f.owner.uid)) links.add(f.link.uid);
+    for (const f of beltFlows) if (unmanned.has(f.owner.uid)) dry.add(f.link.uid);
 
     /**
      * ⓪ 고장 난 설비.
@@ -808,9 +821,12 @@ function SceneContent() {
      *  막힘은 배치를 고쳐 풀 수 있지만 고장은 설비 자체의 성질이라, 지표에서는
      *  갈라 센다(SimClock). 다만 화면에서 벌어지는 일은 같고, 고장 난 설비는
      *  실제로 **받지도 못하므로** 상류 전파도 그대로 태운다.
+     *
+     *  유출 벨트는 **세우지 않고 말린다** — 고장 난 것은 설비지 컨베이어가
+     *  아니다. 이미 올라타 있던 물건은 끝까지 흘러 나가야 한다.
      */
     for (const uid of Object.keys(downMap)) { equips.add(uid); jammed.add(uid); }
-    for (const f of beltFlows) if (downMap[f.owner.uid]) links.add(f.link.uid);
+    for (const f of beltFlows) if (downMap[f.owner.uid]) dry.add(f.link.uid);
 
     /**
      * ① 자리가 없는 종점으로 들어가는 벨트와, 그 벨트를 먹이던 설비.
@@ -854,7 +870,7 @@ function SceneContent() {
       equips.add(p.uid);
       starved.add(p.uid);
     }
-    for (const f of beltFlows) if (starved.has(f.owner.uid)) links.add(f.link.uid);
+    for (const f of beltFlows) if (starved.has(f.owner.uid)) dry.add(f.link.uid);
 
     /**
      * ② 상류로 거슬러 올라간다.
@@ -882,7 +898,9 @@ function SceneContent() {
         grew = true;
       }
     }
-    return { links, equips, jammed, starved, unmanned };
+    /* 선 벨트는 새것이 올라탈 수도 없다 — 두 목록을 따로 볼 필요가 없게 합쳐 둔다 */
+    for (const uid of links) dry.add(uid);
+    return { links, dry, equips, jammed, starved, unmanned };
   }, [beltFlows, placed, itemOf, stockVersion, downMap, crew]);
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
@@ -2197,7 +2215,7 @@ function SceneContent() {
         );
       })}
 
-      {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차거나 재료가 떨어지면 선다 */}
+      {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차면 서고, 재료가 떨어지면 마른다 */}
       {beltFlows.map(({ link, path, owner, sink, recipe, outKind }) => (
         <BeltItems
           key={`f${link.uid}`}
@@ -2206,7 +2224,10 @@ function SceneContent() {
           gap={owner.spawnGap ?? 3}
           layers={owner.outputCount ?? 3}
           payload={payloadByKey(outKind)}
+          /* 벨트가 도는가 — 보낼 곳이 없을 때만 선다 */
           running={state.running && !halted.links.has(link.uid)}
+          /* 새로 올라탈 것이 있는가 — 앞 설비가 고장·무인·굶음이면 앞머리만 빈다 */
+          feeding={!halted.dry.has(link.uid)}
           /**
            * 한 덩어리가 벨트에 올라탈 때 — **재료를 여기서 낸다.**
            * -----------------------------------------------------------------
@@ -2217,10 +2238,10 @@ function SceneContent() {
            *  불량품도 재료를 먹는다 — 불량은 만들고 나서 걸러지는 것이지, 재료를
            *  안 쓰고 나오는 것이 아니다. 그래서 여기서는 `screen` 을 보지 않는다.
            *
-           *  낸 만큼만 돌려주면 벨트가 그 자리에서 선다. 위의 「굶음」 판정이
-           *  이미 벨트를 세워 두므로 여기까지 오는 일은 드물지만(카트가 마지막
-           *  한 개를 가져간 바로 그 프레임), 그 한 프레임에 공짜로 만들어지는
-           *  것을 막는 자리가 여기다.
+           *  못 낸 몫은 **빈칸**으로 지나간다(벨트는 계속 돈다). 위의 「굶음」
+           *  판정이 이미 `feeding` 을 내려 두므로 여기까지 오는 일은 드물지만
+           *  (카트가 마지막 한 개를 가져간 바로 그 프레임), 그 한 프레임에
+           *  공짜로 만들어지는 것을 막는 자리가 여기다.
            */
           onSpawn={recipe && !isSource(recipe) ? (n) => {
             const per = needFor(recipe, Math.max(1, owner.outputCount ?? 3));
@@ -2297,7 +2318,10 @@ function SceneContent() {
           item={itemOf(link.itemId)}
           path={path}
           selected={selected?.kind === 'link' && selected.uid === link.uid}
-          running={state.running}
+          /* 레일이 도는 모습은 벨트가 실제로 도는지를 따라야 한다 — 종점이 막혀
+             물건이 서 있는데 레일만 흐르면 화면이 거짓말을 한다. 반대로 앞 설비가
+             서 있을 뿐이면(마른 벨트) 레일은 계속 돈다. */
+          running={state.running && !halted.links.has(link.uid)}
           defaultSpeed={state.beltSpeed}
           onPointerDown={(e) => onLinkDown(link, e)}
         />
