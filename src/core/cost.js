@@ -53,11 +53,24 @@ export const DEFAULT_RATES = {
   material: 0,       // 원/개 — 투입 자재비. 모르면 0으로 두고 가공비만 본다
 };
 
-export const POWER_RANGE = [0, 1000, 5];        // 원/kWh
+export const POWER_RANGE = [0, 2000, 5];        // 원/kWh
 export const WAGE_RANGE = [0, 100000, 500];     // 원/시간
 export const KW_RANGE = [0, 200, 0.1];          // kW
-export const MATERIAL_RANGE = [0, 1000000, 100];
 export const FIXED_RANGE = [0, 1000000, 100];   // 원/시간
+
+/**
+ * 자재비 — **슬라이더가 훑는 범위**와 **값의 한계**가 다르다.
+ * ---------------------------------------------------------------------------
+ *  처음엔 슬라이더 최대가 100만이었다. 그러면 2,000원짜리 자재를 맞추려 해도
+ *  손잡이가 왼쪽 끝에 붙어 있어 **움직여도 뭐가 달라지는지 안 보인다** — 흔한
+ *  값이 눈금의 0.2% 안에 다 몰려 있으니 슬라이더가 제 노릇을 못 한다.
+ *
+ *  그래서 슬라이더는 흔한 범위(1만원)만 덮고, 그보다 비싼 부품은 **손으로
+ *  적는다.** 적은 값을 슬라이더 최대에 맞춰 잘라 버리면 조용히 틀린 원가가
+ *  나오므로, 값의 한계는 따로 넉넉히 둔다.
+ */
+export const MATERIAL_RANGE = [0, 10000, 50];   // 슬라이더
+export const MATERIAL_MAX = 100000000;          // 값의 한계 — 손으로 적은 것만 여기까지
 
 /** 설비 한 대의 기본값 — 중형 가공기 한 대쯤을 생각한 값이다 */
 export const RUN_KW = 7;
@@ -74,7 +87,8 @@ export function normalizeRates(r) {
     power: clamp(num(s.power, DEFAULT_RATES.power), POWER_RANGE),
     wage: clamp(num(s.wage, DEFAULT_RATES.wage), WAGE_RANGE),
     cartKw: clamp(num(s.cartKw, DEFAULT_RATES.cartKw), KW_RANGE),
-    material: clamp(num(s.material, DEFAULT_RATES.material), MATERIAL_RANGE),
+    /* 자재비만 슬라이더 범위가 아니라 **값의 한계**로 자른다 (위 주석 참고) */
+    material: clamp(num(s.material, DEFAULT_RATES.material), [0, MATERIAL_MAX]),
   };
 }
 

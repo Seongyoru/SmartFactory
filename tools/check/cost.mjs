@@ -30,6 +30,20 @@ t('단가는 범위 밖으로 못 나간다 — 음수 원가가 나오면 안 �
   assert.equal(C.normalizeRates({ wage: 9e9 }).wage, C.WAGE_RANGE[1]);
   assert.equal(C.normalizeRates({ material: -1 }).material, 0);
 });
+t('자재비는 **슬라이더 범위와 값의 한계가 다르다**', () => {
+  /* 슬라이더 최대가 100만이면 2,000원짜리 자재는 손잡이가 왼쪽 끝에 붙어
+     움직여도 뭐가 달라지는지 안 보인다 — 흔한 값이 눈금의 0.2% 안에 몰린다.
+     그래서 슬라이더는 1만까지만 훑고, 비싼 부품은 손으로 적는다. */
+  assert.equal(C.MATERIAL_RANGE[1], 10000, '슬라이더가 흔한 값을 못 훑는다');
+  assert.ok(C.MATERIAL_MAX > C.MATERIAL_RANGE[1], '손으로 적을 여지가 없다');
+  /* 손으로 적은 값을 **슬라이더 최대에 맞춰 자르면 안 된다** — 조용히 틀린다 */
+  assert.equal(C.normalizeRates({ material: 250000 }).material, 250000);
+  assert.equal(C.normalizeRates({ material: 9e12 }).material, C.MATERIAL_MAX);
+});
+t('전기 단가는 2,000원/kWh 까지 — 산업용 밖의 요금도 넣어 본다', () => {
+  assert.equal(C.POWER_RANGE[1], 2000);
+  assert.equal(C.normalizeRates({ power: 1800 }).power, 1800);
+});
 t('설비가 자기 값을 안 가졌으면 기본 kW', () => {
   assert.equal(C.runKwOf({}), C.RUN_KW);
   assert.equal(C.idleKwOf({}), C.IDLE_KW);
@@ -332,6 +346,16 @@ t('스크롤은 **넘치는 칸 안에서만** — 띠 전체가 밀리면 안 �
     '스크롤이 붙는 칸 수가 둘이 아니다');
   assert.equal(/RANK_ROWS/.test(dock), false,
     '아직 목록을 끊는다 — 끊으면 그 뒤를 볼 방법이 없다');
+});
+t('단가는 슬라이더로도, **손으로 적어서도** 넣는다', () => {
+  /* 슬라이더만으로는 12,000 을 못 맞추고, 범위 밖 값은 아예 못 넣는다 */
+  assert.ok(/type="text"/.test(dock), '손으로 적는 칸이 없다');
+  assert.ok(dock.includes('inputMode="decimal"'), '숫자 자판이 안 뜬다');
+  assert.ok(dock.includes('hardMax={MATERIAL_MAX}'), '자재비만 더 크게 적을 수 있어야 한다');
+  /* 타이핑 중에는 손댄 그대로 둔다 — 한 글자마다 되돌리면 못 고친다 */
+  assert.ok(/const \[draft, setDraft\] = useState\(null\)/.test(dock), '입력 중 상태가 없다');
+  assert.ok(/value={Math\.min\(max, value\)}/.test(dock),
+    '슬라이더가 자기 범위 밖 값을 받으면 React 가 값을 되돌린다');
 });
 t('목록의 설비를 누르면 **이동하고 선택된다** — 이름만 주면 다시 찾아야 한다', () => {
   assert.ok(dock.includes("dispatch({ type: 'SELECT', selected: { kind: 'equip', uid } })"), '선택이 안 된다');

@@ -47,7 +47,7 @@ import {
 } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
 import {
-  KW_RANGE, MATERIAL_RANGE, POWER_RANGE, WAGE_RANGE,
+  KW_RANGE, MATERIAL_MAX, MATERIAL_RANGE, POWER_RANGE, WAGE_RANGE,
   DEFAULT_RATES, normalizeRates, won,
 } from '../core/cost.js';
 import { ReportButtons } from './Inspector.jsx';
@@ -87,20 +87,55 @@ function Line({ label, children, big }) {
   );
 }
 
-/** 값이 오른쪽에 붙는 납작한 슬라이더 — 띠에는 높이가 없다 */
-function Knob({ label, value, text, onChange, min, max, step }) {
+/**
+ * 납작한 슬라이더 + **손으로 적는 칸**.
+ * ---------------------------------------------------------------------------
+ *  슬라이더만으로는 정확한 값을 못 맞춘다. 12,000 을 맞추려고 손잡이를 픽셀
+ *  단위로 미는 것은 일이 아니라 고역이고, 슬라이더 범위 밖의 값(비싼 자재)은
+ *  아예 넣을 수가 없다. 그래서 **두 길을 다 연다** — 슬라이더는 어림잡을 때,
+ *  숫자 칸은 아는 값을 그대로 적을 때.
+ *
+ *  @param hardMax 손으로 적을 때의 한계. 없으면 슬라이더 최대와 같다
+ */
+function Knob({ label, value, unit, onChange, min, max, step, hardMax }) {
+  const cap = hardMax ?? max;
+  /* 타이핑 중에는 **적은 그대로** 둔다. 한 글자 칠 때마다 정규화해서 되돌리면
+     「1」 을 지우고 「2」 를 못 치거나 앞자리가 튀어 오른다. */
+  const [draft, setDraft] = useState(null);
+
+  const commit = (raw) => {
+    const n = Number(String(raw).replace(/[^\d.]/g, ''));
+    if (Number.isFinite(n) && raw !== '') onChange(Math.min(cap, Math.max(min, n)));
+  };
+
   return (
-    <label className="block">
-      <span className="flex items-baseline justify-between gap-2">
-        <span className="text-[10.5px] text-ink4">{label}</span>
-        <b className="text-[11px] tabular-nums text-ink2">{text}</b>
-      </span>
+    <div>
+      <div className="flex items-baseline justify-between gap-1">
+        <span className="shrink-0 text-[10.5px] text-ink4">{label}</span>
+        <span className="flex min-w-0 items-baseline gap-0.5">
+          <input
+            type="text"
+            inputMode="decimal"
+            value={draft ?? value.toLocaleString()}
+            onChange={(e) => { setDraft(e.target.value); commit(e.target.value); }}
+            onFocus={(e) => { setDraft(String(value)); e.target.select(); }}
+            onBlur={() => setDraft(null)}
+            /* 엔터로 확정 — 슬라이더로 갔다가 돌아오는 사람이 없게 */
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+            className="w-[68px] rounded bg-raise px-1 py-px text-right text-[11px] tabular-nums text-ink2 ring-1 ring-edge focus:ring-sky-500"
+            aria-label={`${label} 값`}
+          />
+          <span className="shrink-0 text-[9.5px] text-ink4">{unit}</span>
+        </span>
+      </div>
       <input
-        type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        type="range" min={min} max={max} step={step}
+        /* 슬라이더는 자기 범위 안에서만 논다. 손으로 더 크게 적었으면 끝에 붙는다 */
+        value={Math.min(max, value)}
+        onChange={(e) => { setDraft(null); onChange(Number(e.target.value)); }}
         className="h-3 w-full accent-sky-500"
       />
-    </label>
+    </div>
   );
 }
 
@@ -437,24 +472,25 @@ function Rates({ rates, set, untouched }) {
           잘리고 그 자리에 아래 설명이 겹쳐 찍혔다. 폭은 남고 높이가 없다. */}
       <div className="grid min-h-0 flex-1 grid-cols-2 content-start gap-x-3 gap-y-1">
         <Knob
-          label="전기" value={rates.power} text={`${rates.power} 원/kWh`}
+          label="전기" value={rates.power} unit="원/kWh"
           min={POWER_RANGE[0]} max={POWER_RANGE[1]} step={POWER_RANGE[2]}
           onChange={(v) => set({ power: v })}
         />
         <Knob
-          label="인건비" value={rates.wage} text={`${rates.wage.toLocaleString()} 원/시간`}
+          label="인건비" value={rates.wage} unit="원/시간"
           min={WAGE_RANGE[0]} max={WAGE_RANGE[1]} step={WAGE_RANGE[2]}
           onChange={(v) => set({ wage: v })}
         />
         <Knob
-          label="카트 한 대" value={rates.cartKw} text={`${rates.cartKw} kW`}
+          label="카트 한 대" value={rates.cartKw} unit="kW"
           min={KW_RANGE[0]} max={20} step={0.1}
           onChange={(v) => set({ cartKw: v })}
         />
+        {/* 슬라이더는 1만원까지, 그보다 비싼 부품은 손으로 적는다 (cost.js 주석) */}
         <Knob
-          label="자재비" value={rates.material}
-          text={rates.material ? `${rates.material.toLocaleString()} 원/개` : '안 넣음'}
+          label="자재비" value={rates.material} unit="원/개"
           min={MATERIAL_RANGE[0]} max={MATERIAL_RANGE[1]} step={MATERIAL_RANGE[2]}
+          hardMax={MATERIAL_MAX}
           onChange={(v) => set({ material: v })}
         />
       </div>
