@@ -36,6 +36,13 @@ export const layoutSnapshot = (state) => ({
   openings: state.openings,
   /** 교대조 — 배치와 함께 저장한다. 인원이 몇 명인지는 그 도면의 성질이다 */
   shifts: state.shifts,
+  /**
+   * 기본 벨트 속도 — **도면의 성질이다.** 자기 속도를 따로 정하지 않은 벨트가
+   * 전부 이 값으로 돌고, 이제는 **덩어리 간격까지 여기서 나온다**(process.js 의
+   * spacingFor). 저장을 안 하면 새로고침할 때마다 0.6 으로 돌아가는데, 간격은
+   * 설비에 저장돼 그대로 남아서 **아무것도 안 건드렸는데 처리량이 바뀐다.**
+   */
+  beltSpeed: state.beltSpeed,
   seq: state.seq,
 });
 

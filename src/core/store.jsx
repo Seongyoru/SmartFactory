@@ -1022,6 +1022,9 @@ function reducer(state, action) {
         /* 교대조가 없는 옛 도면은 「상시·제한 없음」으로 — 인력이 생겼다고
            예전 도면이 갑자기 서면 안 된다 (crew.js 의 normalizeShifts) */
         shifts: normalizeShifts(action.data.shifts),
+        /* 벨트 속도가 없는 옛 도면은 예전 기본값으로 — 간격이 여기서 나오므로
+           이 값이 조용히 달라지면 처리량이 통째로 바뀐다 */
+        beltSpeed: Number(action.data.beltSpeed) > 0 ? Number(action.data.beltSpeed) : 0.6,
         seq: action.data.seq ?? 1,
         selected: null,
         connectFrom: null,
@@ -1069,7 +1072,7 @@ function reducer(state, action) {
 /** 되돌릴 대상 — 도면을 이루는 값들 */
 /* 교대조도 도면의 일부다 — 인원을 고치는 것도 되돌릴 수 있어야 하고, 자동 저장이
    따라와야 한다. `normalizeShifts` 가 늘 새 배열을 주므로 참조 비교로도 잡힌다. */
-const DOC_KEYS = ['placed', 'links', 'carts', 'areas', 'walls', 'pillars', 'zones', 'openings', 'shifts', 'seq'];
+const DOC_KEYS = ['placed', 'links', 'carts', 'areas', 'walls', 'pillars', 'zones', 'openings', 'shifts', 'beltSpeed', 'seq'];
 const HISTORY_LIMIT = 100;
 /** 같은 조작으로 묶는 시간(ms) */
 const COALESCE_MS = 500;
