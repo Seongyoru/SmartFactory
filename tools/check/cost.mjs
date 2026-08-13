@@ -301,7 +301,7 @@ t('탭 둘 — 실행이 앞, 원가가 뒤', () => {
   /* 한 줄에 다섯 칸을 늘어놓았더니 폭이 모자라 글자가 잘리고 값이 빠졌다.
      띠 높이는 씬을 16:9 로 남기고 나온 나머지라 못 늘린다 — 남은 방법이 탭이다. */
   const tabs = [...dock.matchAll(/\['(\w+)', '([^']+)'\]/g)].map((m) => [m[1], m[2]]);
-  assert.deepEqual(tabs, [['run', '이번 실행'], ['cost', '원가']]);
+  assert.deepEqual(tabs, [['run', '실행'], ['cost', '원가']]);
   assert.ok(dock.includes("tab === 'run'") && dock.includes("tab === 'cost'"), '탭으로 안 갈린다');
   assert.ok(/runTab: 'run'/.test(store), '기본 탭이 도면 상태에 없다');
 });
@@ -312,12 +312,34 @@ t('보고서·다시 재기는 **실행 탭에만** 붙는다', () => {
 t('접힌 채로 탭을 누르면 펴면서 간다 — 두 번 누르게 하지 않는다', () => {
   assert.ok(/runTab: id, showRunDock: true/.test(dock), '탭을 눌러도 안 펴진다');
 });
-t('세로 스크롤을 만들지 않는다 — 계기판은 흘깃 보는 것이다', () => {
-  assert.equal(/overflow-y-auto/.test(dock), false, '칸에 세로 스크롤이 생겼다');
-  assert.ok(dock.includes('overflow-hidden'), '넘치는 것을 자르지 않는다');
-  /* 길이가 변하는 것은 끊는다 — 그리고 끊었다고 말한다 */
-  assert.ok(/RANK_ROWS = \d+/.test(dock), '순위를 안 끊는다 — 설비가 늘면 넘친다');
-  assert.ok(dock.includes('외 {hidden}대'), '자르고 자른 티를 안 낸다');
+t('네 칸의 제목', () => {
+  const cols = [...dock.matchAll(/<Col title="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(cols, [
+    '지표', '생산 추이', '작동 시간 (낮은 순)', '병목 시간',
+    '원가', '원가 구성', '손실 원가', '단가', '원가', '단가',
+  ]);
+});
+t('높이가 없는 것은 **두 열로** 푼다 — 세로로 쌓으면 잘린다', () => {
+  /* 설비 순위는 세 대에서 끊겼고, 단가는 넷째 슬라이더가 잘려 그 자리에 아래
+     설명이 겹쳐 찍혔다. 띠에 남는 높이는 200px 남짓인데 폭은 남는다. */
+  assert.equal((dock.match(/grid-cols-2/g) ?? []).length, 2,
+    '작동 시간 목록과 단가 중 하나가 다시 한 열로 쌓인다');
+});
+t('스크롤은 **넘치는 칸 안에서만** — 띠 전체가 밀리면 안 된다', () => {
+  assert.ok(dock.includes('overflow-hidden'), '칸이 넘치는 것을 안 자른다');
+  /* 길이가 도면에 따라 변하는 둘(작동 시간·병목)만 스스로 스크롤한다 */
+  assert.equal((dock.match(/overflow-y-auto/g) ?? []).length, 2,
+    '스크롤이 붙는 칸 수가 둘이 아니다');
+  assert.equal(/RANK_ROWS/.test(dock), false,
+    '아직 목록을 끊는다 — 끊으면 그 뒤를 볼 방법이 없다');
+});
+t('목록의 설비를 누르면 **이동하고 선택된다** — 이름만 주면 다시 찾아야 한다', () => {
+  assert.ok(dock.includes("dispatch({ type: 'SELECT', selected: { kind: 'equip', uid } })"), '선택이 안 된다');
+  assert.ok(/focusOn\(\[p\.pos\[0\], p\.pos\[1\]\], \{ look: true \}\)/.test(dock), '카메라가 안 간다');
+  for (const who of ['<LossRank', '<Bottleneck']) {
+    const tag = dock.slice(dock.indexOf(who), dock.indexOf(who) + 220);
+    assert.ok(tag.includes('onPick={pick}'), `${who} 가 누르는 길을 안 받는다`);
+  }
 });
 t('띠는 **고른 것과 무관하게** 남는다 — 인스펙터에서는 뺐다', () => {
   const summary = inspector.slice(inspector.indexOf('function Summary('));

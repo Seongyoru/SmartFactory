@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, RotateCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, RotateCcw, RotateCw, Trash2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
@@ -2673,13 +2673,16 @@ export function ReportButtons() {
       >
         보고서
       </button>
+      {/* 아이콘 하나로 줄였다 — 띠의 머리줄은 탭에 자리를 내줘야 한다.
+          누르면 기록이 통째로 날아가므로 **말은 툴팁으로 온전히** 남긴다. */}
       <button
         type="button"
         onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
-        className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
-        title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
+        className="rounded bg-kbd p-1 text-ink4 hover:text-ink2"
+        title="다시 재기 — 배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
+        aria-label="다시 재기"
       >
-        다시 재기
+        <RotateCcw size={12} />
       </button>
     </span>
   );
