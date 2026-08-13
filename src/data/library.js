@@ -66,6 +66,14 @@ export const BUILTIN_LIBRARY = [
      *  고를 수 있는 것의 범위만 정한다 — 기본값이 아니라 **제약**이다.
      */
     makes: FAMILY.PART,
+    /**
+     * 한 개를 만드는 데 걸리는 시간(초). **자리마다 바꿀 수 있는 기본값**이다.
+     * -----------------------------------------------------------------------
+     *  조립이 제작보다 오래 걸리게 잡아 뒀다. 조립품 하나에 제작품 세 개가
+     *  들어가므로(2+1), 6초짜리 제작기 세 대가 12초짜리 조립기 하나를 못 채운다 —
+     *  놓아 보면 어디가 모자란지가 바로 보이는 숫자다.
+     */
+    cycleSec: 6,
     color: '#38bdf8',
     source: 'builtin',
   },
@@ -77,6 +85,7 @@ export const BUILTIN_LIBRARY = [
     modelKey: '/models/Machine_2.glb',
     url: '/models/Machine_2.glb',
     makes: FAMILY.ASM,
+    cycleSec: 12,
     color: '#38bdf8',
     source: 'builtin',
   },

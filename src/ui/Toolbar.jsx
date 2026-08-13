@@ -27,6 +27,7 @@ import {
 import { SPEEDS, formatElapsed, resetClock, setSpeed, useElapsed, useSimSpeed } from '../core/clock.js';
 import { resetMetrics } from '../core/metrics.js';
 import { resetFaults, resetQuality } from '../core/faults.js';
+import { resetWork } from '../core/process.js';
 import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
 import { downloadJSON, layoutSnapshot, saveLayout } from '../core/persistence.js';
@@ -188,7 +189,7 @@ export default function Toolbar() {
       {/* 경과 시간 — 누르면 지표를 처음부터 다시 잰다.
           배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다. */}
       <button
-        onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); }}
+        onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
         title="시뮬레이션 안에서 흐른 시간 (▶ 를 켜 둔 동안만 흐른다) — 눌러서 지표 초기화"
         className="w-[86px] rounded px-1 py-0.5 text-left text-[11px] tabular-nums text-ink3 hover:bg-raiseh hover:text-ink"
       >

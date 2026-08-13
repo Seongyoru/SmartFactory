@@ -21,8 +21,8 @@ const block = `${cut(src, 'if (next.arrived) {', '아무 일도 없었으면 서
 const step = new Function(
   'next', 'carried', 'carriedKinds', 'capacity', 'topUp', 'cart',
   'setCarried', 'setCarriedKinds', 'sourceRef', 'lastKeyRef', 'lastSRef', 'sRef', 'pauseRef',
-  'addLots', 'addLotsShared', 'takeLots', 'takeEach', 'getLots', 'loadRoom',
-  'buildableCount', 'countKinds', 'needFor', 'pickSet', 'slotShares',
+  'addLots', 'addLotsShared', 'takeLots', 'getMade', 'takeMade', 'loadRoom',
+  'pickSet', 'slotShares',
   block + '\nreturn { carried, carriedKinds };',
 );
 
@@ -38,8 +38,8 @@ function visit(station, { carried = 0, kinds = [], capacity = 3, topUp = false, 
     { arrived: station }, carried, kinds, capacity, topUp, cart,
     (v) => { out.carried = v; }, (v) => { out.kinds = v; },
     sourceRef, lastKeyRef, lastSRef, sRef, pauseRef,
-    sim.addLots, sim.addLotsShared, sim.takeLots, sim.takeEach, sim.getLots,
-    cartMod.loadRoom, bom.buildableCount, bom.countKinds, bom.needFor, cartMod.pickSet, bom.slotShares,
+    sim.addLots, sim.addLotsShared, sim.takeLots, sim.getMade, sim.takeMade,
+    cartMod.loadRoom, cartMod.pickSet, bom.slotShares,
   );
   out.source = sourceRef.current;
   out.lastKey = lastKeyRef.current;
@@ -101,52 +101,58 @@ t('버퍼가 꽉 찼으면 그냥 지나간다', () => {
   assert.equal(r.pause, 0);
 });
 
-/* ---------- 설비 유출부에서 싣기 ---------- */
-t('공급원에서는 예전처럼 그냥 실린다', () => {
+/* ---------- 설비 유출부에서 싣기 ------------------------------------------
+     공정 시간이 생기면서 규칙이 바뀌었다. 예전에는 카트가 오면 그 자리에서
+     **가지러 온 만큼 만들어** 줬다(시간 0). 지금은 설비가 미리 만들어 둔 것만
+     실어 간다 — 없으면 빈손으로 지나간다.
+--------------------------------------------------------------------------- */
+t('만들어 놓은 것을 실어 간다', () => {
   sim.clearStock();
+  sim.addMade('A', 3);
   const r = visit({ kind: 'load', uid: 'A', key: 'A:o', count: 3, payloadKind: 'PART_R', recipe: null });
   assert.equal(r.carried, 3);
   assert.deepEqual(r.kinds, ['PART_R', 'PART_R', 'PART_R']);
   assert.equal(r.source, 'A');
+  assert.equal(sim.getMade('A'), 0, '가져간 만큼 빠져야 한다');
 });
-t('조립 설비는 재료를 내고 내준다', () => {
+t('아무것도 안 만들어 놨으면 빈손으로 지나간다', () => {
   sim.clearStock();
-  sim.addLots('C', [...Array(6).fill('PART_R'), ...Array(3).fill('PART_G')], 30);
-  const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R });
-  assert.equal(r.carried, 3);
-  assert.deepEqual(r.kinds, ['ASM_C', 'ASM_C', 'ASM_C']);
-  assert.equal(sim.getStock('C'), 0);            // 6 + 3 을 정확히 먹었다
-});
-t('재료가 모자라면 **있는 만큼만** 만들어 준다', () => {
-  sim.clearStock();
-  sim.addLots('C', [...Array(4).fill('PART_R'), ...Array(3).fill('PART_G')], 30);
-  const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R });
-  assert.equal(r.carried, 2);                    // OBJ 4개 → 2개까지
-  assert.deepEqual(bom.countKinds(sim.getLots('C')), { PART_G: 1 });
-});
-t('재료가 없으면 빈손으로 지나간다 (재고도 안 건드린다)', () => {
-  sim.clearStock();
-  sim.addLots('C', ['PART_R'], 30);
+  /* 재료가 산더미처럼 있어도 소용없다 — 만드는 것은 설비의 시간이지 카트가 아니다 */
+  sim.addLots('C', [...Array(30).fill('PART_R')], 30);
   const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R });
   assert.equal(r.carried, 0);
-  assert.deepEqual(sim.getLots('C'), ['PART_R']);   // 한 개도 안 먹었다
+  assert.equal(sim.getStock('C'), 30, '재료를 건드리면 안 된다');
   assert.equal(r.pause, 0);
+});
+t('만들어 둔 것이 모자라면 있는 만큼만', () => {
+  sim.clearStock();
+  sim.addMade('C', 2);
+  const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R });
+  assert.equal(r.carried, 2);
+  assert.equal(sim.getMade('C'), 0);
+});
+t('카트가 실을 자리보다 많이 만들어 뒀으면 자리만큼만', () => {
+  sim.clearStock();
+  sim.addMade('C', 10);
+  const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R });
+  assert.equal(r.carried, 3);
+  assert.equal(sim.getMade('C'), 7, '안 실은 것은 그대로 남아야 한다');
 });
 t('가져올 종류를 정해 둔 카트는 다른 것을 만드는 설비를 지나친다', () => {
   sim.clearStock();
-  sim.addLots('C', [...Array(6).fill('PART_R'), ...Array(3).fill('PART_G')], 30);
+  sim.addMade('C', 3);
   const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R },
     { cart: { pickKinds: ['PART_R'] } });
   assert.equal(r.carried, 0);
-  assert.equal(sim.getStock('C'), 9);            // 재료를 안 먹었다
+  assert.equal(sim.getMade('C'), 3, '안 실었는데 재고가 줄었다');
 });
-t('짐이 있으면 카트는 더 안 싣는다 (그래서 재료도 안 먹는다)', () => {
+t('짐이 있으면 카트는 더 안 싣는다', () => {
   sim.clearStock();
-  sim.addLots('C', [...Array(6).fill('PART_R'), ...Array(3).fill('PART_G')], 30);
+  sim.addMade('C', 3);
   const r = visit({ kind: 'load', uid: 'C', key: 'C:o', count: 3, payloadKind: 'ASM_C', recipe: R },
     { carried: 1, kinds: ['PART_R'] });
   assert.equal(r.carried, 1);
-  assert.equal(sim.getStock('C'), 9);
+  assert.equal(sim.getMade('C'), 3);
 });
 
 /* ---------- 선반은 그대로인지 (회귀) ---------- */
@@ -175,6 +181,7 @@ t('선반 싣기는 예전 그대로', () => {
 /* ---------- 옛 도면의 옛 종류 이름 (회귀) ---------- */
 t('옛 이름으로 골라 둔 카트도 지금 이름과 맞는다', () => {
   sim.clearStock();
+  sim.addMade('A', 2);
   const r = visit({ kind: 'load', uid: 'A', key: 'A:o', count: 2, payloadKind: 'PART_R', recipe: null },
     { cart: { pickKind: 'OBJ' } });          // 옛 이름 = PART_R
   assert.equal(r.carried, 2, '옛 이름이 안 통해 카트가 그냥 지나갔다');
@@ -192,13 +199,17 @@ t('옛 이름으로 골라 둔 카트가 선반에서도 그것만 집는다', (
 t('여러 종류를 고른 카트는 그중 아무 설비 앞에서나 선다', () => {
   sim.clearStock();
   const c = { cart: { pickKinds: ['PART_R', 'PART_B'] } };
+  sim.addMade('A', 2);
   const r1 = visit({ kind: 'load', uid: 'A', key: 'A:o', count: 2, payloadKind: 'PART_R', recipe: null }, c);
   assert.equal(r1.carried, 2);
+  sim.addMade('A', 2);
   const r2 = visit({ kind: 'load', uid: 'A', key: 'A:o', count: 2, payloadKind: 'PART_B', recipe: null }, c);
   assert.equal(r2.carried, 2);
   /* 안 고른 것은 여전히 지나친다 */
+  sim.addMade('A', 2);
   const r3 = visit({ kind: 'load', uid: 'A', key: 'A:o', count: 2, payloadKind: 'PART_G', recipe: null }, c);
   assert.equal(r3.carried, 0);
+  assert.equal(sim.getMade('A'), 2, '안 실었는데 재고가 줄었다');
 });
 t('선반에서 고른 것들만 섞어 싣는다', () => {
   sim.clearStock();

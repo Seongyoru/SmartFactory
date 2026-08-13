@@ -23,8 +23,8 @@ import {
 } from '../core/cart.js';
 import { simStep } from '../core/clock.js';
 import { accumulateCart } from '../core/metrics.js';
-import { addLots, addLotsShared, addShipped, getLots, takeEach, takeLots } from '../core/simStore.js';
-import { buildableCount, countKinds, needFor, slotShares } from '../core/bom.js';
+import { addLots, addLotsShared, addShipped, getMade, takeLots, takeMade } from '../core/simStore.js';
+import { slotShares } from '../core/bom.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
 import { canonKind } from '../data/library.js';
@@ -293,21 +293,25 @@ function CartUnit({
              카트는 다른 것을 만드는 설비 앞을 그냥 지나간다. */
           let take = Math.min(a.count, loadRoom(carried, capacity, topUp, a.count));
           /**
-           * 조립 설비라면 **재료를 내고 받아 간다.**
+           * **만들어 놓은 것만 실어 간다.**
            * -------------------------------------------------------------------
-           *  벨트로 나갈 때와 같은 규칙이다(EditorScene 의 onSpawn). 설비는 출력
-           *  버퍼를 따로 두지 않는다 — 만들어 놓고 기다리는 것이 아니라 **가지러
-           *  온 만큼 만든다.** 버퍼를 하나 더 두면 "몇 개가 어디에 있는가" 를 두
-           *  곳에서 세게 되고, 화면에 안 보이는 재고가 생긴다.
+           *  예전에는 여기서 재료를 내고 그 자리에서 만들었다 — "가지러 온 만큼
+           *  만든다". 공정 시간이 없던 시절에는 그게 유일한 방법이었지만, 그래서
+           *  카트만 드나드는 설비는 **시간이 0** 이었다. 카트가 30개를 요구하면
+           *  30개가 그 순간 튀어나왔다.
+           *
+           *  이제 만드는 것은 SimClock 이 공정 시간대로 하고, 카트는 벨트와 똑같이
+           *  출력 자리에 쌓인 것만 가져간다(EditorScene 의 onSpawn 과 같은 규칙).
            */
-          if (take > 0 && a.recipe) take = Math.min(take, buildableCount(countKinds(getLots(a.uid)), a.recipe));
+          take = Math.min(take, getMade(a.uid));
           /* 고른 종류들 중 하나여야 싣는다. 아무것도 안 골랐으면 가리지 않는다.
              (옛 이름으로 적힌 도면도 pickSet 이 지금 이름으로 바꿔 준다) */
           const want = pickSet(cart);
           if (take > 0 && (!want.size || want.has(a.payloadKind))) {
-            if (!a.recipe || takeEach(a.uid, needFor(a.recipe, take))) {
-              setCarried(carried + take);
-              setCarriedKinds([...carriedKinds, ...Array.from({ length: take }, () => a.payloadKind)]);
+            const got = takeMade(a.uid, take);
+            if (got > 0) {
+              setCarried(carried + got);
+              setCarriedKinds([...carriedKinds, ...Array.from({ length: got }, () => a.payloadKind)]);
               sourceRef.current = a.uid;
               acted = true;
             }

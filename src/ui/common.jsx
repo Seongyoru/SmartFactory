@@ -60,8 +60,12 @@ export function Row({ label, children }) {
   );
 }
 
-/** 값이 오른쪽에 붙는 슬라이더 — 인스펙터에서 가장 많이 쓰는 모양 */
-export function Slider({ label, value, text, onChange, min, max, step = 0.05 }) {
+/**
+ * 값이 오른쪽에 붙는 슬라이더 — 인스펙터에서 가장 많이 쓰는 모양.
+ *  @param hint 슬라이더 아래 한 줄. **그 값이 무엇으로 환산되는지**를 적는 자리다
+ *              (3.00 m 가 몇 초인지 같은 것). 사용자가 암산하게 두면 안 된다.
+ */
+export function Slider({ label, value, text, onChange, min, max, step = 0.05, hint = null }) {
   return (
     <label className="mt-2 block first:mt-0">
       <span className="mb-1 flex items-center justify-between text-[11px] text-ink4">
@@ -77,6 +81,7 @@ export function Slider({ label, value, text, onChange, min, max, step = 0.05 }) 
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-sky-500"
       />
+      {hint && <span className="block text-[10px] leading-snug text-ink4">{hint}</span>}
     </label>
   );
 }

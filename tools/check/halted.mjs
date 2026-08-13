@@ -17,11 +17,11 @@ const OPEN = 'const halted = useMemo(() => {';
 const RET = 'return { links, dry, equips, jammed, starved, unmanned };';
 const body = cut(src, OPEN, RET, 'halted 판정').slice(OPEN.length);
 
-const halted = new Function(
-  'downMap', 'beltFlows', 'placed', 'itemOf', 'getStock', 'getLots',
+const ARGS = [
+  'downMap', 'beltFlows', 'machines', 'placed', 'itemOf', 'getStock', 'getLots', 'getMade',
   'isShelf', 'isStillage', 'recipeOf', 'isSource', 'buildableCount', 'countKinds', 'crew',
-  body,
-);
+];
+const halted = new Function(...ARGS, body);
 
 const NOCREW = { manned: new Set(), unmanned: new Set() };
 
@@ -58,12 +58,16 @@ const beltFlows = [
   flow('L3', C, 'S', 12),
 ];
 
-const call = ({ stock = {}, lots = {}, down = {} } = {}) =>
+/* SimClock 이 훑는 목록 — 여기서는 출력 자리(cap)만 쓴다 */
+const machines = [A, B, C].map((p) => ({ uid: p.uid, cap: p.outputCount }));
+
+const call = ({ stock = {}, lots = {}, down = {}, made = {}, crew = NOCREW } = {}) =>
   halted(
-    down, beltFlows, placed, itemOf,
+    down, beltFlows, machines, placed, itemOf,
     (uid) => stock[uid] ?? (lots[uid]?.length ?? 0),
     (uid) => lots[uid] ?? [],
-    isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, NOCREW,
+    (uid) => made[uid] ?? 0,
+    isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, crew,
   );
 
 const fill = (kind, k) => Array.from({ length: k }, () => kind);
@@ -92,9 +96,29 @@ t('한 덩어리치(3층 = OBJ 6 + OBJ2 3)가 차면 굶음이 풀린다', () =>
   assert.equal(h.links.has('L3'), false);
   assert.equal(h.dry.has('L3'), false);
 });
-t('한 개라도 모자라면 여전히 굶는다 (부분 생산은 없다)', () => {
-  const lots = { C: [...fill('PART_R', 6), ...fill('PART_G', 2)] };
+t('한 덩어리치가 안 돼도 **한 개분**만 있으면 안 굶는다', () => {
+  /* 공정 시간이 생기기 전에는 한 덩어리(3개)를 못 만들면 굶은 것으로 봤다.
+     지금은 설비가 한 개씩 만들어 출력 자리에 쌓으므로 한 개분이면 일을 한다 —
+     예전에는 두 개 만들 재료를 쥐고도 멀쩡히 놀았다. */
+  const lots = { C: [...fill('PART_R', 4), ...fill('PART_G', 2)] };   // 두 개분
+  assert.equal(call({ lots }).starved.has('C'), false);
+});
+t('한 개분도 안 되면 굶는다', () => {
+  const lots = { C: [...fill('PART_R', 1), ...fill('PART_G', 5)] };   // R 이 하나 모자라다
   assert.ok(call({ lots }).starved.has('C'));
+});
+t('만들어 놓은 것이 출력 자리를 채우면 그 설비가 선다', () => {
+  const lots = { C: [...fill('PART_R', 6), ...fill('PART_G', 3)] };   // 재료는 넉넉하다
+  const h = call({ lots, made: { C: 3 } });                           // 출력 자리 = outputCount 3
+  assert.ok(h.equips.has('C'), '만들어 놨는데 아무도 안 가져가면 서야 한다');
+  assert.equal(h.starved.has('C'), false);
+  assert.equal(h.jammed.has('C'), false, '상류로 번지면 안 된다 — 받기는 받는다');
+  assert.equal(h.links.has('L1'), false, 'C 로 들어오는 벨트가 섰다');
+});
+t('출력 자리에 빈칸이 있으면 안 선다', () => {
+  const lots = { C: [...fill('PART_R', 6), ...fill('PART_G', 3)] };
+  const h = call({ lots, made: { C: 2 } });
+  assert.equal(h.equips.has('C'), false);
 });
 t('공급원은 절대 굶지 않는다', () => {
   const h = call();
@@ -164,7 +188,7 @@ t('레시피 없는 설비는 종점이 아니다 — 자재가 사라지고 벨
   const p2 = [A, D];
   const bf = [{ link: { uid: 'X', to: { uid: 'D' } }, owner: A, sink: null }];
   const h = halted(
-    {}, bf, p2, itemOf, () => 0, () => [],
+    {}, bf, [{ uid: 'A', cap: 3 }, { uid: 'D', cap: 3 }], p2, itemOf, () => 0, () => [], () => 0,
     isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, NOCREW,
   );
   assert.equal(h.links.size, 0);
@@ -180,25 +204,16 @@ t('설비가 고리로 이어져도 전파가 끝난다', () => {
     { link: { uid: 'b', to: { uid: 'P' } }, owner: Q, sink: { uid: 'P', cap: 1 } },
   ];
   const h = halted(
-    {}, bf, [P, Q], itemOf, () => 5, () => ['PART_R'],
+    {}, bf, [{ uid: 'P', cap: 1 }, { uid: 'Q', cap: 1 }], [P, Q], itemOf,
+    () => 5, () => ['PART_R'], () => 0,
     isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, NOCREW,
   );
   assert.equal(h.links.size, 2);            // 끝났다 (여기 오면 무한 루프가 아니다)
 });
 
 /* ---------- 무인(unmanned) — 네 번째 정지 이유 ---------- */
-const haltedCrew = new Function(
-  'downMap', 'beltFlows', 'placed', 'itemOf', 'getStock', 'getLots',
-  'isShelf', 'isStillage', 'recipeOf', 'isSource', 'buildableCount', 'countKinds', 'crew',
-  body,
-);
 const callCrew = (unmannedUids, { lots = {} } = {}) =>
-  haltedCrew(
-    {}, beltFlows, placed, itemOf,
-    (uid) => lots[uid]?.length ?? 0, (uid) => lots[uid] ?? [],
-    isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds,
-    { manned: new Set(), unmanned: new Set(unmannedUids) },
-  );
+  call({ lots, crew: { manned: new Set(), unmanned: new Set(unmannedUids) } });
 
 t('사람이 없으면 그 설비가 서고 유출 벨트가 마른다', () => {
   const h = callCrew(['A']);
@@ -246,8 +261,11 @@ t('레일 애니메이션이 벨트의 정지를 따라간다', () => {
   assert.ok(block.includes(STOP), `ConnectorView 에 ${STOP} 이 없다`);
 });
 t('벨트 위 물건은 서는 것과 마르는 것을 따로 받는다', () => {
-  const block = cut(src, '{beltFlows.map(({ link, path, owner, sink, recipe, outKind }) => (', 'onArrive=', 'BeltItems 배선');
+  const block = cut(src, '{beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap }) => (', 'onArrive=', 'BeltItems 배선');
   assert.ok(block.includes(`running={state.running && ${STOP}}`), 'running 배선이 다르다');
   assert.ok(block.includes('feeding={!halted.dry.has(link.uid)}'), 'feeding 배선이 없다');
+  /* 간격은 **자동 계산된 것**을 넘겨야 한다 — 설비에 저장된 옛 값이 아니라 */
+  assert.ok(block.includes('gap={gap}'), '간격이 자동 계산 값이 아니다');
+  assert.equal(block.includes('owner.spawnGap'), false, 'spawnGap 을 아직 읽고 있다');
 });
 

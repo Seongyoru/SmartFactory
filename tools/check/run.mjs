@@ -22,11 +22,15 @@ await import('./cart.mjs');
 await import('./crew.mjs');
 await import('./metrics.mjs');
 await import('./metrics-crew.mjs');
+await import('./process.mjs');
 
 /* 소스에서 떼어 내는 것 — JSX 라 import 는 안 되지만 계산 자체는 순수하다.
    손으로 옮겨 적으면 옮겨 적은 것을 검증하게 되므로 파일에서 잘라 실행한다. */
 await import('./belt.mjs');
 await import('./halted.mjs');
 await import('./cartview.mjs');
+
+/* 이어 붙여 돌려 보는 것 — 조각마다 통과해도 개수는 셋에 걸쳐 샌다 */
+await import('./line.mjs');
 
 console.log('');

@@ -13,6 +13,10 @@ import {
 import { clearStock, dropKind, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import {
+  CYCLE_RANGE, MIN_GAP, VAR_MAX, beltPerMinute, cycleOf, outputCapFor, perMinute, resetWork,
+  spacingClamped, spacingFor, varOf,
+} from '../core/process.js';
+import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
   assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts,
   shiftAt, shiftLabel, splitHM,
@@ -31,7 +35,9 @@ import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
   getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
 } from '../core/faults.js';
-import { PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck } from '../data/library.js';
+import {
+  PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
+} from '../data/library.js';
 import {
   MAX_BAYS,
   MAX_BAY_LENGTH,
@@ -501,6 +507,35 @@ function EquipmentPanel({ placed }) {
   const rect = spec ? footprintOf(placed, spec) : null;
   const ports = spec ? portsOf(placed, item) : [];
 
+  /* ---- 이 설비가 실제로 몇 개를 내놓는가 --------------------------------
+   *  설비 능력과 벨트 수송 능력 중 **작은 쪽**이 한계다. 예전에는 두 값을 두
+   *  섹션에 나눠 놓고 사용자가 암산하게 했는데, 그나마도 한쪽은 층수를 빠뜨려
+   *  **같은 화면에 서로 다른 개/분이 두 개** 떠 있었다.
+   * ---------------------------------------------------------------------- */
+  const cycleSec = cycleOf(placed, item);
+  const cycleVar = varOf(placed, item);
+  const bundle = Math.max(1, Math.round(placed.outputCount ?? 3));
+  const machineRate = perMinute(cycleSec);
+
+  /* 벨트 속도는 **실제로 물린 벨트**의 것을 쓴다. 전역 기본값을 쓰면 링크마다
+     속도를 따로 준 도면에서 여기 숫자만 조용히 틀린다. */
+  const outLink = useMemo(
+    () =>
+      state.links.find(
+        (l) => l.from?.uid === placed.uid && !l.from?.anchor && !l.from?.link
+          && !isUtility(itemOf(l.itemId)) && itemOf(l.itemId)?.render !== 'tube',
+      ) ?? null,
+    [state.links, placed.uid, itemOf],
+  );
+  const beltV = outLink?.speed ?? beltSpeed;
+  /* 간격은 **정하는 값이 아니라 따라 나오는 값이다** (process.js 의 spacingFor) */
+  const gap = spacingFor(cycleSec, bundle, beltV);
+  const beltRate = beltPerMinute(gap, beltV, bundle);
+  /* 벨트가 안 물려 있으면 카트가 실어 간다 — 그때는 설비 능력이 그대로 한계다 */
+  const rate = outLink ? Math.min(machineRate, beltRate) : machineRate;
+  /* 간격이 최소치에 걸렸을 때만 벨트가 진짜 한계다 — 더 붙여 실을 수가 없다 */
+  const beltIsLimit = !!outLink && spacingClamped(cycleSec, bundle, beltV);
+
   return (
     <>
       <Section title="설비">
@@ -541,52 +576,101 @@ function EquipmentPanel({ placed }) {
         </div>
       </Section>
 
-      {/* 출하 — 이 설비가 유출부로 내보내는 자재의 모양과 빈도 */}
-      <Section title="출하">
-        <label className="block">
-          <span className="mb-1 flex items-center justify-between text-[11px] text-ink4">
-            적재 층수
-            <b className="text-ink tabular-nums">{placed.outputCount ?? 3} 층</b>
-          </span>
-          <input
-            type="range"
-            min="1"
-            max="8"
-            step="1"
-            value={placed.outputCount ?? 3}
-            onChange={(e) =>
-              dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { outputCount: Number(e.target.value) } })
-            }
-            className="w-full accent-sky-500"
-          />
-        </label>
+      {/**
+        * 생산 — **결론부터 보여 준다.**
+        * -------------------------------------------------------------------
+        *  예전에는 「공정 시간」 과 「출하」 두 섹션에 슬라이더 넷이 흩어져 있었고,
+        *  개/분 이 두 군데에 서로 다른 값으로 떠 있었다(한쪽이 층수를 빠뜨렸다).
+        *  사용자가 초·%·층·m 을 머릿속에서 곱해야 "그래서 몇 개 나오는데?" 를
+        *  알 수 있었다 — 그건 도구가 할 일이다.
+        *
+        *  이제 맨 위에 답이 있고, 아래 슬라이더들은 **그 답을 어떻게 바꾸는지**만
+        *  보여 준다. 슬라이더마다 자기 값이 무엇으로 환산되는지 한 줄씩 붙는다.
+        */}
+      <Section title="생산">
+        <div className="rounded-md border border-edge bg-field px-2.5 py-2">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[11px] text-ink4">이 설비의 처리량</span>
+            <b className="text-[15px] tabular-nums text-ink">{rate.toFixed(1)} 개/분</b>
+          </div>
+          <div className="mt-0.5 text-right text-[10px] tabular-nums text-ink4">
+            시간당 {Math.round(rate * 60).toLocaleString()} 개
+          </div>
+          <p className="mt-1.5 border-t border-line pt-1.5 text-[10.5px] leading-relaxed text-ink4">
+            {!outLink ? (
+              <>벨트가 안 물려 있습니다 — 카트가 실어 가는 만큼 나갑니다.</>
+            ) : beltIsLimit ? (
+              <>
+                <b className="text-amber-400">벨트가 한계</b>입니다 (설비는{' '}
+                {machineRate.toFixed(1)} 개/분). 물건이 겹치지 않는 최소 간격
+                {' '}{MIN_GAP.toFixed(2)} m 에 걸렸습니다 — 벨트를 빠르게 하거나{' '}
+                <b className="text-ink3">한 번에</b> 개수를 늘리세요.
+              </>
+            ) : (
+              <>설비가 낸 만큼 벨트가 그대로 실어 냅니다 — 간격이 자동으로 맞춰집니다.</>
+            )}
+          </p>
+        </div>
 
-        <label className="mt-2 block">
-          <span className="mb-1 flex items-center justify-between text-[11px] text-ink4">
-            내보내는 간격
-            <b className="text-ink tabular-nums">{(placed.spawnGap ?? 3).toFixed(2)} m</b>
-          </span>
-          <input
-            type="range"
-            min="0.5"
-            max="10"
-            step="0.25"
-            value={placed.spawnGap ?? 3}
-            onChange={(e) =>
-              dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { spawnGap: Number(e.target.value) } })
-            }
-            className="w-full accent-sky-500"
+        {/* ── 설비가 정하는 것 ── */}
+        <div className="mt-3">
+          <Slider
+            label="만드는 시간"
+            text={`${cycleSec.toFixed(1)} 초/개`}
+            hint={`설비 혼자서는 ${machineRate.toFixed(1)} 개/분`}
+            value={cycleSec}
+            min={CYCLE_RANGE[0]}
+            max={CYCLE_RANGE[1]}
+            step={CYCLE_RANGE[2]}
+            onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { cycleSec: v } })}
           />
-          <span className="text-[10px] text-ink4">
-            벨트 {beltSpeed.toFixed(2)} m/s 기준 {(60 / ((placed.spawnGap ?? 3) / Math.max(beltSpeed, 0.01))).toFixed(1)} 개/분
-          </span>
-        </label>
+          <Slider
+            label="시간 편차"
+            text={`±${Math.round(cycleVar * 100)} %`}
+            hint={
+              cycleVar > 0
+                ? `한 개에 ${(cycleSec * (1 - cycleVar)).toFixed(1)} ~ ${(cycleSec * (1 + cycleVar)).toFixed(1)} 초`
+                : '늘 같은 시간 — 편차를 주면 버퍼가 왜 필요한지 드러납니다'
+            }
+            value={cycleVar}
+            min={0}
+            max={VAR_MAX}
+            step={0.05}
+            onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { cycleVar: v } })}
+          />
+        </div>
 
-        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-          이 설비의 <b className="text-ink3">유출부</b>에서 나가는 컨베이어 위로 이 간격마다
-          자재가 흐릅니다. 카트가 유출부 앞을 지날 때 싣는 양도 같은 층수를 따르고,
-          <b className="text-ink3"> 유입부</b> 앞에서 내려놓습니다.
-        </p>
+        {/* ── 벨트가 정하는 것 ── */}
+        <div className="mt-3 border-t border-line pt-2">
+          <span className="text-[11px] font-medium text-ink3">벨트로 내보내기</span>
+          <Slider
+            label="한 번에"
+            text={`${bundle} 개씩`}
+            hint={`벨트 위에 이만큼 층으로 쌓여 흐릅니다 (카트도 같은 수로 싣습니다) · 설비는 ${outputCapFor(bundle)}개까지 만들어 놓고 기다립니다`}
+            value={bundle}
+            min={1}
+            max={8}
+            step={1}
+            onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { outputCount: v } })}
+          />
+          {/**
+            * 간격은 **읽기만 한다.**
+            * -----------------------------------------------------------------
+            *  슬라이더였을 때는 맞출 방법이 없었다. 촘촘히 할수록 좋은 게 아니라
+            *  톱니처럼 오르내려서, 4.0m 에서 3.5m 로 좁히면 처리량이 114 → 65 로
+            *  반토막 났다(벨트 칸이 빈 채로 먼저 지나가 다음 칸을 기다린다).
+            *  설비가 한 덩어리 내는 박자에 맞추는 값 하나만 정답이라, 그건 도구가
+            *  계산하는 게 맞다.
+            */}
+          <Row label="간격 (자동)">
+            <span className="text-ink4">{gap.toFixed(2)} m</span>
+          </Row>
+          <p className="-mt-0.5 text-[10px] leading-snug text-ink4">
+            {outLink
+              ? `벨트 ${beltV.toFixed(2)} m/s × ${(cycleSec * bundle).toFixed(1)}초(${bundle}개 만드는 시간) — 벨트가 한 덩어리마다 딱 한 번 지나갑니다`
+              : '벨트를 물리면 그 벨트 속도에 맞춰 정해집니다'}
+          </p>
+        </div>
       </Section>
 
       <Section title={`포트 ${ports.length}개`}>
@@ -2369,7 +2453,7 @@ function RunReport() {
             </button>
           )}
           <button
-            onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); }}
+            onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
             className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
             title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
           >

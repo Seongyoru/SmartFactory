@@ -232,6 +232,9 @@ export function setStock(uid, value, kind = null) {
 }
 
 export function clearStock(uid) {
+  /* 완성 자리도 함께 비운다 — 「비우기」 를 눌렀는데 나갈 차례를 기다리던 것이
+     남아 있으면, 화면의 재고는 0 인데 벨트로 물건이 계속 나간다 */
+  clearMade(uid);
   if (uid == null) {
     if (!Object.keys(stock).length) return;
     stock = {};
@@ -245,6 +248,63 @@ export function clearStock(uid) {
   }
   emit();
 }
+
+/* --------------------------------------------------------------------------
+ * 완성돼 나갈 차례를 기다리는 것 (설비의 출력 자리)
+ * --------------------------------------------------------------------------
+ *  오래 "설비는 출력 버퍼를 두지 않는다" 로 버텼다 — 가지러 온 만큼 그 자리에서
+ *  만들었다. 공정 시간이 생기면서 그게 불가능해졌다. **한 개를 만드는 데 12초가
+ *  걸린다면, 다 만들어 놓고 가져갈 사람을 기다리는 순간이 반드시 있다.**
+ *
+ *  그래도 이건 "버퍼" 가 아니다. 사용자가 늘릴 수 있는 값이 아니라 **두 덩어리치**
+ *  로 고정이다(process.js 의 OUT_BUNDLES). 한 덩어리치만 두면 다 만든 순간부터
+ *  벨트 칸이 도착할 때까지 매번 서서, 멀쩡한 라인이 1초에 한 번씩 붉게 깜빡였다
+ *  — 실측으로 1분에 4번, 120개 나올 것이 116개만 나왔다.
+ *
+ *  자리가 차면 설비가 선다 — 그게 "만들어 놨는데 아무도 안 가져간다" 는 막힘이다.
+ *  다만 **상류로는 안 번진다.** 못 내보낼 뿐 재료는 계속 받을 수 있다(무인과 같다).
+ */
+let made = {};             // { [설비 uid]: 완성 개수 }
+
+export const getMade = (uid) => made[uid] ?? 0;
+export const getAllMade = () => made;
+
+/** 완성 — 넣은 만큼 쌓인다 (자리 확인은 부르는 쪽이 한다) */
+export function addMade(uid, n) {
+  const add = Math.max(0, Math.round(n));
+  if (!add) return 0;
+  made = { ...made, [uid]: (made[uid] ?? 0) + add };
+  emit();
+  return add;
+}
+
+/** 가져가기 — 있는 만큼만 내주고 실제로 가져간 수를 돌려준다 */
+export function takeMade(uid, n) {
+  const have = made[uid] ?? 0;
+  const take = Math.min(have, Math.max(0, Math.round(n)));
+  if (!take) return 0;
+  const next = { ...made };
+  if (have - take > 0) next[uid] = have - take;
+  else delete next[uid];
+  made = next;
+  emit();
+  return take;
+}
+
+export function clearMade(uid = null) {
+  if (uid == null) {
+    if (!Object.keys(made).length) return;
+    made = {};
+  } else {
+    if (!(uid in made)) return;
+    made = { ...made };
+    delete made[uid];
+  }
+  emit();
+}
+
+export const useMade = (uid) =>
+  useSyncExternalStore(subscribe, () => made[uid] ?? 0, () => 0);
 
 /** 선반 하나의 재고를 구독 */
 export function useStock(uid) {

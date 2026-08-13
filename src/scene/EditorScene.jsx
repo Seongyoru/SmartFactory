@@ -86,8 +86,10 @@ import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import {
-  addLotsShared, addStock, getLots, getStock, shippedTotal, takeEach, useAllStock, useShipped,
+  addLotsShared, addMade, addStock, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
+  useAllStock, useShipped,
 } from '../core/simStore.js';
+import { cycleOf, outputCapFor, runMachine, spacingFor, varOf } from '../core/process.js';
 import { tick, useElapsed } from '../core/clock.js';
 import { accumulate } from '../core/metrics.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
@@ -119,7 +121,7 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, jammed, starved, unmanned, equips }) {
+function SimClock({ running, halted, jammed, starved, unmanned, equips, machines }) {
   const shipped = shippedTotal(useShipped());
   useFrame((_, real) => {
     const dt = tick(real, running);
@@ -127,6 +129,30 @@ function SimClock({ running, halted, jammed, starved, unmanned, equips }) {
 
     /* 고장을 굴린다 — 이번 프레임에 고장으로 서 있는 설비가 돌아온다 */
     const nowDown = stepFaults(dt, equips);
+
+    /**
+     * 설비를 굴린다 — **여기가 이 도구의 처리량을 정하는 자리다.**
+     * -----------------------------------------------------------------------
+     *  예전에는 벨트가 "한 덩어리 올라탈게" 하면 설비가 그 자리에서 만들어 냈다.
+     *  그래서 설비의 속도가 벨트 간격의 함수였다. 이제는 반대다 — 설비가 제
+     *  공정 시간대로 만들어 출력 자리에 놓고, 벨트와 카트는 **거기 있는 것만**
+     *  가져간다.
+     *
+     *  고장·무인이면 아예 안 돈다. 재료가 없으면 `pay` 가 실패해 그 자리에서
+     *  멈추고(굶음), 출력 자리가 차 있으면 시작조차 안 한다(막힘).
+     */
+    for (const m of machines) {
+      if (nowDown.has(m.uid) || unmanned?.has(m.uid)) continue;
+      const room = m.cap - getMade(m.uid);
+      if (room <= 0) continue;
+      const n = runMachine(m.uid, dt, {
+        cycleSec: m.cycleSec,
+        cycleVar: m.cycleVar,
+        room,
+        pay: m.need ? () => takeEach(m.uid, m.need) : null,
+      });
+      if (n > 0) addMade(m.uid, n);
+    }
 
     /**
      * 서 있는 이유는 **한 프레임에 하나만** 센다.
@@ -762,11 +788,85 @@ function SceneContent() {
           /* 이 벨트에 흐르는 것은 **출발 설비가 만드는 것**이다.
              레시피가 산출 종류를 정했으면 그것, 아니면 라이브러리 항목의 payload. */
           const recipe = recipeOf(owner);
-          return { link, path, owner, sink, recipe, outKind };
+          /**
+           * 덩어리 간격은 **정하는 값이 아니라 따라 나오는 값이다.**
+           * -----------------------------------------------------------------
+           *  벨트가 한 덩어리 만드는 시간에 딱 한 번 지나가도록 맞춘다. 예전에는
+           *  사용자가 슬라이더로 정했는데, 촘촘히 할수록 좋은 게 아니라 톱니처럼
+           *  오르내려서(4.0m 114개/분 → 3.5m 65개/분) 맞출 방법이 없었다.
+           *  자세한 것은 `process.js` 의 spacingFor.
+           */
+          const layers = Math.max(1, Math.round(owner.outputCount ?? 3));
+          const speed = link.speed ?? state.beltSpeed;
+          const gap = spacingFor(cycleOf(owner, itemOf(owner.itemId)), layers, speed);
+          return { link, path, owner, sink, recipe, outKind, layers, speed, gap };
         })
         .filter(Boolean),
-    [linkPaths, itemOf, placed],
+    [linkPaths, itemOf, placed, state.beltSpeed],
   );
+
+  /* ---- 돌릴 설비 목록 ----------------------------------------------------
+   *  SimClock 이 프레임마다 훑는 목록이라 미리 뽑아 둔다. 선반·적치대는 만들지
+   *  않고, 재료를 먹지 않는 설비(공급원)는 `need` 가 null 이라 그냥 만든다.
+   *
+   *  `cap` 은 출력 자리 — **한 덩어리치**다. 벨트가 한 번에 실어 가는 단위가
+   *  그것이라, 이보다 작으면 영영 못 싣고 크면 화면에 안 보이는 재고가 생긴다.
+   * ---------------------------------------------------------------------- */
+  const machines = useMemo(
+    () =>
+      placed
+        .map((p) => {
+          const item = itemOf(p.itemId);
+          if (!item || isShelf(item) || isStillage(item) || isUtility(item)) return null;
+          const recipe = recipeOf(p);
+          return {
+            uid: p.uid,
+            at: p,
+            cycleSec: cycleOf(p, item),
+            cycleVar: varOf(p, item),
+            /** 한 덩어리 개수 — 벨트가 한 번에 실어 가는 단위 */
+            per: Math.max(1, Math.round(p.outputCount ?? 3)),
+            /* 출력 자리는 **한 덩어리 + 한 개**다. 딱 한 덩어리치면 다 만든
+               순간부터 벨트 칸이 올 때까지 설비가 서서, 멀쩡한 라인이 1초에
+               한 번씩 붉게 깜빡인다 (process.js 의 OUT_SPARE). */
+            cap: outputCapFor(p.outputCount ?? 3),
+            /* 재료는 **한 개분씩** 낸다 — 공정이 한 개 단위로 돌기 때문이다.
+               예전처럼 한 덩어리치를 한꺼번에 내면, 두 개분 재료로 세 개짜리
+               덩어리를 못 만들어 멀쩡한 재료가 놀게 된다. */
+            need: isSource(recipe) ? null : needFor(recipe, 1),
+          };
+        })
+        .filter(Boolean),
+    [placed, itemOf],
+  );
+
+  /**
+   * 한 덩어리 개수를 바꾸면 출력 자리의 **자투리를 버린다.**
+   * -------------------------------------------------------------------------
+   *  벨트는 덩어리 단위로만 실어 간다. 그래서 남아 있던 수가 새 덩어리 크기로
+   *  안 나누어떨어지면, 그 나머지는 **영영 안 빠지는 재고**가 된다 — 실을 수도
+   *  없고 줄지도 않는다. 3개 있는 상태에서 「한 번에」 를 8개로 올리면 그 뒤로
+   *  게이지가 0 이 아니라 **3 에서 11 사이**를 오간다(실제로 그랬다).
+   *
+   *  자리가 「덩어리 + 한 개」 뿐이라 이건 화면만 이상해지는 문제가 아니다.
+   *  자투리가 2개만 돼도 설비가 매 덩어리마다 자리를 다 채워 서 버린다.
+   *
+   *  설비마다 **직전 값을 기억해 두고 바뀐 것만** 손본다. 한 대를 고쳤다고 다른
+   *  설비의 정상적인 「아직 덜 찬 덩어리」까지 버리면 안 된다.
+   */
+  const lastPer = useRef({});
+  const perSig = machines.map((m) => `${m.uid}:${m.per}`).join('|');
+  useEffect(() => {
+    for (const m of machines) {
+      const prev = lastPer.current[m.uid];
+      if (prev != null && prev !== m.per) {
+        const left = getMade(m.uid) % m.per;
+        if (left > 0) takeMade(m.uid, left);
+      }
+      lastPer.current[m.uid] = m.per;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perSig]);
 
   /**
    * 서 있는 것들 — 그리고 **왜** 서 있는가.
@@ -853,8 +953,10 @@ function SceneContent() {
     /**
      * ①' 재료가 모자란 설비.
      * -----------------------------------------------------------------------
-     *  벨트 한 덩어리는 `outputCount` 층이다. 한 덩어리를 만들 재료가 없으면 그
-     *  설비는 이번 순간 아무것도 못 낸다.
+     *  **한 개**를 만들 재료가 없으면 굶은 것이다. 공정 시간이 생기기 전에는 한
+     *  덩어리치(`outputCount`)를 기준으로 봤는데, 그때는 덩어리 하나가 통째로
+     *  벨트에 올라타는 것이 유일한 생산 단위였기 때문이다. 지금은 설비가 한 개씩
+     *  만들어 출력 자리에 쌓으므로, 한 개분만 있으면 일을 할 수 있다.
      *
      *  벨트를 물리지 않은 설비(카트만 드나드는 자리)도 함께 본다 — 굶은 것은
      *  벨트가 있고 없고의 문제가 아니라 그 설비의 상태다. 정지 표시가 안 뜨면
@@ -865,12 +967,27 @@ function SceneContent() {
       if (isShelf(item) || isStillage(item)) continue;
       const recipe = recipeOf(p);
       if (isSource(recipe)) continue;
-      const per = Math.max(1, p.outputCount ?? 3);
-      if (buildableCount(countKinds(getLots(p.uid)), recipe) >= per) continue;
+      if (buildableCount(countKinds(getLots(p.uid)), recipe) >= 1) continue;
       equips.add(p.uid);
       starved.add(p.uid);
     }
     for (const f of beltFlows) if (starved.has(f.owner.uid)) dry.add(f.link.uid);
+
+    /**
+     * ①'' 만들어 놨는데 아무도 안 가져가는 설비.
+     * -----------------------------------------------------------------------
+     *  공정 시간이 생기면서 새로 생긴 정지 이유다. 출력 자리(한 덩어리치)가 차면
+     *  다음 개를 시작할 수 없다 — 벨트가 느리거나, 카트가 안 오거나, 유출부에
+     *  아무것도 안 물린 설비다.
+     *
+     *  **상류로는 안 번진다.** 못 내보낼 뿐 재료는 계속 받을 수 있다(무인과 같은
+     *  이유다). 그래서 `jammed` 에 넣지 않는다 — 여기 넣으면 설비가 한 덩어리
+     *  낼 때마다 상류 벨트 전체가 섰다 갔다 하며 떨린다.
+     *
+     *  지표에서는 막힘으로 센다. `equips` 에만 있고 다른 어느 목록에도 없는
+     *  설비를 SimClock 이 막힘으로 돌리므로(마지막 else) 따로 할 일이 없다.
+     */
+    for (const m of machines) if (getMade(m.uid) >= m.cap) equips.add(m.uid);
 
     /**
      * ② 상류로 거슬러 올라간다.
@@ -901,7 +1018,7 @@ function SceneContent() {
     /* 선 벨트는 새것이 올라탈 수도 없다 — 두 목록을 따로 볼 필요가 없게 합쳐 둔다 */
     for (const uid of links) dry.add(uid);
     return { links, dry, equips, jammed, starved, unmanned };
-  }, [beltFlows, placed, itemOf, stockVersion, downMap, crew]);
+  }, [beltFlows, machines, placed, itemOf, stockVersion, downMap, crew]);
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
   const cartPaths = useMemo(
@@ -2002,6 +2119,7 @@ function SceneContent() {
         starved={halted.starved}
         unmanned={halted.unmanned}
         equips={faultParams}
+        machines={machines}
       />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />
@@ -2181,9 +2299,9 @@ function SceneContent() {
 
       {/* 설비 안에 무엇이 몇 개 있는지 — **누르지 않고도** 보인다.
           자재가 어디서 막혔는지는 도면을 훑으면서 알아야 하는 정보다. */}
-      {placed.map((p) => {
+      {machines.map((m) => {
+        const p = m.at;
         const recipe = recipeOf(p);
-        if (isSource(recipe)) return null;
         const bb = boxFor(p);
         return (
           <StockTag
@@ -2191,8 +2309,14 @@ function SceneContent() {
             at={{ uid: p.uid, pos: p.pos }}
             y={p.y ?? 0}
             height={bb ? bb.max[1] : 4}
-            slots={slotShares(recipe, inputCapOf(p))}
+            /* 재료 칸은 먹는 설비만 — 공급원은 빈 객체라 아무것도 안 그린다 */
+            slots={isSource(recipe) ? null : slotShares(recipe, inputCapOf(p))}
             starved={halted.starved.has(p.uid)}
+            /* 진행 게이지와 출력 자리는 **모든 설비**에 띄운다. 공급원도 공정
+               시간이 있으므로 "지금 돌고 있는가" 를 보여 줘야 한다. */
+            cycleSec={m.cycleSec}
+            per={m.per}
+            cap={m.cap}
           />
         );
       })}
@@ -2216,39 +2340,42 @@ function SceneContent() {
       })}
 
       {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차면 서고, 재료가 떨어지면 마른다 */}
-      {beltFlows.map(({ link, path, owner, sink, recipe, outKind }) => (
+      {beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap }) => (
         <BeltItems
           key={`f${link.uid}`}
           path={path}
-          speed={link.speed ?? state.beltSpeed}
-          gap={owner.spawnGap ?? 3}
-          layers={owner.outputCount ?? 3}
+          speed={speed}
+          gap={gap}
+          layers={layers}
           payload={payloadByKey(outKind)}
           /* 벨트가 도는가 — 보낼 곳이 없을 때만 선다 */
           running={state.running && !halted.links.has(link.uid)}
           /* 새로 올라탈 것이 있는가 — 앞 설비가 고장·무인·굶음이면 앞머리만 빈다 */
           feeding={!halted.dry.has(link.uid)}
           /**
-           * 한 덩어리가 벨트에 올라탈 때 — **재료를 여기서 낸다.**
+           * 한 덩어리가 벨트에 올라탈 때 — **설비가 만들어 놓은 것을 실어 간다.**
            * -----------------------------------------------------------------
-           *  만드는 순간에 재료가 없어지는 것이 맞다. 도착할 때 내면 아직 재료가
-           *  없는 설비도 일단 벨트를 채우고 나중에 값을 치르게 되어, 있지도 않은
-           *  재고를 마이너스로 끌어 쓰게 된다.
+           *  예전에는 여기서 재료를 내고 그 자리에서 만들었다. 그래서 설비의
+           *  생산 속도가 벨트 간격의 함수였다 — 간격을 좁히면 그 기계가 갑자기
+           *  빨라졌다. 이제 만드는 것은 `SimClock` 이 공정 시간대로 하고, 벨트는
+           *  **출력 자리에 있는 것만** 가져간다.
            *
-           *  불량품도 재료를 먹는다 — 불량은 만들고 나서 걸러지는 것이지, 재료를
-           *  안 쓰고 나오는 것이 아니다. 그래서 여기서는 `screen` 을 보지 않는다.
+           *  한 덩어리 = `outputCount` 개다. 모자라면 그만큼 못 싣고, 못 실은
+           *  자리는 **빈칸**으로 지나간다(벨트는 계속 돈다). 설비가 벨트보다
+           *  느리면 그 빈칸이 곧 "이 설비가 라인을 못 따라간다" 는 그림이다.
            *
-           *  못 낸 몫은 **빈칸**으로 지나간다(벨트는 계속 돈다). 위의 「굶음」
-           *  판정이 이미 `feeding` 을 내려 두므로 여기까지 오는 일은 드물지만
-           *  (카트가 마지막 한 개를 가져간 바로 그 프레임), 그 한 프레임에
-           *  공짜로 만들어지는 것을 막는 자리가 여기다.
+           *  불량은 여기서 안 본다 — 불량은 만들고 나서 걸러지는 것이라 도착
+           *  시점(`onArrive`)에서 `screen` 이 처리한다.
            */
-          onSpawn={recipe && !isSource(recipe) ? (n) => {
-            const per = needFor(recipe, Math.max(1, owner.outputCount ?? 3));
-            let paid = 0;
-            while (paid < n && takeEach(owner.uid, per)) paid++;
-            return paid;
-          } : null}
+          onSpawn={(n) => {
+            /* **덩어리 단위로만** 가져간다. 남은 개수를 그냥 집으면 한 덩어리가
+               못 되는 나머지가 재고에서 빠진 채 어디에도 안 실린다 — 조용히
+               사라지는 재고는 처리량이 왜 안 맞는지 단서를 안 남긴다. */
+            const per = Math.max(1, Math.round(owner.outputCount ?? 3));
+            const bundles = Math.min(n, Math.floor(getMade(owner.uid) / per));
+            if (bundles > 0) takeMade(owner.uid, bundles * per);
+            return bundles;
+          }}
           /* 종점에 닿은 한 덩어리가 곧 재고 한 묶음이 된다 */
           onArrive={sink ? (n) => {
             /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
