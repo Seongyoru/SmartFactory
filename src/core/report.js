@@ -124,6 +124,37 @@ export function runReportCSV(d = {}) {
     rows.push([s.name, int(s.have), int(s.cap), int(s.arrivedTotal), detail]);
   }
 
+  /* ---- 원가 ----
+     `cost.js` 의 costOf 결과를 그대로 받는다. 여기서 다시 곱하지 않는다 —
+     화면의 개당 원가와 보고서의 개당 원가가 갈리면 둘 다 못 믿게 된다. */
+  if (d.cost) {
+    const c = d.cost;
+    head('원가');
+    rows.push(['개당 원가(원)', c.per == null ? '측정 중' : int(c.per)]);
+    rows.push(['누적(원)', int(c.total)]);
+    rows.push(['시간당(원)', int(c.perHour)]);
+    rows.push(['놀면서 탄 돈(원)', int(c.idleBurn)]);
+    rows.push(['정지 비중(%)', pct(c.stopShare)]);
+    rows.push(['불량으로 버린 돈(원)', int(c.scrapWon)]);
+    rows.push(['전력(kWh)', fx(c.kwh, 2)]);
+    rows.push(['사람·시간', fx(c.manHours, 2)]);
+    blank();
+    rows.push(['항목', '금액(원)', '비중(%)']);
+    for (const p of c.parts) {
+      rows.push([p.label, int(p.won), c.total > 0 ? pct(p.won / c.total) : '']);
+    }
+    blank();
+    rows.push(['단가', '전기(원/kWh)', c.rates.power]);
+    rows.push(['', '인건비(원/시간)', c.rates.wage]);
+    rows.push(['', '카트 한 대(kW)', c.rates.cartKw]);
+    rows.push(['', '자재비(원/개)', c.rates.material]);
+    blank();
+    rows.push(['설비', '가동(초)', '정지(초)', '전력(kWh)', '전력비(원)', '고정비(원)', '놀며 탄 돈(원)']);
+    for (const r of c.rows) {
+      rows.push([r.name, fx(r.runSec), fx(r.idleSec), fx(r.kwh, 2), int(r.power), int(r.fixed), int(r.idleBurn)]);
+    }
+  }
+
   /* ---- 생산 추이 ---- */
   if ((d.series ?? []).length) {
     head('생산 추이');

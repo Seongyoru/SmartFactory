@@ -41,8 +41,12 @@ import {
 } from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
-  getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
+  getMade, getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
 } from '../core/faults.js';
+import {
+  DEFAULT_RATES, FIXED_RANGE, KW_RANGE, MATERIAL_RANGE, POWER_RANGE, WAGE_RANGE,
+  costOf, fixedOf, idleKwOf, normalizeRates, runKwOf, won,
+} from '../core/cost.js';
 import {
   PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
 } from '../data/library.js';
@@ -95,6 +99,7 @@ import {
 } from '../core/area.js';
 import { focusOn } from '../core/focusStore.js';
 import { downloadCSV, stamp } from '../core/persistence.js';
+import { useCostInput } from './useCost.js';
 import { seriesCSV } from '../core/scenarios.js';
 import { sliceCountFor, tileCount } from '../scene/connectorGeometry.js';
 import { Btn, ColorField, Field, Row, Section, Slider } from './common.jsx';
@@ -328,6 +333,51 @@ function FaultFields({ placed }) {
         박자를 맞춰 서서 실제와 다른 그림이 됩니다.
         <br />불량품은 쌓이지 않고 버려집니다. 적치대에 넣으면 자리를 차지해 멀쩡한 라인을
         세우게 되니까요.
+      </p>
+    </Section>
+  );
+}
+
+/**
+ * 설비 한 대의 전력·고정비.
+ * ---------------------------------------------------------------------------
+ *  **대기 전력을 따로 두는 것**이 요점이다. 한 값만 쓰면 서 있는 설비가 공짜가
+ *  되고, 그러면 「설비를 잔뜩 깔고 놀리는」 배치가 원가에서 이긴다. 실제로는
+ *  꺼 두지 않는 한 계속 먹는다.
+ *
+ *  고정비(감가상각·임차)는 **기본이 0** 이다. 아는 사람만 넣으면 되고, 모르는
+ *  숫자를 지어내 넣으면 원가 전체가 그 지어낸 값에 끌려간다.
+ */
+function PowerFields({ placed }) {
+  const { state, dispatch } = useEditor();
+  const set = (patch) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch });
+  const run = runKwOf(placed);
+  const idle = idleKwOf(placed);
+  const fixed = fixedOf(placed);
+  const price = normalizeRates(state.rates).power;
+
+  return (
+    <Section title="전력 · 고정비">
+      <Slider
+        label="가동 중" value={run} text={`${run} kW`}
+        min={KW_RANGE[0]} max={60} step={0.1}
+        onChange={(v) => set({ runKw: v })}
+      />
+      <Slider
+        label="서 있을 때" value={idle} text={`${idle} kW`}
+        min={KW_RANGE[0]} max={60} step={0.1}
+        onChange={(v) => set({ idleKw: v })}
+        hint="가동 kW 를 넘을 수 없다"
+      />
+      <Slider
+        label="고정비" value={fixed} text={fixed ? `${fixed.toLocaleString()} 원/시간` : '안 넣음'}
+        min={FIXED_RANGE[0]} max={FIXED_RANGE[1]} step={FIXED_RANGE[2]}
+        onChange={(v) => set({ fixedPerHour: v })}
+      />
+      <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
+        지금 단가({price} 원/kWh)로 이 설비는 <b className="text-ink2">쉬지 않고 돌 때
+        시간당 {won(run * price + fixed)}</b>, <b className="text-ink2">서 있을 때
+        시간당 {won(idle * price + fixed)}</b> 씁니다.
       </p>
     </Section>
   );
@@ -571,6 +621,8 @@ function EquipmentPanel({ placed }) {
       <CrewFields placed={placed} />
 
       <FaultFields placed={placed} />
+
+      <PowerFields placed={placed} />
 
       <Section title="배치">
         <Row label="위치 X / Z">
@@ -2521,6 +2573,15 @@ function RunReport() {
   const blocked = getBlocked();
   const series = getSeries();
   useFaults();
+  /**
+   * 원가 패널과 **같은 훅**을 쓴다 — 각자 모으면 두 숫자가 갈린다.
+   *
+   *  아래 `ran <= 0` 조기 반환보다 **위**에 있어야 한다. 처음엔 아래에 뒀다가
+   *  「Rendered more hooks than during the previous render」 로 화면이 통째로
+   *  죽었다 — 안 돌았을 때는 훅 넷, 돌기 시작하면 일곱이 되기 때문이다.
+   *  값 검사로는 절대 안 잡히는 종류라, 이 주석이 곧 그 검사다.
+   */
+  const cost = useCostInput();
   const overall = oeeOverall(state.placed.map((p) => p.uid));
 
   if (ran <= 0) return null;
@@ -2643,6 +2704,8 @@ function RunReport() {
       carts,
       stores,
       series,
+      /* 원가는 cost.js 가 이미 낸 값 그대로 — 화면 패널과 같은 훅을 쓴다 */
+      cost,
     });
   };
 
@@ -2908,6 +2971,113 @@ const NUM_FIELD =
   + 'outline-none focus:border-sky-500/60 [appearance:textfield] '
   + '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
 
+/** 항목별 비중 막대 — 어디에 돈이 가는지는 액수보다 **비율**로 먼저 보인다 */
+function CostBar({ parts, total }) {
+  const tone = {
+    power: 'bg-amber-500', labor: 'bg-sky-500', cart: 'bg-violet-500',
+    fixed: 'bg-slate-400', material: 'bg-emerald-500',
+  };
+  if (!(total > 0)) return null;
+  return (
+    <div className="mb-2 mt-1">
+      <div className="flex h-2 overflow-hidden rounded-full bg-panel2">
+        {parts.map((p) => (
+          <div key={p.key} className={tone[p.key] ?? 'bg-ink4'} style={{ width: `${(p.won / total) * 100}%` }} />
+        ))}
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink4">
+        {parts.map((p) => (
+          <span key={p.key} className="flex items-center gap-1">
+            <i className={`inline-block h-2 w-2 rounded-sm ${tone[p.key] ?? 'bg-ink4'}`} />
+            {p.label} {Math.round((p.won / total) * 100)}%
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 원가 — 「이 배치가 남는 장사인가」
+ * -------------------------------------------------------------------------
+ *  숫자 하나로 줄이면 **개당 원가**다. 처리량이 높아도 개당이 비싸면 진 배치다.
+ *  그 아래에 「놀면서 탄 돈」을 같이 둔다 — 고칠 값어치를 액수로 보여 준다.
+ */
+function CostPanel() {
+  const { state, dispatch } = useEditor();
+  const c = useCostInput();
+  const rates = normalizeRates(state.rates);
+  const set = (patch) => dispatch({ type: 'SET_RATES', rates: patch });
+  /* 손대지 않은 기본값으로 낸 원가는 **그 공장의 원가가 아니다.** 액수를 크게
+     띄워 놓고 그 사실을 안 밝히면 회의에서 그대로 인용된다. */
+  const untouched = Object.keys(DEFAULT_RATES).every((k) => rates[k] === DEFAULT_RATES[k]);
+
+  if (!c.ranSec) {
+    return (
+      <Section title="원가">
+        <p className="text-[11px] leading-relaxed text-ink4">
+          아직 돌리지 않았습니다. 시뮬레이션을 시작하면 전기·인건비·자재비를 합쳐
+          <b className="text-ink3"> 개당 원가</b>가 나옵니다.
+        </p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="원가">
+      <Row label="개당 원가">
+        <b className="text-[13px] text-ink">{c.per == null ? '측정 중' : won(c.per)}</b>
+        {c.good > 0 && <span className="ml-1 text-[10px] font-normal text-ink4">양품 {c.good}개 기준</span>}
+      </Row>
+      <Row label="누적">{won(c.total)}</Row>
+      <Row label="시간당">{won(c.perHour)}</Row>
+
+      <CostBar parts={c.parts} total={c.total} />
+
+      {/* 이 패널의 핵심. 「막힘 12%」 는 와 닿지 않지만 「시간당 4만원씩 탄다」 는
+          와 닿는다 — 진단이 짚은 원인을 고칠지 말지가 여기서 갈린다. */}
+      <Row label="놀면서 탄 돈">
+        <span className={c.stopShare > 0.15 ? 'text-rose-500' : 'text-ink2'}>{won(c.idleBurn)}</span>
+        <span className="ml-1 text-[10px] font-normal text-ink4">
+          정지 {(c.stopShare * 100).toFixed(1)}%
+        </span>
+      </Row>
+      {c.scrapWon > 0 && (
+        <Row label="불량으로 버린 돈"><span className="text-rose-500">{won(c.scrapWon)}</span></Row>
+      )}
+      <Row label="전력 · 사람">
+        {c.kwh.toFixed(1)} kWh · {c.manHours.toFixed(1)} 사람·시간
+      </Row>
+
+      <p className="mb-1 mt-3 text-[10.5px] text-ink4">
+        단가 {untouched && <b className="text-amber-600">— 아직 기본값입니다</b>}
+      </p>
+      <Slider
+        label="전기" value={rates.power} text={`${rates.power} 원/kWh`}
+        min={POWER_RANGE[0]} max={POWER_RANGE[1]} step={POWER_RANGE[2]}
+        onChange={(v) => set({ power: v })}
+      />
+      <Slider
+        label="인건비" value={rates.wage} text={`${rates.wage.toLocaleString()} 원/시간`}
+        min={WAGE_RANGE[0]} max={WAGE_RANGE[1]} step={WAGE_RANGE[2]}
+        onChange={(v) => set({ wage: v })}
+        hint="교대조 정원에 물린다 — 사람은 설비가 서 있어도 급여를 받는다"
+      />
+      <Slider
+        label="카트 한 대" value={rates.cartKw} text={`${rates.cartKw} kW`}
+        min={KW_RANGE[0]} max={20} step={0.1}
+        onChange={(v) => set({ cartKw: v })}
+      />
+      <Slider
+        label="자재비" value={rates.material} text={rates.material ? `${rates.material.toLocaleString()} 원/개` : '안 넣음'}
+        min={MATERIAL_RANGE[0]} max={MATERIAL_RANGE[1]} step={MATERIAL_RANGE[2]}
+        onChange={(v) => set({ material: v })}
+        hint="모르면 0으로 두고 가공비만 본다 — 배치끼리 견주는 데는 그걸로 충분하다"
+      />
+    </Section>
+  );
+}
+
 function CrewPanel() {
   const { state, dispatch, itemOf } = useEditor();
   const elapsed = useElapsed();
@@ -3073,6 +3243,8 @@ function Summary() {
 
 
       <CrewPanel />
+
+      <CostPanel />
 
       <BomReport />
 

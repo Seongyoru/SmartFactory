@@ -157,7 +157,9 @@ t('짧게 돌린 기록은 CSV 에도 그렇게 적힌다', () => {
   const r = sc.scenarioCSV([{ name: 'x', at: 0, run: { ran: 10, shipped: 1, throughput: 360, wip: 0,
     scrapped: 0, oee: 1, availability: 1, performance: 1, quality: 1, neck: null, equips: 1 } }]);
   assert.ok(String(r[1][3]).startsWith('아니오'));
-  assert.equal(r[1][12], '없음');                       // 병목 없음
+  /* 열은 **머리글에서 찾는다.** 자리를 숫자로 박아 두면 열 하나 늘 때마다
+     상관없는 검사가 깨진다(원가 열 넷을 넣다가 실제로 겪었다). */
+  assert.equal(r[1][r[0].indexOf('병목')], '없음');
 });
 t('추이 CSV', () => {
   const r = sc.seriesCSV([{ t: 10, shipped: 3 }, { t: 20, shipped: 9 }]);

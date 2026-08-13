@@ -41,7 +41,7 @@ export const SHORT_RUN = 120;
  *  @param placed 지금 도면의 설비들 (병목 이름과 라인 OEE 를 뽑는 데 쓴다)
  *  @param shipped 종류별 출하 { OBJ: n, … }
  */
-export function captureRun(placed, shipped) {
+export function captureRun(placed, shipped, cost = null) {
   const ran = getRan();
   if (ran <= 0) return null;
 
@@ -67,6 +67,15 @@ export function captureRun(placed, shipped) {
     /* 병목은 이름으로 굳힌다 — 나중에 그 설비를 지워도 기록은 남아야 한다 */
     neck: neck ? { name: owner?.name ?? neck.uid, ratio: neck.ratio } : null,
     equips: placed.length,
+    /**
+     * 원가 — **밖에서 받아 온다.** cost.js 는 단가(도면)와 교대조까지 봐야 하는데
+     * 여기서는 그 둘을 모른다. 여기서 다시 계산하면 화면과 갈릴 자리가 하나 더
+     * 생기므로, 화면이 이미 낸 값을 굳히기만 한다.
+     *
+     * 개당 원가는 **처리량과 반대로 움직일 수 있다** — 설비를 두 배 깔아 처리량을
+     * 20% 올린 배치는 여기서 진다. 그게 이 열을 넣은 이유다.
+     */
+    cost: cost ? { per: cost.per, total: cost.total, perHour: cost.perHour, idleBurn: cost.idleBurn } : null,
   };
 }
 
@@ -80,7 +89,7 @@ export function makeScenario(uid, name, layout, run) {
  *  값이 없는(아직 안 돌린) 시나리오는 겨루지 않는다. 병목 비율만 **낮을수록**
  *  좋고 나머지는 높을수록 좋다.
  */
-export const LOWER_IS_BETTER = new Set(['neck', 'wip', 'scrapped']);
+export const LOWER_IS_BETTER = new Set(['neck', 'wip', 'scrapped', 'costPer']);
 
 /**
  * 비교표를 CSV 한 장으로.
@@ -101,6 +110,7 @@ export function scenarioCSV(rows) {
     '이름', '기록 시각', '돌린 시간(초)', '견줄 만한가',
     '출하(개)', '처리량(개/시간)', '재공(개)', '불량(개)',
     'OEE', '가동률', '성능', '양품률',
+    '개당 원가(원)', '누적 원가(원)', '시간당 원가(원)', '놀며 탄 돈(원)',
     '병목', '병목 비율', '설비 수',
   ];
   const body = (rows ?? []).map((r) => {
@@ -116,6 +126,7 @@ export function scenarioCSV(rows) {
       n.wip,
       n.scrapped,
       n.oee ?? '', n.availability ?? '', n.performance ?? '', n.quality ?? '',
+      n.cost?.per ?? '', n.cost?.total ?? '', n.cost?.perHour ?? '', n.cost?.idleBurn ?? '',
       n.neck?.name ?? '없음',
       n.neck?.ratio ?? '',
       n.equips,
@@ -140,7 +151,10 @@ export function bestOf(rows, key) {
        OEE 도 만점에 가깝다. 표에는 남겨 두되(경고를 달아) 왕관은 주지 않는다 —
        숫자가 거짓말을 하는 자리가 정확히 여기다. */
     .filter((r) => r.run && r.run.ran >= SHORT_RUN)
-    .map((r) => (key === 'neck' ? r.run?.neck?.ratio : r.run?.[key]))
+    /* 중첩된 값 둘은 이름이 따로다 — 표의 열 이름과 저장 구조가 늘 같지는 않다 */
+    .map((r) => (key === 'neck' ? r.run?.neck?.ratio
+      : key === 'costPer' ? r.run?.cost?.per
+        : r.run?.[key]))
     .filter((v) => typeof v === 'number' && Number.isFinite(v));
   if (vals.length < 2) return null;                 // 둘 이상 있어야 견줄 것이 있다
   return LOWER_IS_BETTER.has(key) ? Math.min(...vals) : Math.max(...vals);

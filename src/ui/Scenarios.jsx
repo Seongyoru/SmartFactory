@@ -26,6 +26,8 @@ import { useShipped } from '../core/simStore.js';
 import { getRan, useMetrics } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
 import { SHORT_RUN, bestOf, captureRun, scenarioCSV } from '../core/scenarios.js';
+import { won } from '../core/cost.js';
+import { useCostInput } from './useCost.js';
 import { formatElapsed } from '../core/clock.js';
 import { downloadCSV, downloadJSON, stamp } from '../core/persistence.js';
 import { Btn } from './common.jsx';
@@ -49,6 +51,7 @@ export default function Scenarios() {
   useMetrics();
   useFaults();
   const [name, setName] = useState('');
+  const cost = useCostInput();
 
   if (!state.showScenarios) return null;
 
@@ -57,7 +60,8 @@ export default function Scenarios() {
   const close = () => dispatch({ type: 'SET', patch: { showScenarios: false } });
 
   /* 지금까지 돌린 성적 — 아직 안 돌렸으면 null */
-  const current = () => captureRun(state.placed, shipped);
+  /* 원가는 화면이 이미 낸 값 그대로 굳힌다 — 여기서 다시 계산하지 않는다 */
+  const current = () => captureRun(state.placed, shipped, cost);
 
   const best = {
     throughput: bestOf(rows, 'throughput'),
@@ -65,6 +69,7 @@ export default function Scenarios() {
     availability: bestOf(rows, 'availability'),
     performance: bestOf(rows, 'performance'),
     neck: bestOf(rows, 'neck'),
+    costPer: bestOf(rows, 'costPer'),
   };
 
   return (
@@ -117,6 +122,7 @@ export default function Scenarios() {
                   <th className="px-2 py-1.5 text-right font-medium">OEE</th>
                   <th className="px-2 py-1.5 text-right font-medium" title="고장으로 못 돈 시간을 뺀 비율">가동률</th>
                   <th className="px-2 py-1.5 text-right font-medium" title="막혀서 못 돈 시간을 뺀 비율 — 배치로 푼다">성능</th>
+                  <th className="px-2 py-1.5 text-right font-medium" title="처리량과 반대로 움직일 수 있다 — 설비를 잔뜩 깔아 처리량만 올린 배치가 여기서 진다">개당 원가</th>
                   <th className="px-2 py-1.5 text-left font-medium">병목</th>
                   <th className="px-2 py-1.5" />
                 </tr>
@@ -148,6 +154,7 @@ export default function Scenarios() {
                       <Cell value={r?.oee} best={best.oee}>{pct(r?.oee)}</Cell>
                       <Cell value={r?.availability} best={best.availability}>{pct(r?.availability)}</Cell>
                       <Cell value={r?.performance} best={best.performance}>{pct(r?.performance)}</Cell>
+                      <Cell value={r?.cost?.per} best={best.costPer}>{r?.cost?.per == null ? "—" : won(r.cost.per)}</Cell>
                       <td className="px-2 py-1.5 text-ink2">
                         {r?.neck ? (
                           <span title={`${r.neck.name} — 전체 시간의 ${(r.neck.ratio * 100).toFixed(0)}% 를 막혀서 서 있었다`}>

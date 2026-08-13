@@ -16,6 +16,7 @@ import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.j
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
 import { DEFAULT_SHIFT, normalizeShifts } from './crew.js';
 import { normalizeOrders } from './orders.js';
+import { DEFAULT_RATES, normalizeRates } from './cost.js';
 import {
   OPENING_DEFAULTS,
   PILLAR_DEFAULTS,
@@ -159,6 +160,13 @@ const initialState = {
    *  도면이 갑자기 「납기 초과」 로 붉어지면 안 된다(교대조와 같은 태도).
    */
   orders: [],
+
+  /**
+   * 단가 — 전기·인건비·자재비. **도면의 성질이다**(공장마다 다르다).
+   *  기본값이 있어서 아무것도 안 적어도 원가가 나온다. 다만 그 숫자는
+   *  「시작점」이지 그 공장의 값이 아니므로, 화면이 기본값임을 밝힌다.
+   */
+  rates: { ...DEFAULT_RATES },
 
   /** 선반을 놓을 때의 길이(칸 수). 배치 중 [ ] 로 바꾼다 */
   shelfBays: DEFAULT_BAYS,
@@ -1035,6 +1043,9 @@ function reducer(state, action) {
         /* 벨트 속도가 없는 옛 도면은 예전 기본값으로 — 간격이 여기서 나오므로
            이 값이 조용히 달라지면 처리량이 통째로 바뀐다 */
         beltSpeed: Number(action.data.beltSpeed) > 0 ? Number(action.data.beltSpeed) : 0.6,
+        /* 단가가 없는 옛 도면은 기본 단가로 — 원가가 0원이라고 하는 것보다
+           「기본값으로 잡으면 이만큼」 이 정직하다 */
+        rates: normalizeRates(action.data.rates),
         seq: action.data.seq ?? 1,
         selected: null,
         connectFrom: null,
@@ -1048,6 +1059,9 @@ function reducer(state, action) {
 
     case 'SET_ORDERS':
       return { ...state, orders: normalizeOrders(action.orders) };
+
+    case 'SET_RATES':
+      return { ...state, rates: normalizeRates({ ...state.rates, ...action.rates }) };
 
     case 'CLEAR':
       return {
@@ -1085,7 +1099,7 @@ function reducer(state, action) {
 /** 되돌릴 대상 — 도면을 이루는 값들 */
 /* 교대조도 도면의 일부다 — 인원을 고치는 것도 되돌릴 수 있어야 하고, 자동 저장이
    따라와야 한다. `normalizeShifts` 가 늘 새 배열을 주므로 참조 비교로도 잡힌다. */
-const DOC_KEYS = ['placed', 'links', 'carts', 'areas', 'walls', 'pillars', 'zones', 'openings', 'shifts', 'orders', 'beltSpeed', 'seq'];
+const DOC_KEYS = ['placed', 'links', 'carts', 'areas', 'walls', 'pillars', 'zones', 'openings', 'shifts', 'orders', 'beltSpeed', 'rates', 'seq'];
 const HISTORY_LIMIT = 100;
 /** 같은 조작으로 묶는 시간(ms) */
 const COALESCE_MS = 500;

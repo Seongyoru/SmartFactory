@@ -45,6 +45,8 @@ export const layoutSnapshot = (state) => ({
    * 설비에 저장돼 그대로 남아서 **아무것도 안 건드렸는데 처리량이 바뀐다.**
    */
   beltSpeed: state.beltSpeed,
+  /** 단가 — 전기·인건비·자재비. 공장마다 다르니 **그 도면에 딸린 값**이다 */
+  rates: state.rates,
   seq: state.seq,
 });
 

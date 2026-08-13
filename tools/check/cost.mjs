@@ -1,0 +1,268 @@
+/**
+ * 원가 — 「이 배치가 남는 장사인가」
+ * ---------------------------------------------------------------------------
+ *  이 값은 **회의에 들고 나간다.** 처리량이 틀리면 시뮬레이터가 이상한 것이지만
+ *  원가가 틀리면 잘못된 결정이 내려진다. 그래서 여기는 산수 하나하나를 못 박고,
+ *  「화면·보고서·비교표가 같은 값을 보는가」 까지 소스로 확인한다.
+ */
+import assert from 'node:assert/strict';
+import { SRC, group, readSrc, t } from './_harness.mjs';
+
+group('원가');
+
+const C = await import(SRC + 'core/cost.js');
+
+const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≠ ${b}`);
+const HOUR = 3600;
+/** 전기만 따지게 만든 단가 — 다른 항목이 섞이면 뭘 보고 있는지 알 수 없다 */
+const ONLY_POWER = { power: 100, wage: 0, cartKw: 0, material: 0 };
+
+/* ---------- 단가 읽기 ----------------------------------------------------- */
+
+t('단가가 없거나 깨져도 온전한 표를 돌려준다', () => {
+  assert.deepEqual(C.normalizeRates(undefined), C.DEFAULT_RATES);
+  assert.deepEqual(C.normalizeRates(null), C.DEFAULT_RATES);
+  assert.equal(C.normalizeRates({ power: 'abc' }).power, C.DEFAULT_RATES.power);
+  assert.equal(C.normalizeRates({ wage: NaN }).wage, C.DEFAULT_RATES.wage);
+});
+t('단가는 범위 밖으로 못 나간다 — 음수 원가가 나오면 안 된다', () => {
+  assert.equal(C.normalizeRates({ power: -50 }).power, C.POWER_RANGE[0]);
+  assert.equal(C.normalizeRates({ wage: 9e9 }).wage, C.WAGE_RANGE[1]);
+  assert.equal(C.normalizeRates({ material: -1 }).material, 0);
+});
+t('설비가 자기 값을 안 가졌으면 기본 kW', () => {
+  assert.equal(C.runKwOf({}), C.RUN_KW);
+  assert.equal(C.idleKwOf({}), C.IDLE_KW);
+  assert.equal(C.fixedOf({}), 0, '고정비 기본은 0 — 모르는 숫자를 지어내면 안 된다');
+});
+t('**대기 kW 는 가동 kW 를 넘을 수 없다** — 서 있는 게 더 비싸면 거꾸로다', () => {
+  assert.equal(C.idleKwOf({ runKw: 3, idleKw: 10 }), 3);
+  assert.equal(C.idleKwOf({ runKw: 10, idleKw: 3 }), 3);
+});
+
+/* ---------- 시간 → 돈 ------------------------------------------------------ */
+
+t('kWh 는 kW × 시간 — 3600 이 한 곳에만 있다', () => {
+  near(C.kwh(7, HOUR), 7);
+  near(C.kwh(7, HOUR / 2), 3.5);
+  assert.equal(C.kwh(7, -5), 0, '음수 시간은 0');
+  assert.equal(C.kwh(-7, HOUR), 0, '음수 kW 도 0');
+});
+t('시간당 얼마 × 초 = 원', () => {
+  near(C.perHour(12000, HOUR), 12000);
+  near(C.perHour(12000, 600), 2000);
+});
+
+/* ---------- 설비 한 대 ----------------------------------------------------- */
+
+t('가동과 대기를 갈라 센다 — 서 있는 설비는 공짜가 아니다', () => {
+  const r = C.machineCost({ runKw: 10, idleKw: 2 }, HOUR, HOUR / 4, ONLY_POWER);
+  near(r.runSec, 2700);
+  near(r.idleSec, 900);
+  near(r.kwh, 10 * 0.75 + 2 * 0.25);          // 7.5 + 0.5
+  near(r.power, 8 * 100);
+});
+t('한 값만 쓰면 안 되는 이유 — 갈라 세지 않으면 놀리는 배치가 이긴다', () => {
+  const split = C.machineCost({ runKw: 10, idleKw: 2 }, HOUR, HOUR, ONLY_POWER);
+  assert.ok(split.power > 0, '온종일 서 있었는데 전기값이 0이다');
+  near(split.power, 2 * 100);
+});
+t('정지 시간은 돈 시간을 넘을 수 없다', () => {
+  const r = C.machineCost({ runKw: 10, idleKw: 2 }, 600, 99999, ONLY_POWER);
+  near(r.idleSec, 600);
+  near(r.runSec, 0);
+});
+t('고정비는 **돈 시간 전체**에 붙는다 — 놀아도 감가상각은 나간다', () => {
+  const r = C.machineCost({ runKw: 0, idleKw: 0, fixedPerHour: 6000 }, HOUR, HOUR / 2, ONLY_POWER);
+  near(r.fixed, 6000);
+  near(r.idleBurn, 3000, 1e-6);              // 절반은 노는 몫
+});
+t('놀며 탄 돈 = 대기 전력 + 그 시간 몫의 고정비', () => {
+  const r = C.machineCost({ runKw: 10, idleKw: 2, fixedPerHour: 3600 }, HOUR, HOUR / 2, ONLY_POWER);
+  near(r.idleBurn, 2 * 0.5 * 100 + 1800);
+});
+t('한 번도 안 돌았으면 전부 0 — 방금 놓은 설비가 돈을 쓰면 안 된다', () => {
+  const r = C.machineCost({}, 0, 0, ONLY_POWER);
+  near(r.total, 0);
+  near(r.idleBurn, 0);
+});
+
+/* ---------- 사람-초 -------------------------------------------------------- */
+
+const SHIFTS = [
+  { name: '주', minutes: 480, headcount: 6 },
+  { name: '야', minutes: 480, headcount: 3 },
+];
+
+t('한 조 안에서는 그 조의 정원만큼', () => {
+  near(C.crewSeconds(SHIFTS, HOUR), 6 * HOUR);
+});
+t('조가 바뀌면 정원도 바뀐다 — 경계를 걸치면 나눠 센다', () => {
+  const ran = 9 * HOUR;                        // 주 8시간 + 야 1시간
+  near(C.crewSeconds(SHIFTS, ran), 6 * 8 * HOUR + 3 * HOUR);
+});
+t('한 바퀴를 넘겨도 정확하다 — 되풀이해서 더한다', () => {
+  const cycle = 16 * HOUR;
+  near(C.crewSeconds(SHIFTS, cycle), (6 + 3) * 8 * HOUR);
+  near(C.crewSeconds(SHIFTS, 2 * cycle), 2 * (6 + 3) * 8 * HOUR);
+  near(C.crewSeconds(SHIFTS, 2 * cycle + HOUR), 2 * (6 + 3) * 8 * HOUR + 6 * HOUR);
+});
+t('정원 **무제한(0)** 은 그 도면이 실제로 쓰는 인원으로 본다', () => {
+  /* 무한대에 시급을 곱할 수는 없다. 0명으로 두면 인건비가 통째로 사라져
+     「사람이 공짜인 공장」이 되므로, 실제 필요 인원만큼 뒀다고 본다. */
+  const one = [{ name: '상시', minutes: 1440, headcount: 0 }];
+  near(C.crewSeconds(one, HOUR, 4), 4 * HOUR);
+  near(C.crewSeconds(one, HOUR, 0), 0);
+});
+t('안 돌았으면 사람-초도 0', () => {
+  near(C.crewSeconds(SHIFTS, 0), 0);
+  near(C.crewSeconds(null, HOUR), 0, 1e-6);
+});
+
+/* ---------- 한 판 전체 ----------------------------------------------------- */
+
+const M = (uid, extra = {}) => ({ uid, name: uid, placed: { uid, ...extra } });
+
+t('항목을 다 더한 것이 총원가다', () => {
+  const c = C.costOf({
+    machines: [M('A', { runKw: 10, idleKw: 0, fixedPerHour: 1000 })],
+    ranSec: HOUR, stopOf: () => 0, cartSec: 2 * HOUR,
+    shifts: [{ name: '상시', minutes: 1440, headcount: 2 }],
+    made: 100, good: 100,
+    rates: { power: 100, wage: 5000, cartKw: 1, material: 30 },
+  });
+  const parts = c.parts.reduce((s, p) => s + p.won, 0);
+  near(parts, c.total);
+  near(c.total, 10 * 100 + 1000 + 2 * 1 * 100 + 2 * 5000 + 100 * 30);
+});
+t('개당 원가의 분모는 **양품**이다 — 불량까지 나누면 싸 보인다', () => {
+  const d = {
+    machines: [M('A', { runKw: 10, idleKw: 0 })], ranSec: HOUR, stopOf: () => 0,
+    shifts: [], made: 100, rates: ONLY_POWER,
+  };
+  const all = C.costOf({ ...d, good: 100 });
+  const some = C.costOf({ ...d, good: 80 });
+  near(all.per, 1000 / 100);
+  near(some.per, 1000 / 80);
+  assert.ok(some.per > all.per, '불량이 늘었는데 개당이 안 비싸졌다');
+});
+t('불량으로 버린 돈은 만든 몫 그대로', () => {
+  const c = C.costOf({
+    machines: [M('A', { runKw: 10, idleKw: 0 })], ranSec: HOUR, stopOf: () => 0,
+    shifts: [], made: 100, good: 75, rates: ONLY_POWER,
+  });
+  near(c.scrapWon, c.total * 0.25);
+});
+t('자재비는 **만든 개수**에 붙는다 — 불량도 자재는 먹었다', () => {
+  const c = C.costOf({
+    machines: [], ranSec: HOUR, stopOf: () => 0, shifts: [],
+    made: 100, good: 60, rates: { power: 0, wage: 0, cartKw: 0, material: 50 },
+  });
+  near(c.total, 100 * 50);
+});
+t('아무것도 안 만들었으면 개당은 **측정 중** — 0으로 나누지 않는다', () => {
+  const c = C.costOf({ machines: [M('A')], ranSec: HOUR, stopOf: () => 0, shifts: [], made: 0, good: 0 });
+  assert.equal(c.per, null);
+  assert.ok(c.total > 0, '만든 것이 없어도 전기는 썼다');
+});
+t('0원짜리 항목은 목록에 안 뜬다 — 안 넣은 값이 표를 채우면 안 된다', () => {
+  const c = C.costOf({
+    machines: [M('A', { runKw: 10, idleKw: 0 })], ranSec: HOUR, stopOf: () => 0,
+    shifts: [], made: 10, good: 10, rates: ONLY_POWER,
+  });
+  assert.deepEqual(c.parts.map((p) => p.key), ['power']);
+});
+t('인건비는 정지 비중만큼만 손실로 잡는다 — 100% 돌아도 급여는 나간다', () => {
+  const base = {
+    machines: [M('A', { runKw: 0, idleKw: 0 })], ranSec: HOUR,
+    shifts: [{ name: '상시', minutes: 1440, headcount: 1 }],
+    made: 10, good: 10, rates: { power: 0, wage: 6000, cartKw: 0, material: 0 },
+  };
+  const busy = C.costOf({ ...base, stopOf: () => 0 });
+  const half = C.costOf({ ...base, stopOf: () => HOUR / 2 });
+  near(busy.idleBurn, 0, 1e-6);
+  near(half.idleBurn, 3000, 1e-6);
+});
+t('시간당 원가는 돌린 길이와 무관하게 견줄 수 있다', () => {
+  const d = (sec) => C.costOf({
+    machines: [M('A', { runKw: 10, idleKw: 10 })], ranSec: sec, stopOf: () => 0,
+    shifts: [], made: 1, good: 1, rates: ONLY_POWER,
+  });
+  near(d(HOUR).perHour, d(3 * HOUR).perHour, 1e-6);
+  assert.ok(d(3 * HOUR).total > d(HOUR).total, '오래 돌렸는데 누적이 안 늘었다');
+});
+t('설비 목록이 비어도 터지지 않는다', () => {
+  const c = C.costOf({});
+  near(c.total, 0);
+  assert.equal(c.per, null);
+  near(c.perHour, 0);
+});
+
+/* ---------- 사람이 읽는 표기 ----------------------------------------------- */
+
+t('금액 표기는 자릿수에 따라 단위가 바뀐다', () => {
+  assert.equal(C.won(3200), '3,200원');
+  assert.equal(C.won(52000), '5만 원');
+  assert.equal(C.won(3.4e8), '3.40억 원');
+  assert.equal(C.won(null), '—');
+  assert.equal(C.won(NaN), '—');
+});
+
+/* ---------- 배선 — 세 화면이 **같은 값**을 보는가 --------------------------- */
+
+const store = await readSrc('core/store.jsx');
+const persist = await readSrc('core/persistence.js');
+const inspector = await readSrc('ui/Inspector.jsx');
+const scenarios = await readSrc('core/scenarios.js');
+const scenView = await readSrc('ui/Scenarios.jsx');
+const report = await readSrc('core/report.js');
+const hook = await readSrc('ui/useCost.js');
+
+t('단가는 도면에 **저장된다** — 새로고침하면 원가가 달라지면 안 된다', () => {
+  assert.ok(/DOC_KEYS = \[[^\]]*'rates'/.test(store), 'DOC_KEYS 에 rates 가 없다');
+  assert.ok(/rates: state\.rates/.test(persist), 'layoutSnapshot 에 rates 가 없다');
+});
+t('저장 목록 두 벌이 서로 어긋나지 않는다', () => {
+  /* 앞서 openings·shifts·beltSpeed 가 이 사고를 냈다. 네 번째를 만들지 않는다. */
+  const keys = store.match(/DOC_KEYS = \[([^\]]*)\]/)[1]
+    .split(',').map((s) => s.trim().replace(/'/g, '')).filter(Boolean).sort();
+  const snap = persist.match(/layoutSnapshot = \(state\) => \(\{([\s\S]*?)\n\}\)/)[1]
+    .split('\n').map((l) => l.match(/^\s*(\w+):/)?.[1]).filter(Boolean).sort();
+  assert.deepEqual(snap, keys, `snapshot ${snap.join(',')} ≠ DOC_KEYS ${keys.join(',')}`);
+});
+t('단가를 고치는 길이 있다', () => {
+  assert.ok(store.includes("case 'SET_RATES':"), '리듀서에 SET_RATES 가 없다');
+  assert.ok(store.includes('normalizeRates'), '저장하면서 정규화를 안 한다');
+  assert.ok(inspector.includes("type: 'SET_RATES'"), '화면에서 단가를 못 고친다');
+});
+t('옛 도면도 원가가 나온다 — 없는 rates 는 기본값으로', () => {
+  assert.ok(/rates: normalizeRates\(action\.data\.rates\)/.test(store), '불러올 때 정규화를 안 한다');
+});
+t('**모으는 자리는 하나다** — 화면·보고서·비교표가 같은 훅을 쓴다', () => {
+  assert.ok(hook.includes('export function useCostInput'), '훅이 없다');
+  for (const [name, src] of [['Inspector', inspector], ['Scenarios', scenView]]) {
+    assert.ok(/from '\.\/useCost\.js'/.test(src), `${name} 가 훅을 안 쓴다`);
+  }
+  /* 원가 패널과 보고서가 **각각** 부른다 — 둘 다 같은 함수라야 값이 안 갈린다 */
+  assert.ok((inspector.match(/useCostInput\(\)/g) ?? []).length >= 2,
+    'Inspector 안에서 원가 패널과 보고서 중 한쪽이 훅을 안 쓴다');
+});
+/** 주석을 걷어낸 소스 — 「여기서는 안 부른다」 를 확인할 때 주석 속 이름에 걸린다 */
+const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+t('보고서는 원가를 **받아 적기만** 한다 — 다시 곱하지 않는다', () => {
+  assert.ok(report.includes("head('원가')"), '보고서에 원가 구획이 없다');
+  assert.equal(/costOf|kwh\(|crewSeconds/.test(code(report)), false,
+    'report.js 가 원가를 다시 계산한다 — 화면과 갈릴 자리다');
+  assert.ok(inspector.includes('cost,'), '보고서에 원가를 안 넘긴다');
+});
+t('비교표도 밖에서 받는다 — scenarios.js 는 계산하지 않는다', () => {
+  assert.ok(/captureRun\(placed, shipped, cost = null\)/.test(scenarios), '원가를 안 받는다');
+  assert.equal(/costOf|normalizeRates/.test(code(scenarios)), false, 'scenarios.js 가 원가를 계산한다');
+  assert.ok(/captureRun\(state\.placed, shipped, cost\)/.test(scenView), '화면이 원가를 안 넘긴다');
+});
+t('개당 원가는 **낮을수록** 이긴다', () => {
+  assert.ok(/LOWER_IS_BETTER = new Set\(\[[^\]]*'costPer'/.test(scenarios),
+    '개당 원가가 높을수록 좋은 값으로 잡혀 있다');
+  assert.ok(scenarios.includes("key === 'costPer' ? r.run?.cost?.per"), 'bestOf 가 원가를 못 읽는다');
+});
