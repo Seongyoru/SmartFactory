@@ -21,6 +21,7 @@ import { bottleneck, getRan, throughput, useMetrics } from './core/metrics.js';
 import { blockChain, stepTarget } from './core/diagnose.js';
 import { normalizeOrders } from './core/orders.js';
 import { focusOn } from './core/focusStore.js';
+import { SHARE_PARAM, fetchShared, sharedIdOf } from './core/share.js';
 import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
@@ -473,9 +474,44 @@ function StatusBar() {
   );
 }
 
+/**
+ * 주소에 `?share=…` 가 붙어 있으면 그 도면을 열고 들어온다.
+ * ---------------------------------------------------------------------------
+ *  링크를 받은 사람이 할 일이 없어야 한다 — 누르면 그 도면이 떠 있어야지,
+ *  「불러오기를 누르세요」 라고 시키면 링크를 보낸 뜻이 없다.
+ *
+ *  열고 나면 **주소에서 지운다.** 남겨 두면 그 뒤로 새로고침할 때마다 지금까지
+ *  고친 것을 버리고 원본으로 되돌아간다 — 링크는 문이지 자물쇠가 아니다.
+ */
+function useSharedLayout() {
+  const { dispatch } = useEditor();
+  useEffect(() => {
+    const id = sharedIdOf(window.location.search);
+    if (!id) return;
+    let alive = true;
+    fetchShared(id)
+      .then((data) => {
+        if (!alive) return;
+        dispatch({ type: 'LOAD_LAYOUT', data });
+        dispatch({ type: 'SET', patch: { hint: '공유받은 도면을 열었습니다' } });
+      })
+      .catch((e) => {
+        console.error('[공유] 못 열었다', e);
+        if (alive) dispatch({ type: 'SET', patch: { hint: `공유 도면을 못 열었습니다 — ${e.message}` } });
+      })
+      .finally(() => {
+        const u = new URL(window.location.href);
+        u.searchParams.delete(SHARE_PARAM);
+        window.history.replaceState({}, '', u.toString());
+      });
+    return () => { alive = false; };
+  }, [dispatch]);
+}
+
 function Shell() {
   usePreloadBuiltins();
   useShortcuts();
+  useSharedLayout();
 
   return (
     <div className="flex h-full flex-col bg-app text-ink">

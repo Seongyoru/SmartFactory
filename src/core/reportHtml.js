@@ -181,7 +181,10 @@ export function runReportHTML(d = {}) {
     shiftCycleSec: d.shiftCycleSec ?? 0,
   });
   if (!enough.ok) {
-    p(`<p class="assume"><b>${esc(hms(d.ranSec))}만 돌린 결과입니다 — 적어도 ${esc(hms(enough.need))} 는 돌려야 합니다.</b> `
+    /* 「24시간을 돌리라」 는 말은 그것이 **실제로 몇 분인지**를 같이 말해 주지
+       않으면 그냥 못 할 일처럼 들린다. 20배속이면 24시간은 72분이다. */
+    const real = d.speed > 1 ? ` — ${esc(d.speed)}배속이면 실제 ${esc(hms(enough.need / d.speed))}` : '';
+    p(`<p class="assume"><b>${esc(hms(d.ranSec))}만 돌린 결과입니다 — 적어도 ${esc(hms(enough.need))} 는 돌려야 합니다${real}.</b> `
       + `${esc(enough.why)} 아래 숫자는 참고로만 보세요.</p>`);
   }
 

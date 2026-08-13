@@ -10,6 +10,7 @@ import {
   EyeOff,
   GitCompare,
   GraduationCap,
+  Copy,
   Grid3x3,
   Library,
   Magnet,
@@ -20,6 +21,7 @@ import {
   Redo2,
   RotateCw,
   Save,
+  Share2,
   Sun,
   Trash2,
   Undo2,
@@ -33,6 +35,7 @@ import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
 import { downloadJSON, layoutSnapshot, saveLayout } from '../core/persistence.js';
 import { loadGalleryIndex, loadGalleryLayout } from '../core/gallery.js';
+import { SHARE_OFF, copyText, shareLayout } from '../core/share.js';
 import { Btn, IconBtn } from './common.jsx';
 
 /**
@@ -90,6 +93,81 @@ function GalleryButton({ onPick }) {
             <p className="mt-1 border-t border-line px-2 py-1 text-[9.5px] leading-snug text-ink4">
               여는 순간 <b className="text-ink3">지금 도면을 덮어씁니다.</b> 되돌리기(Ctrl+Z)로 돌아올 수 있습니다.
             </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 도면 올리기 — 링크 하나로 서로 테스트.
+ * ---------------------------------------------------------------------------
+ *  **올리기 전에 반드시 묻는다.** 링크를 가진 사람은 누구나 열 수 있고, 한 번
+ *  나간 것은 되돌릴 수 없다. 「공유」 를 눌렀다는 것만으로 그 뜻까지 동의한
+ *  것으로 치면 안 된다 — 사내 도면이 섞이는 순간 사고가 된다.
+ */
+function ShareButton({ snapshot }) {
+  const [state, setState] = useState(null);   // null · 'ask' · 'busy' · { url, copied }
+
+  const upload = async () => {
+    setState('busy');
+    try {
+      const { url } = await shareLayout(snapshot());
+      setState({ url, copied: await copyText(url) });
+    } catch (e) {
+      console.error('[공유] 못 올렸다', e);
+      setState(null);
+      window.alert(e.code === SHARE_OFF
+        ? `공유가 아직 켜져 있지 않습니다.\n\n${e.message}`
+        : `올리지 못했습니다 — ${e.message}`);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Btn active={!!state} onClick={() => setState(state ? null : 'ask')}>
+        <Share2 size={13} /> 공유
+      </Btn>
+      {state && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setState(null)} />
+          <div className="absolute right-0 top-full z-30 mt-1 w-[290px] rounded-lg bg-panel p-2.5 shadow-xl ring-1 ring-edge">
+            {state === 'ask' && (
+              <>
+                <p className="text-[11.5px] leading-relaxed text-ink2">
+                  지금 도면을 올리고 <b className="text-ink">링크</b>를 받습니다.
+                </p>
+                <p className="mt-1.5 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
+                  링크를 가진 사람은 <b>누구나</b> 열 수 있고, 한 번 올린 것은 되돌릴 수 없습니다.
+                  회사 도면이면 올리기 전에 다시 생각해 주세요.
+                </p>
+                <div className="mt-2 flex justify-end gap-1.5">
+                  <Btn onClick={() => setState(null)}>취소</Btn>
+                  <Btn onClick={upload}><Share2 size={12} /> 올리기</Btn>
+                </div>
+              </>
+            )}
+            {state === 'busy' && <p className="text-[11.5px] text-ink3">올리는 중…</p>}
+            {state?.url && (
+              <>
+                <p className="mb-1 text-[10.5px] text-ink4">
+                  {state.copied ? '링크를 복사했습니다 — 그대로 붙여넣으세요.' : '아래 링크를 복사해 보내세요.'}
+                </p>
+                <input
+                  readOnly
+                  value={state.url}
+                  onFocus={(e) => e.target.select()}
+                  className="w-full rounded bg-field px-2 py-1 text-[11px] text-ink2 ring-1 ring-edge"
+                />
+                <div className="mt-2 flex justify-end gap-1.5">
+                  <Btn onClick={async () => setState({ ...state, copied: await copyText(state.url) })}>
+                    <Copy size={12} /> 복사
+                  </Btn>
+                  <Btn onClick={() => setState(null)}>닫기</Btn>
+                </div>
+              </>
+            )}
           </div>
         </>
       )}
@@ -331,6 +409,8 @@ export default function Toolbar() {
       </Btn>
       {/* 저장소에 담아 둔 공용 도면 — 담긴 것이 없으면 버튼도 안 나온다 */}
       <GalleryButton onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })} />
+      {/* 올리기 — 링크 하나로 서로 테스트. 올리기 전에 반드시 묻는다 */}
+      <ShareButton snapshot={() => layoutSnapshot(state)} />
       <input
         ref={fileRef}
         type="file"

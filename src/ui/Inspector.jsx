@@ -27,7 +27,7 @@ import {
 } from '../core/process.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
-  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts,
+  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts, shiftsVary,
   shiftAt, shiftLabel, splitHM,
 } from '../core/crew.js';
 import {
@@ -2534,6 +2534,7 @@ export function ReportButtons() {
   const { state, dispatch, itemOf } = useEditor();
   useMetrics();
   const elapsed = useElapsed();
+  const simSpeed = useSimSpeed();
   const ran = getRan();
   const blocked = getBlocked();
   const series = getSeries();
@@ -2652,7 +2653,11 @@ export function ReportButtons() {
        *  사람 부족이 드러나지 않는다 — 둘 다 **그 도면이 정하는 기간**이다.
        */
       mtbfSec: Math.max(0, ...state.placed.map((p) => p.mtbf ?? 0)),
-      shiftCycleSec: cycleSeconds(state.shifts),
+      /* 교대는 **인원이 실제로 달라질 때만** 기간을 정한다. 기본값인 「상시」
+         한 조에서는 바뀌는 순간이 없는데도 24시간을 기다리라고 했었다. */
+      shiftCycleSec: shiftsVary(state.shifts) ? cycleSeconds(state.shifts) : 0,
+      /* 권고 시간을 **실제 몇 분인지**로도 말해 주려고 — 20배속이면 1/20 이다 */
+      speed: simSpeed,
     };
   };
 

@@ -25,6 +25,7 @@ await import('./metrics-crew.mjs');
 await import('./orders.mjs');
 await import('./report.mjs');
 await import('./cost.mjs');
+await import('./share.mjs');
 await import('./shelfrows.mjs');
 await import('./process.mjs');
 

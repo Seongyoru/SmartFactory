@@ -120,6 +120,20 @@ export const cycleSeconds = (shifts) =>
   normalizeShifts(shifts).reduce((s, r) => s + r.minutes * 60, 0);
 
 /**
+ * 교대에 따라 **인원이 실제로 달라지는가.**
+ * ---------------------------------------------------------------------------
+ *  기본값은 「상시」 한 조다 — 조가 하나뿐이면 바뀌는 순간이 없고, 조가 여럿
+ *  이어도 정원이 같으면 역시 아무것도 안 바뀐다. 그런 도면에서 「교대 한 바퀴는
+ *  돌려야 한다」 고 말하면 **바뀌지도 않는 것을 기다리게** 만든다.
+ *
+ *  얼마나 돌려야 하는지를 정할 때 이 값을 본다(cost.js 의 longEnough).
+ */
+export const shiftsVary = (shifts) => {
+  const heads = normalizeShifts(shifts).map((s) => s.headcount);
+  return heads.length > 1 && heads.some((h) => h !== heads[0]);
+};
+
+/**
  * 시뮬 시간이 이만큼 흘렀을 때 **지금 몇 조인가**.
  *  교대표를 처음부터 되풀이한다 — 하루가 끝나면 다시 첫 조다.
  *  @returns { index, shift, endsIn } · endsIn 은 이 조가 끝나기까지 남은 초
