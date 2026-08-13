@@ -2,7 +2,7 @@
  * 상단 툴바 — 뷰 전환 · 도구 · 스냅 설정 · 저장
  */
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Download,
   Eraser,
@@ -11,6 +11,7 @@ import {
   GitCompare,
   GraduationCap,
   Grid3x3,
+  Library,
   Magnet,
   Moon,
   MousePointer2,
@@ -31,7 +32,70 @@ import { resetWork } from '../core/process.js';
 import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
 import { downloadJSON, layoutSnapshot, saveLayout } from '../core/persistence.js';
+import { loadGalleryIndex, loadGalleryLayout } from '../core/gallery.js';
 import { Btn, IconBtn } from './common.jsx';
+
+/**
+ * 공용 도면 — 저장소에 담아 둔 것을 목록에서 골라 연다.
+ * ---------------------------------------------------------------------------
+ *  매번 JSON 파일을 주고받는 대신, 도면을 `public/layouts/` 에 넣고 배포한다.
+ *  주소에 들어온 사람은 누구나 여기서 골라 쓴다 — 서버가 필요 없다.
+ *
+ *  **목록이 비어 있으면 버튼 자체를 안 낸다.** 갤러리를 안 쓰는 배포에서
+ *  「공용 도면 (0)」 이 떠 있으면 고장 난 것처럼 보인다.
+ */
+function GalleryButton({ onPick }) {
+  const [rows, setRows] = useState(null);        // null = 아직 안 읽음
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(null);
+
+  useEffect(() => { loadGalleryIndex().then(setRows); }, []);
+  if (!rows?.length) return null;
+
+  const pick = async (e) => {
+    setBusy(e.id);
+    try {
+      onPick(await loadGalleryLayout(e), e);
+      setOpen(false);
+    } catch (err) {
+      console.error('[공용 도면] 못 열었다', err);
+      window.alert(`「${e.name}」 을 열지 못했습니다 — ${err.message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Btn active={open} onClick={() => setOpen((v) => !v)}>
+        <Library size={13} /> 공용 도면
+      </Btn>
+      {open && (
+        <>
+          {/* 바깥을 누르면 닫힌다 — 목록을 닫으려고 같은 버튼을 다시 찾게 하지 않는다 */}
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-30 mt-1 max-h-[60vh] w-[300px] overflow-y-auto rounded-lg bg-panel p-1 shadow-xl ring-1 ring-edge">
+            {rows.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => pick(e)}
+                disabled={busy != null}
+                className="block w-full rounded px-2 py-1.5 text-left hover:bg-raiseh disabled:opacity-50"
+              >
+                <div className="text-[11.5px] font-medium text-ink2">{e.name}</div>
+                {e.note && <div className="text-[10px] leading-snug text-ink4">{e.note}</div>}
+              </button>
+            ))}
+            <p className="mt-1 border-t border-line px-2 py-1 text-[9.5px] leading-snug text-ink4">
+              여는 순간 <b className="text-ink3">지금 도면을 덮어씁니다.</b> 되돌리기(Ctrl+Z)로 돌아올 수 있습니다.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function Toolbar() {
   const { state, dispatch } = useEditor();
@@ -265,6 +329,8 @@ export default function Toolbar() {
       <Btn onClick={() => fileRef.current?.click()}>
         <Upload size={13} /> 불러오기
       </Btn>
+      {/* 저장소에 담아 둔 공용 도면 — 담긴 것이 없으면 버튼도 안 나온다 */}
+      <GalleryButton onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })} />
       <input
         ref={fileRef}
         type="file"

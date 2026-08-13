@@ -2646,6 +2646,13 @@ export function ReportButtons() {
       series,
       /* 원가는 cost.js 가 이미 낸 값 그대로 — 화면 패널과 같은 훅을 쓴다 */
       cost,
+      /**
+       * 「이만큼 돌린 것으로 말이 되는가」 를 보고서가 스스로 판단하는 데 쓴다.
+       *  고장이 한 번도 안 났으면 가동률이 100% 로 보이고, 교대가 안 바뀌었으면
+       *  사람 부족이 드러나지 않는다 — 둘 다 **그 도면이 정하는 기간**이다.
+       */
+      mtbfSec: Math.max(0, ...state.placed.map((p) => p.mtbf ?? 0)),
+      shiftCycleSec: cycleSeconds(state.shifts),
     };
   };
 

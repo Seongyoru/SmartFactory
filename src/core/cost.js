@@ -246,6 +246,66 @@ export function costOf(d = {}) {
   };
 }
 
+/* ---------- 길게 보면 얼마인가 ---------------------------------------------
+     시뮬은 몇 분 돌린다. 그런데 사람이 궁금한 것은 「그래서 1년이면 얼마냐」다.
+     시간당 값은 **돌린 길이와 무관**하므로 곱하기만 하면 되는데, 그 곱셈을
+     사람에게 시키면 아무도 안 한다.
+--------------------------------------------------------------------------- */
+
+/** 며칠·몇 달을 볼 것인가 — 시간으로 환산해 둔다 */
+export const HORIZONS = [
+  ['하루', 24],
+  ['한 주', 24 * 7],
+  ['한 달', 24 * 30],
+  ['한 해', 24 * 365],
+];
+
+/**
+ * **이 속도가 그대로 이어진다면** 그 기간에 얼마가 들고 얼마가 나오나.
+ * ---------------------------------------------------------------------------
+ *  단순한 곱셈이지만 가정이 하나 숨어 있다 — **쉬지 않고 이 속도로 돈다**는 것.
+ *  고장·정비·명절·주문 공백은 안 들어 있다. 그래서 이 값은 「예상 비용」이
+ *  아니라 **「지금 배치의 상한」** 이고, 화면과 보고서가 그 말을 같이 해야 한다.
+ *
+ *  @param perHour   시간당 원가 (costOf 의 perHour)
+ *  @param madePerHour 시간당 산출 개수 (metrics 의 throughput)
+ */
+export function projectRun(perHour, madePerHour, horizons = HORIZONS) {
+  const rate = Math.max(0, Number(perHour) || 0);
+  const out = Math.max(0, Number(madePerHour) || 0);
+  return horizons.map(([label, hours]) => ({
+    label,
+    hours,
+    won: rate * hours,
+    made: out * hours,
+  }));
+}
+
+/**
+ * 이만큼 돌린 것으로 **말이 되는가**.
+ * ---------------------------------------------------------------------------
+ *  짧게 돌린 결과를 1년으로 곱하면 틀린 숫자가 아주 그럴듯한 얼굴로 나온다.
+ *  무엇이 기간을 정하는지는 그 도면이 정한다 —
+ *
+ *    · 라인이 차는 시간   비기 전까지는 처리량이 실제보다 높게 나온다
+ *    · 고장 주기(MTBF)    한 번도 안 고장 나면 가동률이 100% 로 보인다
+ *    · 교대 한 바퀴       조가 안 바뀌면 사람 부족이 드러나지 않는다
+ *
+ *  @returns { ok, need, why } — need 는 「적어도 이만큼(초)」
+ */
+export function longEnough(ranSec, { mtbfSec = 0, shiftCycleSec = 0, warmSec = 60 } = {}) {
+  /* 셋 중 **가장 긴 것**이 기간을 정하고, 말도 그것을 따라가야 한다.
+     처음엔 이유를 순서대로 쌓고 첫 줄을 돌려줬더니, 교대가 정한 8시간을
+     놓고 「고장이 몇 번은 나야」 라고 말했다 — 엉뚱한 데를 고치게 만든다. */
+  const cands = [
+    { need: warmSec, why: '라인이 다 차기 전에는 처리량이 실제보다 높게 나온다' },
+    ...(mtbfSec > 0 ? [{ need: mtbfSec * 3, why: '고장이 몇 번은 나야 가동률이 사실이 된다' }] : []),
+    ...(shiftCycleSec > 0 ? [{ need: shiftCycleSec, why: '교대가 한 바퀴는 돌아야 사람 부족이 드러난다' }] : []),
+  ];
+  const top = cands.reduce((a, b) => (b.need > a.need ? b : a));
+  return { ok: (ranSec ?? 0) >= top.need, need: top.need, why: top.why };
+}
+
 /** 원 단위 사람이 읽는 표기 — 1,234만 원 / 12.3억 원 */
 export function won(v) {
   if (!Number.isFinite(v)) return '—';

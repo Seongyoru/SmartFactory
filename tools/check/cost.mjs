@@ -377,3 +377,35 @@ t('보고서 모으기는 **한 곳에만** 남는다 — 띠가 다시 모으�
   assert.ok(inspector.includes('const buildReport = ()'), '보고서 모으기가 사라졌다');
   assert.equal(/runReportCSV/.test(dock), false, 'RunDock 이 보고서를 따로 만든다');
 });
+
+/* ---------- 길게 보면 얼마인가 -------------------------------------------- */
+
+t('시간당 값을 곱하기만 한다 — 돌린 길이와 무관하다', () => {
+  const r = C.projectRun(1000, 60);
+  const day = r.find((x) => x.label === '하루');
+  near(day.won, 24000);
+  near(day.made, 1440);
+  const year = r.find((x) => x.label === '한 해');
+  near(year.won, 1000 * 24 * 365);
+});
+t('안 돌렸으면 0 — 없는 값을 지어내지 않는다', () => {
+  for (const r of C.projectRun(null, undefined)) { near(r.won, 0); near(r.made, 0); }
+});
+t('**얼마나 돌려야 하는지는 그 도면이 정한다**', () => {
+  /* 짧은 결과를 1년으로 곱하면 틀린 숫자가 그럴듯한 얼굴로 나온다. 무엇이
+     기간을 정하는지 — 라인이 차는 시간 · 고장 주기 · 교대 한 바퀴. */
+  assert.equal(C.longEnough(300, {}).ok, true, '아무 조건 없으면 5분으로 충분하다');
+  /* 고장이 몇 번은 나야 가동률이 사실이 된다 */
+  const mtbf = C.longEnough(300, { mtbfSec: 1800 });
+  assert.equal(mtbf.ok, false);
+  near(mtbf.need, 5400, 1e-9);
+  /* 교대가 한 바퀴는 돌아야 사람 부족이 드러난다 — 더 긴 쪽이 이긴다 */
+  const both = C.longEnough(300, { mtbfSec: 1800, shiftCycleSec: 86400 });
+  near(both.need, 86400, 1e-9);
+  /* **정하는 쪽과 말이 따라가야 한다** — 교대가 정했는데 고장 이야기를 하면
+     엉뚱한 데를 고치게 된다(실제로 그렇게 나왔다) */
+  assert.match(both.why, /교대/, '기간을 정한 이유와 다른 말을 한다');
+  assert.match(C.longEnough(60, { mtbfSec: 1800 }).why, /고장/);
+  assert.match(C.longEnough(10, {}).why, /라인/);
+  assert.ok(C.longEnough(90000, { mtbfSec: 1800, shiftCycleSec: 86400 }).ok, '충분히 돌렸는데 모자라다고 한다');
+});

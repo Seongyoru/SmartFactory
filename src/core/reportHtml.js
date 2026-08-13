@@ -23,6 +23,7 @@
 
 import { ORDER, formatSpan } from './orders.js';
 import { hms } from './report.js';
+import { longEnough, projectRun } from './cost.js';
 
 /* ---------- 안전하게 글자 넣기 ---------------------------------------------
      설비 이름은 사용자가 적는다. `<b>` 같은 것을 이름에 넣어 두면 보고서
@@ -121,6 +122,9 @@ tbody tr:hover{background:var(--raise)}
   border:1px solid #fecdd3;color:#9f1239;font-size:12.5px}
 .note b{color:#e11d48}
 .none{margin:6px 0;color:var(--ink3);font-size:12.5px}
+.assume{margin:8px 0 0;padding:9px 11px;border-radius:8px;background:#fffbeb;
+  border:1px solid #fde68a;color:#92400e;font-size:11.5px;line-height:1.55}
+.assume b{color:#b45309}
 .chart{display:block;width:100%;height:150px;margin-top:8px}
 .axis{display:flex;justify-content:space-between;color:var(--ink3);font-size:10.5px}
 .foot{margin-top:30px;padding-top:10px;border-top:1px solid var(--line);
@@ -132,6 +136,8 @@ tbody tr:hover{background:var(--raise)}
   :root{--ink:#e2e8f0;--ink2:#cbd5e1;--ink3:#94a3b8;--line:#334155;--bg:#0f172a;--raise:#1e293b}
   th{border-bottom-color:#475569}
   .note{background:#4c0519;border-color:#881337;color:#fecdd3}
+  .assume{background:#422006;border-color:#854d0e;color:#fde68a}
+  .assume b{color:#fcd34d}
 }
 `;
 
@@ -163,6 +169,21 @@ export function runReportHTML(d = {}) {
     p(card('시간당 원가', `${int(d.cost.perHour)}<small> 원</small>`));
   }
   p('</div>');
+
+  /**
+   * 너무 짧게 돌렸으면 **맨 위에서** 말한다.
+   *  짧은 결과를 1년으로 곱하면 틀린 숫자가 아주 그럴듯한 얼굴로 나온다.
+   *  읽는 사람은 표지의 큰 글자부터 믿기 시작하므로, 못 믿을 이유가 있으면
+   *  그 큰 글자 **바로 옆**에 있어야 한다.
+   */
+  const enough = longEnough(d.ranSec, {
+    mtbfSec: d.mtbfSec ?? 0,
+    shiftCycleSec: d.shiftCycleSec ?? 0,
+  });
+  if (!enough.ok) {
+    p(`<p class="assume"><b>${esc(hms(d.ranSec))}만 돌린 결과입니다 — 적어도 ${esc(hms(enough.need))} 는 돌려야 합니다.</b> `
+      + `${esc(enough.why)} 아래 숫자는 참고로만 보세요.</p>`);
+  }
 
   /* ---- 진단 — 「어디를 손볼까」 는 표보다 먼저 나와야 한다 ---- */
   if (d.diagnosis) {
@@ -208,6 +229,24 @@ export function runReportHTML(d = {}) {
     ));
     p(`<p class="none">단가 — 전기 ${int(c.rates.power)}원/kWh · 인건비 ${int(c.rates.wage)}원/시간`
       + ` · 카트 ${num(c.rates.cartKw, 1)}kW · 자재비 ${c.rates.material ? `${int(c.rates.material)}원/개` : '안 넣음'}</p>`);
+
+    /* ---- 길게 보면 ----
+       시뮬은 몇 분 돌리는데 사람이 궁금한 것은 「그래서 1년이면 얼마냐」다.
+       시간당 값은 돌린 길이와 무관하므로 곱하면 되지만, 그 곱셈을 사람에게
+       시키면 아무도 안 한다. 대신 **가정을 반드시 같이 적는다.** */
+    p('<h2>길게 보면</h2>');
+    p(table(
+      ['기간', '원가', '산출', '개당'],
+      projectRun(c.perHour, d.throughput).map((r) => [
+        r.label,
+        `${int(r.won)} 원`,
+        d.throughput == null ? '—' : `${int(r.made)} 개`,
+        c.per == null ? '—' : `${int(c.per)} 원`,
+      ]),
+    ));
+    p('<p class="assume"><b>가정 — 지금 이 속도로 쉬지 않고 돕니다.</b> '
+      + '정비·명절·주문 공백은 들어 있지 않으므로 「예상 비용」이 아니라 '
+      + '<b>이 배치의 상한</b>으로 읽으세요. 배치끼리 견주는 데는 이 값이 맞습니다.</p>');
   }
 
   /* ---- 설비 ---- */

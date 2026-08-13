@@ -1,0 +1,102 @@
+{
+  "placed": [
+    {
+      "uid": "E1",
+      "itemId": "MACHINE_1",
+      "name": "제작기 1",
+      "pos": [
+        -6,
+        0
+      ],
+      "rot": 0,
+      "y": 0
+    },
+    {
+      "uid": "E2",
+      "itemId": "MACHINE_1",
+      "name": "제작기 2",
+      "pos": [
+        6,
+        0
+      ],
+      "rot": 2,
+      "y": 0
+    }
+  ],
+  "links": [
+    {
+      "uid": "C1",
+      "itemId": "CONVEYOR",
+      "name": "컨베이어 #1",
+      "from": {
+        "uid": "E1",
+        "portId": "PORT_OUT@Z-"
+      },
+      "to": {
+        "uid": "E2",
+        "portId": "PORT_IN@Z+"
+      },
+      "radius": 1,
+      "layer": 0,
+      "widthScale": 1,
+      "speed": null
+    }
+  ],
+  "carts": [],
+  "areas": [
+    {
+      "uid": "A1",
+      "name": "영역 1",
+      "mp": [
+        [
+          [
+            [
+              -30,
+              -30
+            ],
+            [
+              30,
+              -30
+            ],
+            [
+              30,
+              30
+            ],
+            [
+              -30,
+              30
+            ],
+            [
+              -30,
+              -30
+            ]
+          ]
+        ]
+      ],
+      "edges": {},
+      "thickness": 0.3,
+      "height": 4,
+      "color": "#c8ccd4"
+    }
+  ],
+  "walls": [],
+  "pillars": [],
+  "zones": [],
+  "openings": [],
+  "shifts": [
+    {
+      "name": "상시",
+      "minutes": 1440,
+      "headcount": 0
+    }
+  ],
+  "orders": [],
+  "beltSpeed": 0.6,
+  "rates": {
+    "power": 130,
+    "wage": 12000,
+    "cartKw": 0.4,
+    "material": 0
+  },
+  "seq": 20
+}
