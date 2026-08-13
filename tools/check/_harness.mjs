@@ -72,7 +72,13 @@ export function group(name) {
 export function t(name, fn) {
   if (!current) group('(이름 없음)');
   try {
-    fn();
+    const r = fn();
+    /* async 본문은 여기서 막는다. 기다려 주지 않으므로 그 안의 assert 가 나중에
+       터지고, 검사는 **통과한 것으로 세어진다** — 있으나 마나 한 검사가 된다.
+       필요한 값은 파일 맨 위에서 await 로 받아 두고 본문은 동기로 쓸 것. */
+    if (r && typeof r.then === 'function') {
+      throw new Error('async 검사는 안 된다 — 값을 파일 맨 위에서 await 로 받아 둘 것');
+    }
     current.pass += 1;
   } catch (e) {
     current.fails.push(`${name}: ${e.message}`);
