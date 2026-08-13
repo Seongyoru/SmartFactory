@@ -217,6 +217,7 @@ const scenarios = await readSrc('core/scenarios.js');
 const scenView = await readSrc('ui/Scenarios.jsx');
 const report = await readSrc('core/report.js');
 const hook = await readSrc('ui/useCost.js');
+const dockSrc = await readSrc('ui/RunDock.jsx');
 
 t('단가는 도면에 **저장된다** — 새로고침하면 원가가 달라지면 안 된다', () => {
   assert.ok(/DOC_KEYS = \[[^\]]*'rates'/.test(store), 'DOC_KEYS 에 rates 가 없다');
@@ -233,19 +234,18 @@ t('저장 목록 두 벌이 서로 어긋나지 않는다', () => {
 t('단가를 고치는 길이 있다', () => {
   assert.ok(store.includes("case 'SET_RATES':"), '리듀서에 SET_RATES 가 없다');
   assert.ok(store.includes('normalizeRates'), '저장하면서 정규화를 안 한다');
-  assert.ok(inspector.includes("type: 'SET_RATES'"), '화면에서 단가를 못 고친다');
+  assert.ok(dockSrc.includes("type: 'SET_RATES'"), '화면에서 단가를 못 고친다');
 });
 t('옛 도면도 원가가 나온다 — 없는 rates 는 기본값으로', () => {
   assert.ok(/rates: normalizeRates\(action\.data\.rates\)/.test(store), '불러올 때 정규화를 안 한다');
 });
 t('**모으는 자리는 하나다** — 화면·보고서·비교표가 같은 훅을 쓴다', () => {
   assert.ok(hook.includes('export function useCostInput'), '훅이 없다');
-  for (const [name, src] of [['Inspector', inspector], ['Scenarios', scenView]]) {
-    assert.ok(/from '\.\/useCost\.js'/.test(src), `${name} 가 훅을 안 쓴다`);
+  /* 띠(화면)·보고서·비교표 **셋 다** 부른다. 하나라도 스스로 모으면 값이 갈린다 */
+  for (const [name, src] of [['RunDock', dockSrc], ['Inspector(보고서)', inspector], ['Scenarios', scenView]]) {
+    assert.ok(/from '\.\/useCost\.js'/.test(src), `${name} 가 훅을 안 가져온다`);
+    assert.ok(/useCostInput\(\)/.test(src), `${name} 이 훅을 안 부른다`);
   }
-  /* 원가 패널과 보고서가 **각각** 부른다 — 둘 다 같은 함수라야 값이 안 갈린다 */
-  assert.ok((inspector.match(/useCostInput\(\)/g) ?? []).length >= 2,
-    'Inspector 안에서 원가 패널과 보고서 중 한쪽이 훅을 안 쓴다');
 });
 /** 주석을 걷어낸 소스 — 「여기서는 안 부른다」 를 확인할 때 주석 속 이름에 걸린다 */
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -265,4 +265,58 @@ t('개당 원가는 **낮을수록** 이긴다', () => {
   assert.ok(/LOWER_IS_BETTER = new Set\(\[[^\]]*'costPer'/.test(scenarios),
     '개당 원가가 높을수록 좋은 값으로 잡혀 있다');
   assert.ok(scenarios.includes("key === 'costPer' ? r.run?.cost?.per"), 'bestOf 가 원가를 못 읽는다');
+});
+
+/* ---------- 아래 띠 — 씬을 16:9 로 남긴다 --------------------------------- */
+
+const D = await import(SRC + 'ui/dockLayout.js');
+const app = await readSrc('App.jsx');
+const dock = dockSrc;
+
+t('띠는 **폭의 9/16 을 씬에 남기고** 나머지를 가진다', () => {
+  /* 1920 창의 씬 영역: 폭 1364 · 높이 1004 → 씬 767, 띠 237 (실제로 그렇게 나온다) */
+  assert.equal(D.dockHeight(1364, 1004), 237);
+  near(1364 / (1004 - D.dockHeight(1364, 1004)), 16 / 9, 2e-3);
+  const h = D.dockHeight(1044, 924);
+  near(1044 / (924 - h), 16 / 9, 2e-3);
+});
+t('창이 낮으면 띠가 최소만 가져간다 — 글자가 잘리면 계기판이 아니다', () => {
+  assert.equal(D.dockHeight(1600, 700), D.MIN_H);
+  assert.equal(D.dockHeight(1600, 200), D.MIN_H, '나머지가 음수여도 버틴다');
+  assert.equal(D.dockHeight(), D.MIN_H, '아직 못 잰 상태에서도 값이 있다');
+});
+t('창이 높으면 남는 몫은 **씬이** 갖는다 — 계기판이 도면을 밀어내지 않는다', () => {
+  assert.equal(D.dockHeight(1000, 2000), D.MAX_H);
+  assert.ok(D.MAX_H > D.MIN_H);
+});
+t('씬 쪽에 aspect 를 같이 주지 않는다 — 플렉스와 다퉈 반씩 갈린다', () => {
+  /* 실제로 그렇게 나왔다: 씬 322 · 띠 323(비율 2.25). 되돌리면 이 검사가 잡는다. */
+  assert.equal(/aspect-\[16\/9\]/.test(code(app)), false, 'App 이 씬에 aspect 를 다시 걸었다');
+  assert.ok(app.includes('<RunDock />'), '띠가 화면에 안 붙어 있다');
+});
+
+/* ---------- 띠 안의 배치 — 가로로 펴고 스크롤을 만들지 않는다 -------------- */
+
+t('실행이 **왼쪽**, 원가가 **오른쪽**', () => {
+  const order = [...dock.matchAll(/<Col title="([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ['이번 실행', '생산 추이', '돈 시간 (낮은 순)', '원가', '단가']);
+});
+t('세로 스크롤을 만들지 않는다 — 계기판은 흘깃 보는 것이다', () => {
+  assert.equal(/overflow-y-auto/.test(dock), false, '칸에 세로 스크롤이 생겼다');
+  assert.ok(dock.includes('overflow-hidden'), '넘치는 것을 자르지 않는다');
+  /* 길이가 변하는 것은 끊는다 — 그리고 끊었다고 말한다 */
+  assert.ok(/RANK_ROWS = \d+/.test(dock), '순위를 안 끊는다 — 설비가 늘면 넘친다');
+  assert.ok(dock.includes('외 {hidden}대'), '자르고 자른 티를 안 낸다');
+});
+t('띠는 **고른 것과 무관하게** 남는다 — 인스펙터에서는 뺐다', () => {
+  const summary = inspector.slice(inspector.indexOf('function Summary('));
+  for (const tag of ['<RunReport />', '<CostPanel />', '<ReportButtons />']) {
+    assert.equal(summary.includes(tag), false, `Summary 에 ${tag} 가 남아 있다 — 두 곳에서 뜬다`);
+  }
+  assert.ok(inspector.includes('export function ReportButtons'), '보고서 버튼을 띠가 못 쓴다');
+  assert.ok(dock.includes('<ReportButtons />'), '띠에 보고서 버튼이 없다');
+});
+t('보고서 모으기는 **한 곳에만** 남는다 — 띠가 다시 모으지 않는다', () => {
+  assert.ok(inspector.includes('const buildReport = ()'), '보고서 모으기가 사라졌다');
+  assert.equal(/runReportCSV/.test(dock), false, 'RunDock 이 보고서를 따로 만든다');
 });

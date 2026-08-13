@@ -30,6 +30,7 @@ import Inspector from './ui/Inspector.jsx';
 import ZoneLayers from './ui/ZoneLayers.jsx';
 import Tutorial from './ui/Tutorial.jsx';
 import Scenarios from './ui/Scenarios.jsx';
+import RunDock from './ui/RunDock.jsx';
 import ErrorBoundary from './ui/ErrorBoundary.jsx';
 
 /* 기본 제공 모델은 앱이 뜨자마자 받아 둔다 — 라이브러리 카드에 치수를 띄우고,
@@ -481,20 +482,30 @@ function Shell() {
       <Toolbar />
       <div className="flex min-h-0 flex-1">
         <LibraryPanel />
-        <main className="relative min-w-0 flex-1">
-          {/* 씬에서 오류가 나도 화면이 통째로 하얘지지 않도록 */}
-          <ErrorBoundary>
-            <EditorScene />
-          </ErrorBoundary>
-          <ModeBanner />
-          <ShippedHUD />
-          <ViewOptions />
-          <ZoneLayers />
-          {/* 따라 하기 — 캔버스 안에 둔다. 환영 창이 도면만 가리고 라이브러리
-              패널은 그대로 보여야, 창이 가리키는 탭을 바로 찾을 수 있다. */}
-          <Tutorial />
-          {/* 배치 비교 — 도면을 덮는 창이라 캔버스 안에 둔다 */}
-          <Scenarios />
+        <main className="flex min-w-0 flex-1 flex-col">
+          {/**
+           * 씬은 **남는 높이를 다 쓴다.** 16:9 는 여기서 정하지 않는다 —
+           * 아래 띠가 「폭의 9/16 을 씬에 남기고 나머지」 만 가져가므로, 결과가
+           * 16:9 다(RunDock 의 dockHeight). 여기에 `aspect-[16/9]` 를 같이 주면
+           * 플렉스와 다퉈 50:50 으로 갈라진다 — 실제로 그렇게 나왔었다.
+           */}
+          <div className="relative min-h-0 w-full flex-1">
+            {/* 씬에서 오류가 나도 화면이 통째로 하얘지지 않도록 */}
+            <ErrorBoundary>
+              <EditorScene />
+            </ErrorBoundary>
+            <ModeBanner />
+            <ShippedHUD />
+            <ViewOptions />
+            <ZoneLayers />
+            {/* 따라 하기 — 캔버스 안에 둔다. 환영 창이 도면만 가리고 라이브러리
+                패널은 그대로 보여야, 창이 가리키는 탭을 바로 찾을 수 있다. */}
+            <Tutorial />
+            {/* 배치 비교 — 도면을 덮는 창이라 캔버스 안에 둔다 */}
+            <Scenarios />
+          </div>
+          {/* 이번 실행 · 원가 — 무엇을 골랐든 계속 보여야 하는 값들 */}
+          <RunDock />
         </main>
         <Inspector />
       </div>

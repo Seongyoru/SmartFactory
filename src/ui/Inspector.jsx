@@ -43,10 +43,7 @@ import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
   getMade, getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
 } from '../core/faults.js';
-import {
-  DEFAULT_RATES, FIXED_RANGE, KW_RANGE, MATERIAL_RANGE, POWER_RANGE, WAGE_RANGE,
-  costOf, fixedOf, idleKwOf, normalizeRates, runKwOf, won,
-} from '../core/cost.js';
+import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, won } from '../core/cost.js';
 import {
   PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
 } from '../data/library.js';
@@ -2522,39 +2519,6 @@ function MultiPanel({ items }) {
  *  라이브러리를 들이지 않고 SVG 폴리라인 하나로 그린다. 표본은 metrics 가 10
  *  시뮬초에 하나씩 쌓아 두고 있어서 여기서는 그리기만 하면 된다.
  */
-function ProductionChart({ series }) {
-  const W = 220;
-  const H = 44;
-  if (series.length < 2) return null;
-
-  const t0 = series[0].t;
-  const t1 = series[series.length - 1].t;
-  const span = Math.max(1e-6, t1 - t0);
-  const top = Math.max(1, series[series.length - 1].shipped);
-
-  const pts = series
-    .map((s) => {
-      const x = ((s.t - t0) / span) * W;
-      const y = H - (s.shipped / top) * H;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
-
-  return (
-    <div className="mt-1">
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-11 w-full" preserveAspectRatio="none">
-        {/* 채움은 흐리게, 선은 또렷하게 — 값보다 모양(기울기)이 먼저 읽혀야 한다 */}
-        <polyline points={`0,${H} ${pts} ${W},${H}`} fill="rgb(14 165 233 / 0.14)" stroke="none" />
-        <polyline points={pts} fill="none" stroke="rgb(14 165 233)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-      </svg>
-      <div className="flex justify-between text-[10px] tabular-nums text-ink4">
-        <span>{formatElapsed(t0)}</span>
-        <span>{top.toLocaleString()} 개</span>
-      </div>
-    </div>
-  );
-}
-
 /**
  * 이번 실행의 성적표.
  * ---------------------------------------------------------------------------
@@ -2565,7 +2529,7 @@ function ProductionChart({ series }) {
  *  가동률은 **막히지 않고 돈 시간의 비율**이다(적치대가 차서 선 시간을 뺀 것).
  *  아직 아무것도 안 돌았으면 나눌 것이 없으므로 통째로 감춘다.
  */
-function RunReport() {
+export function ReportButtons() {
   const { state, dispatch, itemOf } = useEditor();
   useMetrics();
   const elapsed = useElapsed();
@@ -2585,34 +2549,6 @@ function RunReport() {
   const overall = oeeOverall(state.placed.map((p) => p.uid));
 
   if (ran <= 0) return null;
-
-  /**
-   * 선 적이 있는 설비만, **많이 잃은 순서**로.
-   * -------------------------------------------------------------------------
-   *  예전에는 막힌 시간만 세고 그것으로 순위를 매겼다. 이제 서는 이유가 둘이라
-   *  (막힘 · 굶음) 막힌 시간만으로 줄을 세우면, 라인 전체가 굶어 서 있는 도면이
-   *  "아무 문제 없음" 으로 나온다 — 가장 심하게 놀고 있을 때 표가 가장 조용하다.
-   *  잃은 시간은 합쳐서 줄을 세우고, **어느 쪽으로 잃었는지는 줄마다 적는다.**
-   */
-  const starved = getStarved();
-  const unmanned = getUnmanned();
-  const rows = state.placed
-    .map((p) => {
-      const sec = blocked[p.uid] ?? 0;
-      const starve = starved[p.uid] ?? 0;
-      const crew = unmanned[p.uid] ?? 0;
-      return {
-        uid: p.uid,
-        name: p.name ?? p.uid,
-        sec,
-        starve,
-        crew,
-        run: Math.max(0, 1 - Math.min(1, (sec + starve + crew) / ran)),
-      };
-    })
-    .filter((r) => r.sec > LOSS_FLOOR || r.starve > LOSS_FLOOR || r.crew > LOSS_FLOOR)
-    .sort((a, b) => a.run - b.run);
-  const split = lossSplit();
 
   /**
    * 보고서에 넣을 값을 모은다 — **여기서 새로 계산하는 것은 없다.**
@@ -2710,140 +2646,42 @@ function RunReport() {
   };
 
   return (
-    <Section
-      title="이번 실행"
-      right={
-        <span className="flex items-center gap-1">
-          {/* 추이를 엑셀에서 다시 그리거나 다른 실행과 겹쳐 보려고 내보낸다.
-              화면의 그래프는 눈으로 보는 것이고 이건 들고 나가는 것이다 */}
-          {/**
-            * 실행 보고서 — **이 배치가 무엇을 했는가** 를 한 장에.
-            * -----------------------------------------------------------------
-            *  예전에는 「생산 추이」(시간 × 누적 출하) 하나만 내보낼 수 있었다.
-            *  회의에 들고 가는 것은 추이 그래프가 아니라 오더를 맞췄는지, 어느
-            *  설비가 얼마나 놀았는지, 어디서 막혔는지다. 추이는 그 안에 들어간다.
-            */}
-          {/* 눌렀는데 아무 일도 안 일어나면 사용자는 버튼이 고장 났는지 파일이
-              어디 갔는지조차 알 수 없다. 실패하면 **말은 하게** 해 둔다. */}
-          <button
-            type="button"
-            onClick={() => {
-              try {
-                downloadCSV(buildReport(), `실행보고서-${stamp()}.csv`);
-                dispatch({ type: 'SET', patch: { hint: '실행 보고서를 내려받았습니다' } });
-              } catch (e) {
-                console.error('[보고서] 만들다 실패', e);
-                dispatch({ type: 'SET', patch: { hint: `보고서를 못 만들었습니다 — ${e.message}` } });
-              }
-            }}
-            className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
-            title="이번 실행을 CSV 한 장으로 — 오더 · 설비 · 차량 · 진단 · 추이"
-          >
-            보고서
-          </button>
-          <button
-            onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
-            className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
-            title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
-          >
-            다시 재기
-          </button>
-        </span>
-      }
-    >
-      <Row label="돌린 시간">{formatElapsed(elapsed)}</Row>
-
-      {/* 라인 전체 OEE — 세 기둥을 곱한다. 하나만 나빠도 전체가 무너진다는 뜻이고,
-          그래서 어디를 손봐야 하는지가 세 줄에서 바로 드러난다. */}
-      {overall && (
-        <>
-          <Row label="OEE (라인)">
-            <b className={tone(overall.oee)}>{pct(overall.oee)}</b>
-          </Row>
-          <div className="mb-1 flex gap-1 text-[10px]">
-            {[
-              ['가동률', overall.availability, '고장·무인으로 못 돈 시간 — 정비·인력으로 푼다'],
-              ['성능', overall.performance, '막혀서·굶어서 못 돈 시간 — 배치로 푼다'],
-              ['양품률', overall.quality, '만들었지만 못 쓰는 것 — 공정으로 푼다'],
-            ].map(([label, v, why]) => (
-              <div key={label} className="flex-1 rounded bg-raise px-1.5 py-1 text-center ring-1 ring-edge" title={why}>
-                <div className="text-ink4">{label}</div>
-                <b className={`tabular-nums ${tone(v)}`}>{pct(v)}</b>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      <ProductionChart series={series} />
-
-      {rows.length === 0 ? (
-        <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-          {state.placed.length === 0
-            ? '아직 설비가 없습니다.'
-            : '서 있는 설비가 없습니다 — 라인이 흐르고 있습니다.'}
-        </p>
-      ) : (
-        <>
-          <p className="mb-1 mt-2 text-[10.5px] text-ink4">돈 시간 (낮은 순)</p>
-          <ul className="space-y-1">
-            {rows.map((r) => (
-              <li key={r.uid} className="text-[11px]">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-ink2">{r.name}</span>
-                  <b className={`shrink-0 tabular-nums ${r.run < 0.5 ? 'text-rose-500' : r.run < 0.85 ? 'text-amber-600' : 'text-ink2'}`}>
-                    {(r.run * 100).toFixed(0)}%
-                  </b>
-                </div>
-                {/* 막대가 짧을수록 오래 서 있었다 — 숫자보다 먼저 눈에 들어온다 */}
-                <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-kbd">
-                  <div
-                    className={`h-full ${r.run < 0.5 ? 'bg-rose-500' : r.run < 0.85 ? 'bg-amber-500' : 'bg-emerald-500'}`}
-                    style={{ width: `${Math.max(2, r.run * 100)}%` }}
-                  />
-                </div>
-                <div className="text-[10px] tabular-nums text-ink4">
-                  {[
-                    r.crew > LOSS_FLOOR ? `${formatElapsed(r.crew)} 무인` : null,
-                    r.sec > LOSS_FLOOR ? `${formatElapsed(r.sec)} 막힘` : null,
-                    r.starve > LOSS_FLOOR ? `${formatElapsed(r.starve)} 굶음` : null,
-                  ].filter(Boolean).join(' · ')}
-                </div>
-              </li>
-            ))}
-          </ul>
-          {/**
-           * 어느 쪽으로 더 잃었는지 한 줄로 못 박는다.
-           * ---------------------------------------------------------------------
-           *  같은 "성능 40%" 라도 처방이 정반대다. 막힘이 많으면 뒤가 못 받는
-           *  것이고(하류를 늘린다), 굶음이 많으면 앞이 못 대는 것이다(상류를
-           *  늘린다). 숫자만 늘어놓고 방향을 안 말하면 반대로 손보게 된다.
-           */}
-          {/* 사람이 없어 선 시간이 있으면 그게 먼저다 — 배치를 아무리 고쳐도
-              사람이 없으면 안 돈다 */}
-          {split?.crew > LOSS_FLOOR && (
-            <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
-              <b>사람이 없어 선 시간이 {formatElapsed(split.crew)}</b> 있습니다. 배치를 고쳐도
-              풀리지 않습니다 — 「인력」에서 교대 인원을 먼저 보세요.
-            </p>
-          )}
-          <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-            {split?.starvedMore ? (
-              <>
-                <b className="text-ink2">굶음</b>이 더 큽니다 — 재료가 여기까지 못 옵니다.
-                라인 <b className="text-ink2">앞쪽</b>(투입·앞 공정·나르는 카트)을 늘려야 합니다.
-              </>
-            ) : (
-              <>
-                <b className="text-ink2">막힘</b>이 더 큽니다 — 만들었는데 보낼 곳이 없습니다.
-                라인 <b className="text-ink2">뒤쪽</b>(적치대 수용량·다음 공정·반출)을 늘려야 합니다.
-              </>
-            )}
-            {' '}맨 위를 풀면 그다음이 병목이 됩니다.
-          </p>
-        </>
-      )}
-    </Section>
+    <span className="flex items-center gap-1">
+      {/**
+        * 실행 보고서 — **이 배치가 무엇을 했는가** 를 한 장에.
+        * ---------------------------------------------------------------------
+        *  예전에는 「생산 추이」(시간 × 누적 출하) 하나만 내보낼 수 있었다.
+        *  회의에 들고 가는 것은 추이 그래프가 아니라 오더를 맞췄는지, 어느
+        *  설비가 얼마나 놀았는지, 어디서 막혔는지다. 추이는 그 안에 들어간다.
+        *
+        *  눌렀는데 아무 일도 안 일어나면 사용자는 버튼이 고장 났는지 파일이
+        *  어디 갔는지조차 알 수 없다. 실패하면 **말은 하게** 해 둔다.
+        */}
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            downloadCSV(buildReport(), `실행보고서-${stamp()}.csv`);
+            dispatch({ type: 'SET', patch: { hint: '실행 보고서를 내려받았습니다' } });
+          } catch (e) {
+            console.error('[보고서] 만들다 실패', e);
+            dispatch({ type: 'SET', patch: { hint: `보고서를 못 만들었습니다 — ${e.message}` } });
+          }
+        }}
+        className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+        title="이번 실행을 CSV 한 장으로 — 오더 · 설비 · 차량 · 진단 · 원가 · 추이"
+      >
+        보고서
+      </button>
+      <button
+        type="button"
+        onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
+        className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+        title="배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
+      >
+        다시 재기
+      </button>
+    </span>
   );
 }
 
@@ -2970,113 +2808,6 @@ const NUM_FIELD =
   'w-9 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink '
   + 'outline-none focus:border-sky-500/60 [appearance:textfield] '
   + '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
-
-/** 항목별 비중 막대 — 어디에 돈이 가는지는 액수보다 **비율**로 먼저 보인다 */
-function CostBar({ parts, total }) {
-  const tone = {
-    power: 'bg-amber-500', labor: 'bg-sky-500', cart: 'bg-violet-500',
-    fixed: 'bg-slate-400', material: 'bg-emerald-500',
-  };
-  if (!(total > 0)) return null;
-  return (
-    <div className="mb-2 mt-1">
-      <div className="flex h-2 overflow-hidden rounded-full bg-panel2">
-        {parts.map((p) => (
-          <div key={p.key} className={tone[p.key] ?? 'bg-ink4'} style={{ width: `${(p.won / total) * 100}%` }} />
-        ))}
-      </div>
-      <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink4">
-        {parts.map((p) => (
-          <span key={p.key} className="flex items-center gap-1">
-            <i className={`inline-block h-2 w-2 rounded-sm ${tone[p.key] ?? 'bg-ink4'}`} />
-            {p.label} {Math.round((p.won / total) * 100)}%
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/**
- * 원가 — 「이 배치가 남는 장사인가」
- * -------------------------------------------------------------------------
- *  숫자 하나로 줄이면 **개당 원가**다. 처리량이 높아도 개당이 비싸면 진 배치다.
- *  그 아래에 「놀면서 탄 돈」을 같이 둔다 — 고칠 값어치를 액수로 보여 준다.
- */
-function CostPanel() {
-  const { state, dispatch } = useEditor();
-  const c = useCostInput();
-  const rates = normalizeRates(state.rates);
-  const set = (patch) => dispatch({ type: 'SET_RATES', rates: patch });
-  /* 손대지 않은 기본값으로 낸 원가는 **그 공장의 원가가 아니다.** 액수를 크게
-     띄워 놓고 그 사실을 안 밝히면 회의에서 그대로 인용된다. */
-  const untouched = Object.keys(DEFAULT_RATES).every((k) => rates[k] === DEFAULT_RATES[k]);
-
-  if (!c.ranSec) {
-    return (
-      <Section title="원가">
-        <p className="text-[11px] leading-relaxed text-ink4">
-          아직 돌리지 않았습니다. 시뮬레이션을 시작하면 전기·인건비·자재비를 합쳐
-          <b className="text-ink3"> 개당 원가</b>가 나옵니다.
-        </p>
-      </Section>
-    );
-  }
-
-  return (
-    <Section title="원가">
-      <Row label="개당 원가">
-        <b className="text-[13px] text-ink">{c.per == null ? '측정 중' : won(c.per)}</b>
-        {c.good > 0 && <span className="ml-1 text-[10px] font-normal text-ink4">양품 {c.good}개 기준</span>}
-      </Row>
-      <Row label="누적">{won(c.total)}</Row>
-      <Row label="시간당">{won(c.perHour)}</Row>
-
-      <CostBar parts={c.parts} total={c.total} />
-
-      {/* 이 패널의 핵심. 「막힘 12%」 는 와 닿지 않지만 「시간당 4만원씩 탄다」 는
-          와 닿는다 — 진단이 짚은 원인을 고칠지 말지가 여기서 갈린다. */}
-      <Row label="놀면서 탄 돈">
-        <span className={c.stopShare > 0.15 ? 'text-rose-500' : 'text-ink2'}>{won(c.idleBurn)}</span>
-        <span className="ml-1 text-[10px] font-normal text-ink4">
-          정지 {(c.stopShare * 100).toFixed(1)}%
-        </span>
-      </Row>
-      {c.scrapWon > 0 && (
-        <Row label="불량으로 버린 돈"><span className="text-rose-500">{won(c.scrapWon)}</span></Row>
-      )}
-      <Row label="전력 · 사람">
-        {c.kwh.toFixed(1)} kWh · {c.manHours.toFixed(1)} 사람·시간
-      </Row>
-
-      <p className="mb-1 mt-3 text-[10.5px] text-ink4">
-        단가 {untouched && <b className="text-amber-600">— 아직 기본값입니다</b>}
-      </p>
-      <Slider
-        label="전기" value={rates.power} text={`${rates.power} 원/kWh`}
-        min={POWER_RANGE[0]} max={POWER_RANGE[1]} step={POWER_RANGE[2]}
-        onChange={(v) => set({ power: v })}
-      />
-      <Slider
-        label="인건비" value={rates.wage} text={`${rates.wage.toLocaleString()} 원/시간`}
-        min={WAGE_RANGE[0]} max={WAGE_RANGE[1]} step={WAGE_RANGE[2]}
-        onChange={(v) => set({ wage: v })}
-        hint="교대조 정원에 물린다 — 사람은 설비가 서 있어도 급여를 받는다"
-      />
-      <Slider
-        label="카트 한 대" value={rates.cartKw} text={`${rates.cartKw} kW`}
-        min={KW_RANGE[0]} max={20} step={0.1}
-        onChange={(v) => set({ cartKw: v })}
-      />
-      <Slider
-        label="자재비" value={rates.material} text={rates.material ? `${rates.material.toLocaleString()} 원/개` : '안 넣음'}
-        min={MATERIAL_RANGE[0]} max={MATERIAL_RANGE[1]} step={MATERIAL_RANGE[2]}
-        onChange={(v) => set({ material: v })}
-        hint="모르면 0으로 두고 가공비만 본다 — 배치끼리 견주는 데는 그걸로 충분하다"
-      />
-    </Section>
-  );
-}
 
 function CrewPanel() {
   const { state, dispatch, itemOf } = useEditor();
@@ -3244,11 +2975,7 @@ function Summary() {
 
       <CrewPanel />
 
-      <CostPanel />
-
       <BomReport />
-
-      <RunReport />
 
       <Section title="조작">
         <ul className="space-y-1.5 text-[11px] leading-relaxed text-ink3">
