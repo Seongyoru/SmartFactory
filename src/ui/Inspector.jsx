@@ -10,8 +10,16 @@ import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
   CART_MARGIN, cartPath, cartStations, fleetFits, haulPerMinute, nextRole, pickSet, stationStyle,
 } from '../core/cart.js';
-import { clearStock, dropKind, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
+import {
+  arrivedAt, arrivedOf, clearStock, dropKind, getAllStock, getShipped, setStock, shippedTotal,
+  useAllStock, useLots, useShipped, useStock,
+} from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
+import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
+import { runReportCSV } from '../core/report.js';
+import {
+  DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
+} from '../core/orders.js';
 import {
   CYCLE_RANGE, MIN_GAP, VAR_MAX, beltPerMinute, cycleOf, outputCapFor, perMinute, resetWork,
   spacingClamped, spacingFor, varOf,
@@ -22,8 +30,8 @@ import {
   shiftAt, shiftLabel, splitHM,
 } from '../core/crew.js';
 import {
-  LOSS_FLOOR, cartBlockRatio, getBlocked, getCartBlocked, getCartRan, getRan, getSeries,
-  getStarved, getUnmanned, lossSplit, oeeOf, oeeOverall,
+  LOSS_FLOOR, bottleneck, cartBlockRatio, getBlocked, getCartBlocked, getCartRan, getRan, getSeries,
+  getStarved, getUnmanned, lossSplit, oeeOf, oeeOverall, throughput, uptimeOf,
   resetMetrics, useMetrics,
 } from '../core/metrics.js';
 import {
@@ -48,6 +56,15 @@ import {
   MIN_BAY_LENGTH,
   MIN_LEVELS,
   MIN_LEVEL_GAP,
+  MIN_ROWS,
+  MAX_ROWS,
+  MIN_ROW_GAP,
+  MAX_ROW_GAP,
+  perRow,
+  rowGap,
+  rowKinds,
+  shelfDepth,
+  shelfRows,
   bayLength,
   levelGap,
   perLevel,
@@ -955,6 +972,9 @@ function ShelfPanel({ placed }) {
   const per = perLevel(placed, spec);
   const pitch = slotPitch(placed, spec);
   const capacity = shelfCapacity(placed, spec);
+  const rows = shelfRows(placed);
+  const aisle = rowGap(placed);
+  const rowList = rowKinds(placed);
   const shown = Math.min(stock, capacity);   // 수용량이 줄면 표시도 따라 줄어든다
 
   const set = (patch) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch });
@@ -1001,10 +1021,63 @@ function ShelfPanel({ placed }) {
         <Row label="전체 높이">{shelfHeight(placed, spec).toFixed(2)} m</Row>
       </Section>
 
+      {/**
+        * 줄 — 같은 규격의 랙을 앞뒤로 세운다.
+        * ---------------------------------------------------------------------
+        *  예전에는 줄을 늘리려면 선반을 새로 그려 위치와 설정을 손으로 맞춰야
+        *  했다. 한 덩어리로 다루면 옮길 때도 같이 움직이고 규격도 한 번만 맞춘다.
+        */}
+      <Section title="줄">
+        {num('줄 수', 'rows', MIN_ROWS, MAX_ROWS, 1, rows,
+          `${rows} 줄 · 전체 깊이 ${shelfDepth(placed, spec).toFixed(2)} m`)}
+        {rows > 1 && num('통로 폭', 'rowGap', MIN_ROW_GAP, MAX_ROW_GAP, 0.1, aisle, `${aisle.toFixed(2)} m`)}
+
+        {rows > 1 && (
+          <div className="mt-2">
+            <p className="mb-1 text-[10.5px] leading-relaxed text-ink4">
+              줄마다 받을 종류를 정할 수 있습니다. <b className="text-ink3">안 정한 줄</b>은
+              지금처럼 섞어서 받고, 정한 줄은 그 종류만 받습니다.
+            </p>
+            {rowList.map((kind, r) => (
+              <div key={r} className="mt-1 flex items-center gap-1.5">
+                <span className="w-10 shrink-0 text-[10.5px] tabular-nums text-ink4">{r + 1}번 줄</span>
+                <select
+                  value={kind ?? ''}
+                  onChange={(e) => {
+                    const next = [...rowList];
+                    next[r] = e.target.value || null;
+                    set({ rowKinds: next });
+                  }}
+                  className="min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink outline-none focus:border-sky-500/60"
+                >
+                  <option value="">안 정함 (섞어서)</option>
+                  {Object.entries(PAYLOAD_ITEMS).map(([k, it]) => (
+                    <option key={k} value={k}>{it.name}</option>
+                  ))}
+                </select>
+                {kind && (
+                  <i
+                    className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-black/20"
+                    style={{ background: PAYLOAD_ITEMS[kind]?.color ?? '#94a3b8' }}
+                  />
+                )}
+              </div>
+            ))}
+            {rowList.every((k) => k) && (
+              <p className="mt-1.5 rounded bg-amber-500/10 px-2 py-1 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+                모든 줄에 종류를 정했습니다 — 여기 없는 종류는 이 선반에 **못 들어갑니다.**
+                한 줄은 비워 두면 나머지가 섞여 들어갑니다.
+              </p>
+            )}
+          </div>
+        )}
+      </Section>
+
       <Section title="수용량">
         <div>
           <Row label="한 단 적재수">{per} 개 · 간격 {pitch.toFixed(2)} m</Row>
-          <Row label="총 수용량">{per} × {levelCount}단 = {capacity} 개</Row>
+          <Row label="한 줄">{per} × {levelCount}단 = {perRow(placed, spec)} 개</Row>
+          <Row label="총 수용량">{perRow(placed, spec)} × {rows}줄 = {capacity} 개</Row>
           <div className="mb-1 mt-1 flex items-center justify-between text-[11px]">
             <span className="text-ink4">현재 재고</span>
             <b className="text-ink tabular-nums">{shown} / {capacity}</b>
@@ -2441,7 +2514,7 @@ function ProductionChart({ series }) {
  *  아직 아무것도 안 돌았으면 나눌 것이 없으므로 통째로 감춘다.
  */
 function RunReport() {
-  const { state } = useEditor();
+  const { state, dispatch, itemOf } = useEditor();
   useMetrics();
   const elapsed = useElapsed();
   const ran = getRan();
@@ -2480,6 +2553,99 @@ function RunReport() {
     .sort((a, b) => a.run - b.run);
   const split = lossSplit();
 
+  /**
+   * 보고서에 넣을 값을 모은다 — **여기서 새로 계산하는 것은 없다.**
+   * -------------------------------------------------------------------------
+   *  보고서가 화면과 다른 숫자를 말하면 둘 다 못 믿게 된다. 그래서 화면이 이미
+   *  쓰는 함수(process · cart · orders · metrics)를 그대로 불러 담기만 한다.
+   */
+  const buildReport = () => {
+    const shipped = getShipped();
+    const stock = getAllStock();
+    const orders = normalizeOrders(state.orders);
+    const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
+
+    const machines = state.placed
+      .filter((p) => { const it = itemOf(p.itemId); return it && !isShelf(it) && !isStillage(it) && !isUtility(it); })
+      .map((p) => {
+        const cyc = cycleOf(p, itemOf(p.itemId));
+        const o = oeeOf(p.uid);
+        return {
+          name: p.name ?? p.uid,
+          cycleSec: cyc,
+          rate: perMinute(cyc),
+          uptime: uptimeOf(p.uid),
+          blockSec: o.blockSec, starveSec: o.starveSec, crewSec: o.crewSec, downSec: o.downSec,
+          oee: o.oee,
+        };
+      });
+
+    const carts = state.carts.map((c) => {
+      const it = itemOf(c.itemId);
+      const truck = isTruck(it);
+      const path = cartPath(c);
+      const st = path ? cartStations(path, state.placed, itemOf, { loadOnly: truck, roles: c.roles }) : [];
+      const h = path ? haulPerMinute(c, path, st, { truck }) : null;
+      return {
+        name: c.name ?? c.uid,
+        kindName: truck ? '트럭' : '카트',
+        count: c.count ?? 1,
+        perMinute: h?.perMinute,
+        blockRatio: cartBlockRatio(c.uid),
+      };
+    });
+
+    const stores = state.placed
+      .filter((p) => { const it = itemOf(p.itemId); return isShelf(it) || isStillage(it); })
+      .map((p) => {
+        const seen = arrivedAt(p.uid);
+        return {
+          name: p.name ?? p.uid,
+          have: stock[p.uid] ?? 0,
+          cap: storeCapOf(p, itemOf, specOf),
+          arrivedTotal: Object.values(seen).reduce((s, n) => s + n, 0),
+          arrived: seen,
+        };
+      });
+
+    /* 진단 — 지금 가장 오래 막힌 설비의 원인 사슬 (화면 왼쪽 위와 같은 값) */
+    const neck = bottleneck();
+    const owner = neck ? state.placed.find((p) => p.uid === neck.uid) : null;
+    const chain = owner
+      ? blockChain(owner.uid, {
+        placed: state.placed, links: state.links, carts: state.carts, itemOf, specOf,
+        getStock: (uid) => stock[uid] ?? 0,
+      })
+      : null;
+
+    return runReportCSV({
+      at: new Date().toLocaleString('ko-KR'),
+      elapsedSec: elapsed,
+      ranSec: ran,
+      throughput: throughput(shippedTotal(shipped)),
+      wip: Object.values(stock).reduce((s, n) => s + n, 0),
+      oee: overall,
+      diagnosis: chain ? chainText(chain.steps) : null,
+      culprit: chain?.culprit?.name ?? null,
+      orders: orders.map((o) => {
+        const r = statusOf(o, { shipped, arrivedOf }, elapsed);
+        const target = o.at === DONE_AT.SHIP
+          ? '출하'
+          : `${state.placed.find((p) => p.uid === o.atUid)?.name ?? o.atUid ?? '(안 정함)'} 통과`;
+        return {
+          kind: o.kind, kindName: PAYLOAD_ITEMS[o.kind]?.name ?? o.kind,
+          qty: o.qty, done: r.done, ratio: r.ratio,
+          atLabel: target, dueMin: o.dueMin, eta: r.eta, slackSec: r.slackSec, state: r.state,
+        };
+      }),
+      shipped: Object.entries(shipped).map(([k, n]) => [PAYLOAD_ITEMS[k]?.name ?? k, n]),
+      machines,
+      carts,
+      stores,
+      series,
+    });
+  };
+
   return (
     <Section
       title="이번 실행"
@@ -2487,15 +2653,31 @@ function RunReport() {
         <span className="flex items-center gap-1">
           {/* 추이를 엑셀에서 다시 그리거나 다른 실행과 겹쳐 보려고 내보낸다.
               화면의 그래프는 눈으로 보는 것이고 이건 들고 나가는 것이다 */}
-          {series.length > 1 && (
-            <button
-              onClick={() => downloadCSV(seriesCSV(series), `생산추이-${stamp()}.csv`)}
-              className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
-              title="생산 추이를 CSV 로 — 엑셀에서 다시 그릴 수 있다"
-            >
-              CSV
-            </button>
-          )}
+          {/**
+            * 실행 보고서 — **이 배치가 무엇을 했는가** 를 한 장에.
+            * -----------------------------------------------------------------
+            *  예전에는 「생산 추이」(시간 × 누적 출하) 하나만 내보낼 수 있었다.
+            *  회의에 들고 가는 것은 추이 그래프가 아니라 오더를 맞췄는지, 어느
+            *  설비가 얼마나 놀았는지, 어디서 막혔는지다. 추이는 그 안에 들어간다.
+            */}
+          {/* 눌렀는데 아무 일도 안 일어나면 사용자는 버튼이 고장 났는지 파일이
+              어디 갔는지조차 알 수 없다. 실패하면 **말은 하게** 해 둔다. */}
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                downloadCSV(buildReport(), `실행보고서-${stamp()}.csv`);
+                dispatch({ type: 'SET', patch: { hint: '실행 보고서를 내려받았습니다' } });
+              } catch (e) {
+                console.error('[보고서] 만들다 실패', e);
+                dispatch({ type: 'SET', patch: { hint: `보고서를 못 만들었습니다 — ${e.message}` } });
+              }
+            }}
+            className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+            title="이번 실행을 CSV 한 장으로 — 오더 · 설비 · 차량 · 진단 · 추이"
+          >
+            보고서
+          </button>
           <button
             onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
             className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
@@ -2888,6 +3070,7 @@ function Summary() {
           <Row key={kind} label={`· ${PAYLOAD_ITEMS[kind]?.name ?? kind}`}>{n} 개</Row>
         ))}
       </Section>
+
 
       <CrewPanel />
 

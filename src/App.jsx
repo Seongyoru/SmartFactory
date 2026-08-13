@@ -19,6 +19,7 @@ import { useCursor } from './core/cursorStore.js';
 import { shippedTotal, useAllStock, useShipped } from './core/simStore.js';
 import { bottleneck, getRan, throughput, useMetrics } from './core/metrics.js';
 import { blockChain, stepTarget } from './core/diagnose.js';
+import { normalizeOrders } from './core/orders.js';
 import { focusOn } from './core/focusStore.js';
 import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
@@ -335,7 +336,9 @@ function ShippedHUD() {
     })
     : null;
 
-  if (!kinds.length && !wip && !neck) return null;
+  /* 오더가 있으면 그것만으로도 띄운다 — 진척은 늘 보여야 하는 값이다 */
+  const hasOrders = normalizeOrders(state.orders).length > 0;
+  if (!kinds.length && !wip && !neck && !hasOrders) return null;
 
   return (
     <div className="pointer-events-none absolute left-3 top-3 z-10 flex w-[186px] flex-col gap-1">

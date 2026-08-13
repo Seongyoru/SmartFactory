@@ -34,7 +34,9 @@ import {
   shelfLevelCount,
   shelfSpec,
   shelfZones,
-  slotPosition,
+  layoutShelf,
+  shelfRows,
+  rowZ,
   payloadWidth,
 } from '../core/shelf.js';
 import { NO_PICK, SHELF_BAND_COLOR } from './ZoneMarks.jsx';
@@ -159,17 +161,23 @@ function StoredItems({ placed, spec, count }) {
      인스펙터가 적은 개수와 실제로 그리는 개수가 어긋난다(34 vs 35). */
   const width = payloadWidth();
 
+  /**
+   * 어느 자리에 앉을지는 **`layoutShelf` 하나가 정한다.**
+   *  줄마다 받을 종류를 정할 수 있게 되면서, 번호만으로는 자리를 못 정한다 —
+   *  같은 3번째 물건이라도 종류에 따라 다른 줄에 간다. 그 규칙을 화면이 따로
+   *  구현하면 "보이는 곳" 과 "받아 주는 곳" 이 어긋난다.
+   */
   const items = useMemo(() => {
     if (count <= 0) return [];
-    const cap = shelfCapacity(placed, spec);
     const out = [];
-    for (let i = 0; i < Math.min(count, cap); i++) {
-      const s = specOf(lots[i]);
+    for (const slot of layoutShelf(lots, placed, spec, width)) {
+      const s = specOf(slot.kind);
       if (!s) continue;                        // 아직 못 읽은 모델은 건너뛴다
-      out.push({ obj: cloneScene(s), pos: slotPosition(i, placed, spec) });
+      out.push({ obj: cloneScene(s), pos: slot.pos });
     }
     return out;
-  }, [lots, specOf, count, placed.bays, placed.levels, placed.bayLength, placed.levelGap, placed.perLevel, spec, width]);
+  }, [lots, specOf, count, placed.bays, placed.levels, placed.bayLength, placed.levelGap,
+    placed.perLevel, placed.rows, placed.rowGap, placed.rowKinds, spec, width]);
 
   return (
     <group>
@@ -197,9 +205,12 @@ export default function ShelfView({
   const useModel = !!spec?.shelf && !missing;
   const modelSpec = useModel ? spec : null;
   const capacity = shelfCapacity(placed, modelSpec);
+  /* 의존성은 **shelfZones 가 읽는 값 전부**여야 한다. 줄이 생기면서 깊이가
+     rows·rowGap 에도 걸리는데 그걸 안 넣어서, 줄을 늘려도 띠가 제자리에 있었다 —
+     새로고침해야 옮겨졌다. 형상을 바꾸는 값이 늘면 여기도 같이 늘어야 한다. */
   const zones = useMemo(
     () => shelfZones(placed, modelSpec),
-    [placed.bays, placed.bayLength, modelSpec],
+    [placed.bays, placed.bayLength, placed.rows, placed.rowGap, modelSpec],
   );
 
   /**
@@ -236,11 +247,22 @@ export default function ShelfView({
       rotation={[0, rotToRad(placed.rot), 0]}
       onPointerDown={ghost ? undefined : onPointerDown}
     >
-      {useModel ? (
-        <ModelRack spec={spec} placed={placed} ghost={ghost} />
-      ) : (
-        <ProceduralRack placed={placed} ghost={ghost} />
-      )}
+      {/**
+        * 줄 — 같은 랙을 앞뒤로 세운다.
+        * ---------------------------------------------------------------------
+        *  랙 하나를 그리는 코드는 그대로 두고 **z 만 옮겨 되풀이한다.** 줄마다
+        *  규격이 다를 이유가 없으므로(한 덩어리로 다루려고 만든 기능이다) 형상은
+        *  한 벌이면 충분하다. 자리 계산은 `layoutShelf` 가 같은 z 를 쓴다.
+        */}
+      {Array.from({ length: shelfRows(placed) }, (_, r) => (
+        <group key={`row${r}`} position={[0, 0, rowZ(r, placed, modelSpec)]}>
+          {useModel ? (
+            <ModelRack spec={spec} placed={placed} ghost={ghost} />
+          ) : (
+            <ProceduralRack placed={placed} ghost={ghost} />
+          )}
+        </group>
+      ))}
 
       {!ghost && <StoredItems placed={placed} spec={modelSpec} count={stock} />}
 

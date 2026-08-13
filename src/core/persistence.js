@@ -36,6 +36,8 @@ export const layoutSnapshot = (state) => ({
   openings: state.openings,
   /** 교대조 — 배치와 함께 저장한다. 인원이 몇 명인지는 그 도면의 성질이다 */
   shifts: state.shifts,
+  /** 생산 오더 — 「무엇을 몇 개, 언제까지」. 이것도 그 도면에 딸린 계획이다 */
+  orders: state.orders,
   /**
    * 기본 벨트 속도 — **도면의 성질이다.** 자기 속도를 따로 정하지 않은 벨트가
    * 전부 이 값으로 돌고, 이제는 **덩어리 간격까지 여기서 나온다**(process.js 의
@@ -193,7 +195,11 @@ function saveBlob(blob, filename) {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  /* 문서에 붙였다 뗀다 — 떨어져 있는 앵커의 click() 을 무시하는 브라우저가 있다 */
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
+  a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 

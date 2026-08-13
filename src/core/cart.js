@@ -18,7 +18,7 @@ import { allPorts } from './link.js';
 import { PORT_KIND, PORT_ZONE_REACH } from './ports.js';
 import { canonKind, isShelf, isStillage } from '../data/library.js';
 import { inputCapOf, isSource, outputKindOf, recipeOf } from './bom.js';
-import { ZONE, shelfCapacity, shelfZones } from './shelf.js';
+import { ZONE, perRow, rowGroupOf, shelfCapacity, shelfZones } from './shelf.js';
 import { stillageCapacity } from './stillage.js';
 import { rotateXZ } from './grid.js';
 import { getSpec } from './modelStore.js';
@@ -289,7 +289,21 @@ export function cartPath(cart) {
 }
 
 /** 점에서 경로까지의 최단 지점을 호 길이로 찾는다 (간단히 촘촘히 훑는다) */
-function closestOnPath(path, [x, z], step = 0.25) {
+/**
+ * 이 점에 가장 가까운 경로 위의 자리.
+ *
+ * @param accept 쓸 만한 자리인지 — **가장 가까운 한 점만 보면 안 되는 경우**가 있다.
+ * ---------------------------------------------------------------------------
+ *  선반을 한 바퀴 도는 경로가 그렇다. 경로의 어느 구간은 선반 앞면을 제대로
+ *  지나가는데, 반대편(또는 안쪽) 구간이 **더 가깝다는 이유로** 뽑히고, 그 자리가
+ *  "면의 정면이 아니다" 로 걸려 정차역이 통째로 사라졌다.
+ *
+ *  실제로 겪은 그림이다 — 줄을 늘려 선반이 커지자 경로 한쪽이 선반 안으로
+ *  들어갔고, 바깥을 지나는 구간이 멀쩡히 있는데도 역이 안 생겼다.
+ *
+ *  그래서 **조건을 만족하는 것들 중** 가장 가까운 자리를 고른다.
+ */
+function closestOnPath(path, [x, z], step = 0.25, accept = null) {
   const L = path.length;
   let bestS = 0;
   let bestD = Infinity;
@@ -298,7 +312,10 @@ function closestOnPath(path, [x, z], step = 0.25) {
     const s = (i / n) * L;
     const p = path.at(s).pos;
     const d = Math.hypot(p[0] - x, p[2] - z);
-    if (d < bestD) { bestD = d; bestS = s; }
+    if (d >= bestD) continue;
+    if (accept && !accept(p, d)) continue;
+    bestD = d;
+    bestS = s;
   }
   return { s: bestS, dist: bestD };
 }
@@ -410,14 +427,15 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false, roles
         const lx = z.cx - z.w / 2 + (i * z.w) / (samples - 1);
         const [ox, oz] = rotateXZ([lx, z.fz], p.rot);
         const at2 = [p.pos[0] + ox, p.pos[1] + oz];
-        const hit = closestOnPath(path, at2);
+        /* 정면 판정을 **찾는 동안** 한다 — 뒤에서 거르면, 더 가까운 엉뚱한 구간
+           하나 때문에 제대로 지나가는 구간이 통째로 묻힌다(closestOnPath 주석) */
+        const hit = closestOnPath(path, at2, 0.25, (q) => {
+          const vx = q[0] - at2[0];
+          const vz = q[2] - at2[1];
+          const len = Math.hypot(vx, vz);
+          return len <= 1e-3 || (vx * dir[0] + vz * dir[1]) / len >= FRONT_COS;
+        });
         if (hit.dist > STATION_DIST) continue;
-
-        const at = path.at(hit.s).pos;
-        const vx = at[0] - at2[0];
-        const vz = at[2] - at2[1];
-        const len = Math.hypot(vx, vz);
-        if (len > 1e-3 && (vx * dir[0] + vz * dir[1]) / len < FRONT_COS) continue;
         if (!near || hit.dist < near.dist) near = { s: hit.s, dist: hit.dist, zone: z.kind };
       }
     }
@@ -444,6 +462,17 @@ export function cartStations(path, placedList, itemOf, { loadOnly = false, roles
       capacity: shelfCapacity(p, spec),
       /** 빈 카트가 오면 실어 보낼 수량 */
       dispatch: Math.max(0, p.dispatchCount ?? 3),
+      /**
+       * 줄을 나눈 선반이면 **어느 통에 얼마나** 들어가는지.
+       * ---------------------------------------------------------------------
+       *  「1번 줄은 제작품 1」 같은 지정을 지키려면 내려놓는 쪽이 그 규칙을
+       *  알아야 한다. 규칙은 shelf.js 한 곳에 있고 여기서는 그것을 싸서 넘긴다 —
+       *  CartView 가 줄 계산을 다시 하면 그리는 자리와 어긋난다.
+       */
+      binOf: (kind) => {
+        const g = rowGroupOf(p, kind);
+        return { id: g.rows.length ? g.id : null, cap: g.rows.length * perRow(p, spec) };
+      },
     });
   }
 

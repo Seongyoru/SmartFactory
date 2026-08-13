@@ -57,6 +57,35 @@ export const getKind = (uid) => {
   return l?.length ? l[l.length - 1] : null;
 };
 
+/* --------------------------------------------------------------------------
+ * 여기까지 **거쳐 간** 수 — 생산 오더가 세는 값
+ * --------------------------------------------------------------------------
+ *  처음에는 오더를 「지금 쌓여 있는 수」로 셌다. 그런데 적치대가 200칸이면
+ *  400개짜리 오더는 **영영 안 끝난다** — 담을 데가 없어서지 못 만들어서가 아니다.
+ *  「이 창고를 채워라」 와 「500개를 만들어라」 는 다른 지시다.
+ *
+ *  그래서 자리마다 **누적 도착 수**를 따로 센다. 쌓인 것이 카트에 실려 나가도
+ *  이 수는 안 준다 — 지나간 것은 지나간 것이다. 출하 누계와 같은 성질이라
+ *  같은 자리에 둔다.
+ */
+let arrived = {};             // { [uid]: { [종류]: 누적 도착 수 } }
+const EMPTY_ARRIVED = {};
+
+export const arrivedOf = (uid, kind) => arrived[uid]?.[kind] ?? 0;
+export const arrivedAt = (uid) => arrived[uid] ?? EMPTY_ARRIVED;
+export const getAllArrived = () => arrived;
+
+/** 실제로 자리에 놓인 것만 센다 — 못 넣고 되돌아간 것은 안 센다 */
+function noteArrival(uid, kinds) {
+  if (!kinds?.length) return;
+  const cur = arrived[uid] ?? {};
+  const next = { ...cur };
+  for (const k of kinds) next[k] = (next[k] ?? 0) + 1;
+  arrived = { ...arrived, [uid]: next };
+}
+
+export const resetArrived = () => { arrived = {}; emit(); };
+
 /** 개수와 종류 목록을 한 번에 맞춘다 — 둘이 어긋나면 그리는 쪽이 무너진다 */
 function commit(uid, list) {
   stock = { ...stock, [uid]: list.length };
@@ -81,6 +110,7 @@ export function addLots(uid, kindList, capacity = Infinity) {
   const room = Math.max(0, Math.floor(capacity) - cur.length);
   const take = kindList.slice(0, room);
   if (!take.length) return 0;
+  noteArrival(uid, take);
   commit(uid, [...cur, ...take]);
   return take.length;
 }
@@ -115,7 +145,40 @@ export function addLotsShared(uid, kindList, slotsOf) {
       left.push(k);
     }
   }
-  if (take.length) commit(uid, [...cur, ...take]);
+  if (take.length) { noteArrival(uid, take); commit(uid, [...cur, ...take]); }
+  return { moved: take.length, left };
+}
+
+/**
+ * **묶음마다 자리가 정해진** 적재 (줄을 나눈 선반).
+ * ---------------------------------------------------------------------------
+ *  `addLotsShared` 와 닮았지만 자리를 **종류가 아니라 묶음**으로 센다. 선반의
+ *  「안 정한 줄」 은 여러 종류가 함께 쓰는 한 통이라, 종류마다 따로 세면 그 통이
+ *  종류 수만큼 뻥튀기된다 — 공용 두 줄에 세 종류가 오면 여섯 줄치가 들어간다.
+ *
+ *  @param binOf (종류) => { id, cap } · id 가 null 이면 그 종류는 **안 받는다**
+ *  @returns { moved, left } · left 는 자리가 없어 못 넣은 것들 (카트가 싣고 간다)
+ */
+export function addByGroup(uid, kindList, binOf) {
+  const cur = getLots(uid);
+  const used = {};
+  for (const k of cur) {
+    const b = binOf(k);
+    if (b?.id) used[b.id] = (used[b.id] ?? 0) + 1;
+  }
+
+  const take = [];
+  const left = [];
+  for (const k of kindList ?? []) {
+    const b = binOf(k);
+    if (b?.id && (used[b.id] ?? 0) < b.cap) {
+      used[b.id] = (used[b.id] ?? 0) + 1;
+      take.push(k);
+    } else {
+      left.push(k);
+    }
+  }
+  if (take.length) { noteArrival(uid, take); commit(uid, [...cur, ...take]); }
   return { moved: take.length, left };
 }
 
@@ -348,6 +411,9 @@ export function addShipped(kinds) {
 }
 
 export const resetShipped = () => { shipped = EMPTY_SHIPPED; emit(); };
+
+/** 훅 없이 지금 값만 — 보고서처럼 한 번 읽고 마는 자리에서 쓴다 */
+export const getShipped = () => shipped;
 
 /** 종류별 출하 누계 { [종류]: 개수 } */
 export const useShipped = () =>

@@ -23,7 +23,9 @@ import {
 } from '../core/cart.js';
 import { simStep } from '../core/clock.js';
 import { accumulateCart } from '../core/metrics.js';
-import { addLots, addLotsShared, addShipped, getMade, takeLots, takeMade } from '../core/simStore.js';
+import {
+  addByGroup, addLots, addLotsShared, addShipped, getMade, takeLots, takeMade,
+} from '../core/simStore.js';
 import { slotShares } from '../core/bom.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { inGate, pointInMP } from '../core/area.js';
@@ -254,11 +256,20 @@ function CartUnit({
              1번 선반에 내리면 아무 일도 안 한 셈이고, 왕복 경로에서는 그게
              무한히 반복된다. 어디서 실었는지 기억해 두고 그 선반은 건너뛴다. */
           if (carried > 0 && sourceRef.current !== a.uid) {
-            const moved = addLots(a.uid, carriedKinds, a.capacity);
+            /* 줄을 나눈 선반이면 **그 지정을 지켜** 내린다 — 1번 줄이 제작품 1
+               자리라면 다른 것은 거기 못 들어간다. 규칙은 shelf.js 에 있고 역이
+               싸서 넘겨 준다(binOf). 지정이 없으면 예전처럼 순서대로 쌓인다. */
+            const r = a.binOf
+              ? addByGroup(a.uid, carriedKinds, a.binOf)
+              : { moved: addLots(a.uid, carriedKinds, a.capacity), left: null };
+            const moved = r.moved;
             if (moved > 0) {
-              const left = carried - moved;
+              /* 못 넣은 것을 **목록으로** 받는 이유는 addLotsShared 와 같다 —
+                 앞에서부터 잘라 내면 안 들어간 종류가 사라진다 */
+              const rest = r.left ?? carriedKinds.slice(moved);
+              const left = rest.length;
               setCarried(left);
-              setCarriedKinds(carriedKinds.slice(moved));   // 못 내린 것은 그대로 싣고 간다
+              setCarriedKinds(rest);
               if (left === 0) sourceRef.current = null;
               acted = true;
             }

@@ -36,6 +36,7 @@ import { SHAPE, TOOL, useEditor } from '../core/store.jsx';
 import { deleteModelBuffer } from '../core/persistence.js';
 import { dropModel, getSpec } from '../core/modelStore.js';
 import ImportDialog from './ImportDialog.jsx';
+import OrdersDock from './OrdersDock.jsx';
 import { ColorField, Slider } from './common.jsx';
 
 /** 건물 탭은 라이브러리 항목이 아니라 도구 모음이라 별도의 id 를 쓴다 */
@@ -264,6 +265,7 @@ export default function LibraryPanel() {
 
   return (
     <aside className="flex w-[264px] shrink-0 flex-col border-r border-line bg-panel">
+      <div className="flex min-h-0 flex-1 flex-col">
       {/* 탭 — 아이콘 위, 이름 아래 */}
       <div className="flex border-b border-line">
         {TABS.map(({ id, label, Icon }) => (
@@ -348,6 +350,17 @@ export default function LibraryPanel() {
           )}
         </p>
       </div>
+
+      </div>
+
+      {/**
+        * 생산 오더 — **왼쪽 아래 절반**에 붙박이로 둔다.
+        * ---------------------------------------------------------------------
+        *  인스펙터에만 있으면 설비를 하나라도 누르는 순간 진척이 화면에서 사라진다.
+        *  라인을 손보는 동안에도 「지금 몇 개까지 왔고 납기를 맞추는가」 는 계속
+        *  보여야 하는 값이다.
+        */}
+      <OrdersDock />
 
       {importing && (
         <ImportDialog

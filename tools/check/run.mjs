@@ -22,6 +22,9 @@ await import('./cart.mjs');
 await import('./crew.mjs');
 await import('./metrics.mjs');
 await import('./metrics-crew.mjs');
+await import('./orders.mjs');
+await import('./report.mjs');
+await import('./shelfrows.mjs');
 await import('./process.mjs');
 
 /* 소스에서 떼어 내는 것 — JSX 라 import 는 안 되지만 계산 자체는 순수하다.

@@ -1,0 +1,172 @@
+/**
+ * =============================================================================
+ *  생산 오더 — 왼쪽 패널 **아래 절반**의 붙박이
+ * =============================================================================
+ *  처음에는 인스펙터에 뒀다. 그런데 설비를 하나라도 누르는 순간 진척이 화면에서
+ *  사라진다 — 라인을 손보는 동안에도 「지금 몇 개까지 왔고 납기를 맞추는가」 는
+ *  계속 보여야 하는 값이다. 그래서 라이브러리 아래에 붙여 두고, 무엇을 고르든
+ *  자리를 지킨다.
+ *
+ *  ── 전부 채워지면 시뮬을 멈춘다 ──────────────────────────────────────────
+ *   지금까지는 사람이 눈대중으로 멈췄다. 끝나는 조건이 생겼으니 도구가 멈춘다.
+ *   **한 번만** 멈춘다 — 다시 채워질 때마다 되풀이해 멈추면 손을 못 댄다.
+ * ---------------------------------------------------------------------------
+ */
+
+import React, { useEffect, useRef } from 'react';
+import { Trash2 } from 'lucide-react';
+import { useEditor } from '../core/store.jsx';
+import { arrivedOf, useAllStock, useShipped } from '../core/simStore.js';
+import { useElapsed } from '../core/clock.js';
+import {
+  DEFAULT_ORDER, DONE_AT, ORDER, allDone, formatSpan, normalizeOrders, statusOf,
+} from '../core/orders.js';
+import { PAYLOAD_ITEMS, isShelf, isStillage } from '../data/library.js';
+
+/** 좁은 칸에 들어가는 숫자 입력 — 스피너를 감춘다(폭을 감당할 수 없다) */
+const NUM =
+  'w-11 rounded border border-edge bg-field px-1 py-0.5 text-right text-[11px] tabular-nums text-ink '
+  + 'outline-none focus:border-sky-500/60 [appearance:textfield] '
+  + '[&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none';
+const SEL =
+  'min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink '
+  + 'outline-none focus:border-sky-500/60';
+
+export default function OrdersDock() {
+  const { state, dispatch, itemOf } = useEditor();
+  const elapsed = useElapsed();
+  const shipped = useShipped();
+  useAllStock();                       // 거쳐 간 수가 바뀌면 다시 그린다
+  const stopped = useRef(false);
+
+  const orders = normalizeOrders(state.orders);
+  const rows = orders.map((o) => ({ o, r: statusOf(o, { shipped, arrivedOf }, elapsed) }));
+
+  /* 전부 채우면 멈춘다 — 한 번만 */
+  useEffect(() => {
+    if (!allDone(rows.map((x) => x.r))) { stopped.current = false; return; }
+    if (stopped.current || !state.running) return;
+    stopped.current = true;
+    dispatch({
+      type: 'SET',
+      patch: { running: false, hint: '오더를 전부 채웠습니다 — 시뮬레이션을 멈췄습니다' },
+    });
+  });
+
+  const stores = state.placed.filter((p) => {
+    const it = itemOf(p.itemId);
+    return isShelf(it) || isStillage(it);
+  });
+
+  const set = (i, patch) =>
+    dispatch({ type: 'SET_ORDERS', orders: orders.map((o, k) => (k === i ? { ...o, ...patch } : o)) });
+  const add = () => dispatch({
+    type: 'SET_ORDERS',
+    orders: [...orders, { ...DEFAULT_ORDER, uid: `O${Date.now().toString(36)}` }],
+  });
+  const del = (i) => dispatch({ type: 'SET_ORDERS', orders: orders.filter((_, k) => k !== i) });
+
+  const doneCount = rows.filter((x) => x.r.state === ORDER.DONE).length;
+  const lateCount = rows.filter((x) => x.r.state === ORDER.LATE).length;
+
+  return (
+    <div className="flex max-h-[46%] min-h-[132px] shrink-0 flex-col border-t border-line">
+      <div className="flex shrink-0 items-center justify-between px-3 py-1.5">
+        <span className="text-[11px] font-medium text-ink2">생산 오더</span>
+        <span className="text-[10px] tabular-nums text-ink4">
+          {orders.length > 0 && (
+            <>
+              {doneCount}/{orders.length} 완료
+              {lateCount > 0 && <b className="ml-1 text-rose-500">{lateCount} 지연</b>}
+            </>
+          )}
+        </span>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
+        {orders.length === 0 && (
+          <p className="text-[10.5px] leading-relaxed text-ink4">
+            오더를 넣으면 <b className="text-ink3">언제 끝나는지</b>와{' '}
+            <b className="text-ink3">납기를 맞추는지</b>를 알려 줍니다.
+            전부 채워지면 시뮬레이션이 스스로 멈춥니다.
+          </p>
+        )}
+
+        {rows.map(({ o, r }, i) => {
+          const done = r.state === ORDER.DONE;
+          const late = r.state === ORDER.LATE;
+          return (
+            <div key={o.uid} className="mt-1.5 rounded-md border border-edge bg-field px-1.5 py-1 first:mt-0">
+              <div className="flex items-center gap-1">
+                <select value={o.kind} onChange={(e) => set(i, { kind: e.target.value })} className={SEL}>
+                  {Object.entries(PAYLOAD_ITEMS).map(([k, it]) => (
+                    <option key={k} value={k}>{it.name}</option>
+                  ))}
+                </select>
+                <input
+                  type="number" min="1" value={o.qty} title="목표 수량"
+                  onChange={(e) => set(i, { qty: e.target.value })} className={NUM}
+                />
+                <input
+                  type="number" min="0" value={o.dueMin} title="납기 (분) · 0 이면 안 따진다"
+                  onChange={(e) => set(i, { dueMin: e.target.value })} className={NUM}
+                />
+                <span className="shrink-0 text-[10px] text-ink4">분</span>
+                <button
+                  type="button" onClick={() => del(i)} title="이 오더 삭제"
+                  className="shrink-0 rounded p-0.5 text-ink4 hover:bg-raiseh hover:text-rose-500"
+                >
+                  <Trash2 size={11} />
+                </button>
+              </div>
+
+              {/* 어디를 거쳐 가면 완료인가 — 자리는 **세는 지점**이지 채울 그릇이 아니다 */}
+              <select
+                value={o.at === DONE_AT.STORE ? (o.atUid ?? '') : DONE_AT.SHIP}
+                onChange={(e) => (e.target.value === DONE_AT.SHIP
+                  ? set(i, { at: DONE_AT.SHIP, atUid: null })
+                  : set(i, { at: DONE_AT.STORE, atUid: e.target.value }))}
+                className={`${SEL} mt-1 w-full`}
+                title="여기를 거쳐 간 누계로 셉니다 — 쌓인 수가 아닙니다"
+              >
+                <option value={DONE_AT.SHIP}>출하 — 트럭이 공장 밖으로</option>
+                {stores.map((p) => (
+                  <option key={p.uid} value={p.uid}>{p.name ?? p.uid} 통과</option>
+                ))}
+              </select>
+
+              <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-edge">
+                <div
+                  className={`h-full rounded-full ${done ? 'bg-emerald-500' : late ? 'bg-rose-500' : 'bg-sky-500'}`}
+                  style={{ width: `${(r.ratio * 100).toFixed(1)}%` }}
+                />
+              </div>
+              <div className="mt-0.5 flex items-baseline justify-between text-[10px] tabular-nums">
+                <span className={done ? 'text-emerald-500' : late ? 'text-rose-500' : 'text-ink3'}>
+                  {r.done.toLocaleString()} / {o.qty.toLocaleString()}
+                </span>
+                <span className="text-ink4">{Math.round(r.ratio * 100)}%</span>
+              </div>
+
+              <p className={`mt-0.5 text-[10px] leading-snug ${late ? 'text-rose-500' : 'text-ink4'}`}>
+                {done ? '다 채웠습니다.'
+                  : r.state === ORDER.MEASURING ? '속도를 재는 중…'
+                  : r.state === ORDER.NO_DUE ? `${formatSpan(r.eta)} 뒤 완료 (${r.rate.toFixed(1)} 개/분)`
+                  : late ? `${formatSpan(-r.slackSec)} 늦습니다 · ${r.rate.toFixed(1)} 개/분`
+                  : `${formatSpan(r.eta)} 뒤 완료 · 여유 ${formatSpan(r.slackSec)}`}
+              </p>
+            </div>
+          );
+        })}
+
+        <button
+          type="button"
+          onClick={add}
+          className="mt-1.5 w-full rounded-md border border-dashed border-edge py-1 text-[11px] text-ink4 hover:border-sky-500/60 hover:text-ink2"
+        >
+          + 오더 추가
+        </button>
+      </div>
+    </div>
+  );
+}
