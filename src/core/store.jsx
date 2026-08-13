@@ -202,6 +202,9 @@ const initialState = {
    */
   showRunDock: true,
 
+  /** 아래 띠에서 보고 있는 탭 — 'run'(이번 실행) 또는 'cost'(원가) */
+  runTab: 'run',
+
   /** 3D 에서 앞 벽을 감출지(돌하우스). 끄면 벽이 전부 서 있는 모습을 본다 */
   dollhouse: true,
 

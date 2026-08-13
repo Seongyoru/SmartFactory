@@ -297,9 +297,20 @@ t('씬 쪽에 aspect 를 같이 주지 않는다 — 플렉스와 다퉈 반씩 
 
 /* ---------- 띠 안의 배치 — 가로로 펴고 스크롤을 만들지 않는다 -------------- */
 
-t('실행이 **왼쪽**, 원가가 **오른쪽**', () => {
-  const order = [...dock.matchAll(/<Col title="([^"]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(order, ['이번 실행', '생산 추이', '돈 시간 (낮은 순)', '원가', '단가']);
+t('탭 둘 — 실행이 앞, 원가가 뒤', () => {
+  /* 한 줄에 다섯 칸을 늘어놓았더니 폭이 모자라 글자가 잘리고 값이 빠졌다.
+     띠 높이는 씬을 16:9 로 남기고 나온 나머지라 못 늘린다 — 남은 방법이 탭이다. */
+  const tabs = [...dock.matchAll(/\['(\w+)', '([^']+)'\]/g)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(tabs, [['run', '이번 실행'], ['cost', '원가']]);
+  assert.ok(dock.includes("tab === 'run'") && dock.includes("tab === 'cost'"), '탭으로 안 갈린다');
+  assert.ok(/runTab: 'run'/.test(store), '기본 탭이 도면 상태에 없다');
+});
+t('보고서·다시 재기는 **실행 탭에만** 붙는다', () => {
+  /* 단가를 만지는 중에 「다시 재기」 가 옆에 있으면 잘못 눌러 기록이 날아간다 */
+  assert.ok(/tab === 'run' && <ReportButtons \/>/.test(dock), '원가 탭에서도 다시 재기가 눌린다');
+});
+t('접힌 채로 탭을 누르면 펴면서 간다 — 두 번 누르게 하지 않는다', () => {
+  assert.ok(/runTab: id, showRunDock: true/.test(dock), '탭을 눌러도 안 펴진다');
 });
 t('세로 스크롤을 만들지 않는다 — 계기판은 흘깃 보는 것이다', () => {
   assert.equal(/overflow-y-auto/.test(dock), false, '칸에 세로 스크롤이 생겼다');
