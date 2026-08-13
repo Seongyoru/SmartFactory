@@ -32,9 +32,55 @@ import React, { useRef } from 'react';
 import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import { PAYLOAD_ITEMS } from '../data/library.js';
-import { getMade, useLots, useMade } from '../core/simStore.js';
+import { getMade, useLots, useMade, useStock } from '../core/simStore.js';
 import { countKinds } from '../core/bom.js';
 import { bundleProgress } from '../core/process.js';
+
+/**
+ * 쌓이는 곳(적치대 · 선반)의 채움 정도.
+ * ---------------------------------------------------------------------------
+ *  **가득 찬 적치대는 라인 전체를 세운다.** 그런데 그게 화면 어디에도 안 보여서,
+ *  눌러 보기 전에는 200/200 인 줄 알 수가 없었다 — 그래서 멀쩡한 설비를 붙들고
+ *  왜 빨간지 한참을 찾게 된다. 설비에 게이지를 붙인 것과 같은 이유다.
+ *
+ *  차오르는 정도만 보여 준다. 무엇이 몇 개인지는 눌러서 볼 일이고, 도면을 훑을 때
+ *  필요한 것은 **여기가 찼는가** 하나다.
+ */
+export function StoreTag({ at, y = 0, height = 2, cap = 0 }) {
+  const have = useStock(at.uid);
+  if (!(cap > 0)) return null;
+  const ratio = Math.min(1, have / cap);
+  const full = have >= cap;
+  /* 8할을 넘으면 곧 찬다 — 차고 나서 알려 주면 이미 라인이 선 뒤다 */
+  const near = !full && ratio >= 0.8;
+
+  return (
+    <Html
+      position={[at.pos[0], y + height + 0.35, at.pos[1]]}
+      center
+      zIndexRange={[17, 0]}
+      style={{ pointerEvents: 'none', userSelect: 'none' }}
+    >
+      <div
+        className={`w-max rounded px-1.5 py-0.5 shadow ${
+          full ? 'bg-rose-500/90' : near ? 'bg-amber-500/85' : 'bg-black/65'
+        }`}
+      >
+        <div className="mb-0.5 h-[3px] w-full min-w-[44px] overflow-hidden rounded-full bg-white/25">
+          <div
+            className={`h-full rounded-full ${full ? 'bg-white' : near ? 'bg-white/90' : 'bg-emerald-400'}`}
+            style={{ width: `${(ratio * 100).toFixed(1)}%` }}
+          />
+        </div>
+        <div className="whitespace-nowrap text-center text-[10px] font-medium tabular-nums text-white/90">
+          {have}
+          <span className="text-white/40">/{cap}</span>
+          {full && <span className="ml-1">가득</span>}
+        </div>
+      </div>
+    </Html>
+  );
+}
 
 export default function StockTag({
   at,

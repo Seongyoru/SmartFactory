@@ -63,7 +63,7 @@ import {
 } from '../core/grid.js';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { publishCursor } from '../core/cursorStore.js';
-import { subscribeFocus } from '../core/focusStore.js';
+import { LOOK_ZOOM, ORBIT_RATE, orbitAzimuth, orbitPose, subscribeFocus } from '../core/focusStore.js';
 import { allPorts, autoLayer, layerLift, linkPath, nearestPort } from '../core/link.js';
 import { buildConnectorPath, buildFreePath } from '../core/routing.js';
 import { rotateXZ } from '../core/grid.js';
@@ -83,7 +83,7 @@ import CartView from './CartView.jsx';
 import BeltItems from './BeltItems.jsx';
 import EditHandles from './EditHandles.jsx';
 import { cartPath, cartStations } from '../core/cart.js';
-import { shelfBBox } from '../core/shelf.js';
+import { shelfBBox, shelfCapacity } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import {
   addLotsShared, addMade, addStock, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
@@ -102,7 +102,7 @@ import ShelfView from './ShelfView.jsx';
 import StillageView from './StillageView.jsx';
 import ZoneMarks from './ZoneMarks.jsx';
 import WorkerView from './WorkerView.jsx';
-import StockTag from './StockTag.jsx';
+import StockTag, { StoreTag } from './StockTag.jsx';
 import { sceneTheme } from '../theme.js';
 
 /** 카트 경로를 그릴 때 첫 점을 다시 눌러 고리를 닫는 거리(m) */
@@ -443,30 +443,103 @@ function Floor({ gridSize, show, theme }) {
 function FocusRig() {
   const { camera, controls } = useThree();
   const goal = useRef(null);
+  /** 들여다보는 중 — { az } · 지금 도는 방위각. null 이면 안 돈다 */
+  const spin = useRef(null);
 
-  useEffect(() => subscribeFocus((r) => { goal.current = r.at; }), []);
+  useEffect(() => subscribeFocus((r) => {
+    goal.current = r;
+    /* 옮겨 간 **뒤에** 돌기 시작한다. 옮기면서 같이 돌면 어디로 가는지 안 보인다 */
+    spin.current = null;
+  }), []);
 
-  useFrame(() => {
-    const at = goal.current;
-    if (!at) return;
+  /* 궤도 수식은 core/focusStore.js 에 있다 — 눈으로 못 보는 계산이라 값으로 확인한다 */
+  const poseAt = (t, az) => orbitPose([t.x, t.y, t.z], az);
+  const azOf = (t) => orbitAzimuth([camera.position.x, camera.position.y, camera.position.z], [t.x, t.y, t.z]);
+
+  useFrame((_, dt) => {
+    const req = goal.current;
     const k = 0.18;
-    if (camera.isOrthographicCamera) {
-      camera.position.x += (at[0] - camera.position.x) * k;
-      camera.position.z += (at[1] - camera.position.z) * k;
-      if (Math.hypot(at[0] - camera.position.x, at[1] - camera.position.z) < 0.05) goal.current = null;
+
+    if (req) {
+      const at = req.at;
+      if (camera.isOrthographicCamera) {
+        camera.position.x += (at[0] - camera.position.x) * k;
+        camera.position.z += (at[1] - camera.position.z) * k;
+        /* 탑뷰의 「들여다보기」 는 **당겨 보기**다 — 회전이 없으니 배율로 짚는다.
+           이미 더 가까이 보고 있으면 밀어내지 않는다(사용자가 맞춰 둔 것을 뺏지 않는다) */
+        if (req.look && camera.zoom < LOOK_ZOOM) {
+          camera.zoom += (LOOK_ZOOM - camera.zoom) * k;
+          camera.updateProjectionMatrix();
+        }
+        if (Math.hypot(at[0] - camera.position.x, at[1] - camera.position.z) < 0.05) goal.current = null;
+        return;
+      }
+
+      const t = controls?.target;
+      if (!t) { goal.current = null; return; }
+
+      t.x += (at[0] - t.x) * k;
+      t.z += (at[1] - t.z) * k;
+
+      if (req.look) {
+        /**
+         * **표준 자세로 맞춘다** — 올려다보는 각과 거리를 정해 둔 값으로.
+         * -------------------------------------------------------------------
+         *  보던 각도 그대로 돌면 어색하다. 거의 위에서 내려다보고 있으면 화면이
+         *  그냥 빙빙 돌고, 바닥에 붙어 있으면 설비에 얼굴을 박고 도는 그림이 된다.
+         *  너무 멀거나 가까운 것도 같은 이유로 여기서 함께 맞춘다.
+         *
+         *  방위각만 지금 것을 그대로 쓴다 — 어느 쪽에서 보는가는 사용자가 고른
+         *  방향이고, 굳이 되돌리면 화면이 크게 튄다.
+         */
+        const [gx, gy, gz] = poseAt(t, azOf(t));
+        camera.position.x += (gx - camera.position.x) * k;
+        camera.position.y += (gy - camera.position.y) * k;
+        camera.position.z += (gz - camera.position.z) * k;
+        camera.lookAt(t);
+        controls.update?.();
+        const near = Math.hypot(at[0] - t.x, at[1] - t.z) < 0.05
+          && Math.abs(gy - camera.position.y) < 0.15;
+        if (near) {
+          spin.current = { az: azOf(t) };
+          goal.current = null;
+        }
+        return;
+      }
+
+      /* 그냥 옮기기 — 각도와 거리를 그대로 두고 따라만 간다 */
+      camera.position.x += (at[0] - t.x) * k;
+      camera.position.z += (at[1] - t.z) * k;
+      controls.update?.();
+      if (Math.hypot(at[0] - t.x, at[1] - t.z) < 0.05) goal.current = null;
       return;
     }
-    const t = controls?.target;
-    if (!t) { goal.current = null; return; }
-    const dx = (at[0] - t.x) * k;
-    const dz = (at[1] - t.z) * k;
-    t.x += dx;
-    t.z += dz;
-    camera.position.x += dx;
-    camera.position.z += dz;
+
+    /**
+     * 둘레 돌기 — **카메라를 만질 때까지** 천천히.
+     * -----------------------------------------------------------------------
+     *  각과 거리는 표준 자세로 **고정**하고 방위각만 돌린다. 그래서 어디서
+     *  시작하든 같은 눈높이로 돈다. 한 바퀴에 20초쯤 — 눈에 띄되 성가시지 않게.
+     *  사용자가 카메라를 만지는 순간 그만둔다(아래 onStart).
+     */
+    const s = spin.current;
+    if (!s || !controls?.target) return;
+    const t = controls.target;
+    s.az += ORBIT_RATE * Math.min(dt, 0.05);
+    const [gx, gy, gz] = poseAt(t, s.az);
+    camera.position.set(gx, gy, gz);
+    camera.lookAt(t);
     controls.update?.();
-    if (Math.hypot(at[0] - t.x, at[1] - t.z) < 0.05) goal.current = null;
   });
+
+  /* 사용자가 카메라를 만지면 자동 회전은 그 자리에서 그만둔다 */
+  useEffect(() => {
+    if (!controls?.addEventListener) return undefined;
+    const stop = () => { spin.current = null; goal.current = null; };
+    controls.addEventListener('start', stop);
+    return () => controls.removeEventListener('start', stop);
+  }, [controls]);
+
   return null;
 }
 
@@ -2299,6 +2372,26 @@ function SceneContent() {
 
       {/* 설비 안에 무엇이 몇 개 있는지 — **누르지 않고도** 보인다.
           자재가 어디서 막혔는지는 도면을 훑으면서 알아야 하는 정보다. */}
+      {/* 쌓이는 곳이 얼마나 찼는가 — **가득 찬 적치대가 라인을 세운다.**
+          눌러 보기 전에는 200/200 인 줄 알 수 없어서 멀쩡한 설비를 붙들고 찾게 된다. */}
+      {placed.map((p) => {
+        const it = itemOf(p.itemId);
+        const store = isStillage(it) ? stillageCapacity(p)
+          : isShelf(it) ? shelfCapacity(p, it?.modelKey ? getSpec(it.modelKey) : null)
+          : 0;
+        if (!store) return null;
+        const bb = boxFor(p);
+        return (
+          <StoreTag
+            key={`t${p.uid}`}
+            at={{ uid: p.uid, pos: p.pos }}
+            y={p.y ?? 0}
+            height={bb ? bb.max[1] : 2}
+            cap={store}
+          />
+        );
+      })}
+
       {machines.map((m) => {
         const p = m.at;
         const recipe = recipeOf(p);

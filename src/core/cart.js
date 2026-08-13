@@ -99,6 +99,73 @@ export function loadRoom(carried, capacity, topUp, want) {
   return carried === 0 ? Math.max(0, want ?? 0) : 0;
 }
 
+/** 이 차량이 한 번에 실을 수 있는 최대치 */
+export const cartCapacity = (cart, truck = false) =>
+  Math.max(0, cart?.loadCount ?? (truck ? 10 : 3));
+
+/**
+ * 이 역이 권하는 실을 양 — **차량 쪽 값이 역의 값을 이긴다.**
+ *  `CartView` 가 `cart.loadCount ?? a.dispatch` 로 부르는 그 규칙이다. 손으로
+ *  옮겨 적으면 반드시 어긋난다 — 실제로 어긋나서 수송 능력을 20배 낮게 봤다.
+ */
+export function stationWant(cart, st) {
+  if (!st) return 0;
+  /* 설비 유출부는 그 설비가 내보내는 덩어리 크기를 따른다 (차량 값이 아니다) */
+  if (st.kind === 'load') return Math.max(0, st.count ?? 0);
+  if (st.kind === 'shelf-out') return Math.max(0, cart?.loadCount ?? st.dispatch ?? 0);
+  return 0;
+}
+
+/**
+ * 이 차량이 나를 수 있는 양 (개/분).
+ * ---------------------------------------------------------------------------
+ *  **설비 능력과 나란히 놓고 보라고 있는 값**이다. 만드는 속도가 나르는 속도를
+ *  넘으면 쌓이는 곳이 차고, 그다음은 라인 전체가 선다. 그런데 그걸 알려면
+ *  대수 · 한 번에 싣는 양 · 경로 길이 · 속도 · 정차 시간을 전부 곱해야 해서,
+ *  놓고 나서 한참 돌려 보기 전에는 알 수가 없었다.
+ *
+ *  ── 한 바퀴에 한 번 싣고 한 번 내린다 ────────────────────────────────────
+ *  카트는 **비어 있을 때만** 싣고, 내려놓아야 다시 싣는다(`loadRoom`). 그래서
+ *  한 바퀴당 나르는 양이 곧 한 번에 싣는 양이다. 트럭은 자리가 찰 때까지 여러
+ *  역에서 나눠 담으므로 적재량 전부를 한 바퀴로 본다.
+ *
+ *  정차 시간은 **실제로 주고받은 역에서만** 든다(`acted` 일 때만 선다). 카트는
+ *  두 번, 트럭은 들르는 싣기 역 수만큼으로 본다.
+ *
+ *  @returns { perMinute, perLap, lapSec, fleet, loadStations } · 못 구하면 null
+ */
+export function haulPerMinute(cart, path, stations, { truck = false } = {}) {
+  if (!cart || !path || !(path.length > 0)) return null;
+  const list = stations ?? [];
+  const loads = list.filter((s) => s.kind === 'load' || s.kind === 'shelf-out');
+  const drops = list.filter((s) => s.kind === 'unload' || s.kind === 'shelf-in');
+  /* 실을 데가 없으면 나를 것이 없고, 트럭이 아닌데 내릴 데가 없으면 한 바퀴만
+     싣고 영영 못 내린다 — 둘 다 처리량 0 이다 */
+  if (!loads.length || (!truck && !drops.length)) {
+    return { perMinute: 0, perLap: 0, lapSec: 0, fleet: 0, loadStations: loads.length };
+  }
+
+  const cap = cartCapacity(cart, truck);
+  const wants = loads.map((s) => stationWant(cart, s));
+  /* 카트는 한 역에서 한 번만 싣는다. 역마다 값이 다르면 가장 많이 실을 수 있는
+     쪽을 쓴다 — 어느 역에 먼저 닿는지는 위치에 달렸으므로 좋은 쪽으로 잡는다. */
+  const perLap = truck ? cap : Math.min(cap, Math.max(0, ...wants));
+
+  const speed = Math.max(0.01, cart.speed ?? 1.4);
+  const dwell = Math.max(0, cart.dwell ?? 1.2);
+  const stops = truck ? loads.length : 2;
+  const lapSec = path.length / speed + stops * dwell;
+  const fleet = Math.max(1, Math.round(cart.count ?? 1));
+
+  return {
+    perMinute: lapSec > 0 ? (fleet * perLap) / lapSec * 60 : 0,
+    perLap,
+    lapSec,
+    fleet,
+    loadStations: loads.length,
+  };
+}
+
 /**
  * 방금 주고받은 역을 언제까지 건너뛸 것인가.
  * ---------------------------------------------------------------------------

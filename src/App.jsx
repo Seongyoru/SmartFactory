@@ -14,10 +14,12 @@
 import React, { useEffect } from 'react';
 import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2, Truck } from 'lucide-react';
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
-import { loadModel, modelOptions } from './core/modelStore.js';
+import { getSpec, loadModel, modelOptions } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
 import { shippedTotal, useAllStock, useShipped } from './core/simStore.js';
 import { bottleneck, getRan, throughput, useMetrics } from './core/metrics.js';
+import { blockChain, stepTarget } from './core/diagnose.js';
+import { focusOn } from './core/focusStore.js';
 import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
@@ -262,6 +264,50 @@ function ModeBanner() {
  *
  *  아무것도 안 나갔으면 띄우지 않는다 — 0 만 적힌 상자는 화면만 가린다.
  */
+/**
+ * 원인 사슬의 한 줄 — **누르면 데려간다.**
+ * ---------------------------------------------------------------------------
+ *  "저기가 문제다" 라고 말만 하고 끝나면, 도면이 크면 이름만 보고 그 설비를 찾는
+ *  데 또 한참이 걸린다. 짚어 줬으면 데려다도 줘야 한다.
+ *
+ *  누르면 그 대상을 고르고(인스펙터가 열린다) 카메라가 따라간다. 탑뷰는 당겨
+ *  보고, 3D 는 그 둘레를 한 바퀴 돈다 — 어느 것인지 눈에 확 들어오도록.
+ */
+function StepRow({ step, depth, culprit }) {
+  const { state, dispatch } = useEditor();
+  const target = stepTarget(step, state);
+
+  const body = (
+    <>
+      <span className="shrink-0 text-ink4">←</span>
+      <span className={culprit ? 'text-rose-500' : 'text-ink4'}>
+        <b className={culprit ? 'font-semibold' : 'font-normal'}>{step.name}</b>
+        {step.note ? ` ${step.note}` : ''}
+      </span>
+    </>
+  );
+  const cls = 'mt-0.5 flex w-full items-start gap-1 text-left text-[10.5px] leading-snug';
+  const pad = { paddingLeft: `${depth * 6}px` };
+
+  /* 「빼가는 것이 없습니다」 처럼 가리킬 대상이 없는 칸도 있다 — 그건 글자로 둔다 */
+  if (!target) return <div className={cls} style={pad}>{body}</div>;
+
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        dispatch({ type: 'SELECT', selected: { kind: target.kind, uid: target.uid } });
+        focusOn(target.at, { look: true });
+      }}
+      style={pad}
+      title={`${step.name} 로 이동`}
+      className={`${cls} pointer-events-auto cursor-pointer rounded px-0.5 hover:bg-raiseh`}
+    >
+      {body}
+    </button>
+  );
+}
+
 function ShippedHUD() {
   const { state, itemOf } = useEditor();
   const shipped = useShipped();
@@ -280,6 +326,14 @@ function ShippedHUD() {
   const neckOwner = neckRaw ? state.placed.find((p) => p.uid === neckRaw.uid) : null;
   const neck = neckOwner ? neckRaw : null;
   const neckName = neckOwner?.name ?? null;
+  /* 왜 막혔는지 — 사슬 끝이 손볼 곳이다 (core/diagnose.js) */
+  const chain = neckOwner
+    ? blockChain(neckOwner.uid, {
+      placed: state.placed, links: state.links, carts: state.carts, itemOf,
+      specOf: (it) => (it?.modelKey ? getSpec(it.modelKey) : null),
+      getStock: (uid) => stock[uid] ?? 0,
+    })
+    : null;
 
   if (!kinds.length && !wip && !neck) return null;
 
@@ -325,12 +379,41 @@ function ShippedHUD() {
             <span className="text-ink4">재공</span>
             <b className="tabular-nums text-ink">{wip.toLocaleString()} 개</b>
           </div>
+          {/**
+            * 막힌 설비와 **그 원인**.
+            * -----------------------------------------------------------------
+            *  예전에는 「병목: 제작기 #1 82%」 한 줄이었다. 그런데 막힌 설비는
+            *  피해자다 — 보낼 곳이 없어서 서 있을 뿐이다. 그 한 줄 때문에 멀쩡한
+            *  제작기를 붙들고 한참을 헤맸다.
+            *
+            *  이제 사슬을 편다. **마지막 줄이 손볼 곳**이고, 앞의 것들은 결과다.
+            */}
           {neck && (
-            <div className="mt-0.5 flex items-center justify-between gap-2 border-t border-line pt-0.5">
-              <span className="shrink-0 text-rose-500">병목</span>
-              <span className="truncate text-right text-ink2" title={`${neckName} — 전체 시간의 ${(neck.ratio * 100).toFixed(0)}% 를 막혀서 서 있었다`}>
-                {neckName} <b className="tabular-nums text-rose-500">{(neck.ratio * 100).toFixed(0)}%</b>
-              </span>
+            <div className="mt-0.5 border-t border-line pt-0.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="shrink-0 text-rose-500">
+                  {chain?.culprit ? '막힘' : '병목'}
+                </span>
+                <span
+                  className="truncate text-right text-ink2"
+                  title={`${neckName} — 전체 시간의 ${(neck.ratio * 100).toFixed(0)}% 를 막혀서 서 있었다`}
+                >
+                  {neckName} <b className="tabular-nums text-rose-500">{(neck.ratio * 100).toFixed(0)}%</b>
+                </span>
+              </div>
+              {chain?.steps?.slice(1).map((s, i) => (
+                <StepRow
+                  key={`${s.uid ?? s.name}${i}`}
+                  step={s}
+                  depth={i}
+                  culprit={s === chain.culprit}
+                />
+              ))}
+              {chain?.culprit && (
+                <div className="mt-1 rounded bg-rose-500/10 px-1.5 py-1 text-[10.5px] leading-snug text-rose-600 ring-1 ring-rose-500/25">
+                  손볼 곳은 <b>{chain.culprit.name}</b> 입니다 — 앞의 것들은 그 결과입니다.
+                </div>
+              )}
             </div>
           )}
         </div>

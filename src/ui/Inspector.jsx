@@ -8,7 +8,7 @@ import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
-  CART_MARGIN, cartPath, cartStations, fleetFits, nextRole, pickSet, stationStyle,
+  CART_MARGIN, cartPath, cartStations, fleetFits, haulPerMinute, nextRole, pickSet, stationStyle,
 } from '../core/cart.js';
 import { clearStock, dropKind, setStock, shippedTotal, useLots, useShipped, useStock } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
@@ -1113,6 +1113,11 @@ function CartPanel({ cart }) {
   /* 앞차와 지키는 간격 — 씬과 같은 규칙으로 잰다(차체 길이 + 여유) */
   const spec = item?.modelKey ? getSpec(item.modelKey) : null;
   const gap = (spec?.bbox?.size?.[(spec?.connector?.axis ?? 'z') === 'z' ? 2 : 0] ?? 2.2) + CART_MARGIN;
+  /* 나르는 능력 — 규칙은 core/cart.js 한 곳에만 둔다 (CartView 와 어긋나면 검사가 잡는다) */
+  const haul = useMemo(
+    () => haulPerMinute(cart, path, stations, { truck: isTruck(item) }),
+    [cart, path, stations, item],
+  );
 
   /** 역 하나의 역할을 자동 → 싣기 → 내리기 → 자동 으로 돌린다 */
   const cycleRole = (key) => {
@@ -1176,6 +1181,45 @@ function CartPanel({ cart }) {
           수 있고, 한 번에 실어 낼 양은 차의 성질이기 때문이다.
           트럭은 한 번에 많이 싣고 나가는 물건이라 단위와 폭을 다르게 잡는다. */}
       <Section title={truck ? '출하' : '적재'}>
+        {/**
+          * 수송 능력 — **설비 능력과 나란히 놓고 보라고 있는 값.**
+          * -------------------------------------------------------------------
+          *  만드는 속도가 나르는 속도를 넘으면 쌓이는 곳이 차고, 그다음은 라인
+          *  전체가 선다. 그런데 그걸 알려면 대수 · 한 번에 싣는 양 · 경로 길이 ·
+          *  속도 · 정차 시간을 전부 곱해야 했다. **손으로 재다 20배를 틀린 적이
+          *  있다** — 적치대의 값을 썼는데 실제로는 차량 값이 이기고, 대수도
+          *  안 봤다. 사람이 암산할 값이 아니다.
+          */}
+        <div className="mb-2 rounded-md border border-edge bg-field px-2.5 py-2">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[11px] text-ink4">이 {truck ? '트럭' : '카트'}의 수송 능력</span>
+            <b className="text-[15px] tabular-nums text-ink">
+              {haul ? haul.perMinute.toFixed(1) : '—'} 개/분
+            </b>
+          </div>
+          {haul && haul.perMinute > 0 && (
+            <div className="mt-0.5 text-right text-[10px] tabular-nums text-ink4">
+              시간당 {Math.round(haul.perMinute * 60).toLocaleString()} 개
+            </div>
+          )}
+          <p className="mt-1.5 border-t border-line pt-1.5 text-[10.5px] leading-relaxed text-ink4">
+            {!haul ? (
+              <>경로를 먼저 그려 주세요.</>
+            ) : haul.loadStations === 0 ? (
+              <><b className="text-amber-400">실을 곳이 없습니다</b> — 경로가 설비 유출부나
+                선반·적치대 앞을 지나가야 짐을 싣습니다.</>
+            ) : haul.perMinute === 0 ? (
+              <><b className="text-amber-400">내릴 곳이 없습니다</b> — 한 번 싣고 나면 비울
+                데가 없어 그대로 돕니다. 경로가 선반이나 설비 유입부를 지나가야 합니다.</>
+            ) : (
+              <>
+                {haul.fleet}대 × {haul.perLap}개 ÷ {haul.lapSec.toFixed(1)}초(한 바퀴).
+                {' '}이 값이 **앞 설비가 만드는 속도**보다 작으면 쌓이는 곳이 차고 라인이 섭니다.
+              </>
+            )}
+          </p>
+        </div>
+
         <Slider
           label="한 번에 싣는 양"
           min={truck ? 10 : 1}

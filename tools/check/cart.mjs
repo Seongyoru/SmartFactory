@@ -1,11 +1,12 @@
 /* cart.js — 차간 간격(followDistance) · 수용 판정(fleetFits) · stepCart 와의 합 */
 import assert from 'node:assert/strict';
-import { SRC, group, t } from './_harness.mjs';
+import { SRC, group, readSrc, t } from './_harness.mjs';
 
 group('카트 간격 · 수용');
 
 const cart = await import(SRC + 'core/cart.js');
 const { followDistance, fleetFits, stepCart, CART_MARGIN } = cart;
+const C = cart;
 
 const L = 100;
 const GAP = 3;
@@ -135,3 +136,83 @@ t('고리 세 대 — 오래 돌려도 서로 통과하지 않는다', () => {
   assert.equal(order0.length, 3);
 });
 
+
+/* ---------- 수송 능력 -------------------------------------------------------
+     설비 능력과 나란히 놓고 보는 값. **손으로 계산하다 20배를 틀렸다** —
+     적치대의 dispatch(3) 를 썼는데 실제로는 카트의 loadCount(20) 가 이기고,
+     배치 대수(3대)도 안 봤다. 그래서 규칙을 한 곳에 두고 소스와 대조한다.
+--------------------------------------------------------------------------- */
+const cartView = await readSrc('scene/CartView.jsx');
+
+t('실을 양의 규칙이 CartView 와 같다 — 차량 값이 역의 값을 이긴다', () => {
+  /* CartView 가 실제로 부르는 식. 이게 바뀌면 stationWant 도 같이 바뀌어야 한다 */
+  assert.ok(
+    cartView.includes('loadRoom(carried, capacity, topUp, cart.loadCount ?? a.dispatch ?? 0)'),
+    'CartView 의 싣기 규칙이 바뀌었다 — stationWant 를 맞춰야 한다',
+  );
+  const st = { kind: 'shelf-out', dispatch: 3 };
+  assert.equal(C.stationWant({ loadCount: 20 }, st), 20, '차량 값이 안 이긴다');
+  assert.equal(C.stationWant({}, st), 3, '차량 값이 없으면 역의 값');
+});
+t('설비 유출부는 그 설비의 덩어리 크기를 따른다', () => {
+  /* 설비에서 싣는 쪽은 a.count 를 쓴다 — 차량 값이 아니다 */
+  assert.ok(cartView.includes('Math.min(a.count, loadRoom(carried, capacity, topUp, a.count))'));
+  assert.equal(C.stationWant({ loadCount: 20 }, { kind: 'load', count: 4 }), 4);
+});
+t('적재량 기본값도 CartView 와 같다', () => {
+  assert.ok(cartView.includes('cart.loadCount ?? (shipOutside ? 10 : 3)'));
+  assert.equal(C.cartCapacity({}, false), 3);
+  assert.equal(C.cartCapacity({}, true), 10);
+  assert.equal(C.cartCapacity({ loadCount: 20 }, false), 20);
+});
+
+const LOOP = { uid: 'K', points: [[0, 0], [10, 0], [10, 5], [0, 5]], closed: true, speed: 1.4, dwell: 1.2 };
+const pathOf = (c) => C.cartPath(c);
+const ST = [
+  { kind: 'shelf-out', uid: 'S1', dispatch: 3 },
+  { kind: 'shelf-in', uid: 'S2' },
+];
+
+t('대수 × 한 번에 싣는 양 ÷ 한 바퀴', () => {
+  const c = { ...LOOP, count: 3, loadCount: 20 };
+  const p = pathOf(c);
+  const h = C.haulPerMinute(c, p, ST);
+  assert.equal(h.fleet, 3);
+  assert.equal(h.perLap, 20);
+  const lap = p.length / 1.4 + 2 * 1.2;          // 카트는 한 바퀴에 두 번 선다
+  assert.ok(Math.abs(h.lapSec - lap) < 1e-9);
+  assert.ok(Math.abs(h.perMinute - (3 * 20) / lap * 60) < 1e-9);
+});
+t('대수를 늘리면 그만큼 는다', () => {
+  const p = pathOf(LOOP);
+  const one = C.haulPerMinute({ ...LOOP, count: 1, loadCount: 10 }, p, ST).perMinute;
+  const four = C.haulPerMinute({ ...LOOP, count: 4, loadCount: 10 }, p, ST).perMinute;
+  assert.ok(Math.abs(four - one * 4) < 1e-9);
+});
+t('적재량보다 많이 실으라고 해도 적재량까지만', () => {
+  const c = { ...LOOP, count: 1, loadCount: 5 };
+  assert.equal(C.haulPerMinute(c, pathOf(c), [{ kind: 'load', uid: 'M', count: 99 }, ST[1]]).perLap, 5);
+});
+t('실을 데나 내릴 데가 없으면 0 — 나르는 게 없다', () => {
+  const p = pathOf(LOOP);
+  assert.equal(C.haulPerMinute(LOOP, p, [ST[1]]).perMinute, 0, '실을 데가 없는데 0 이 아니다');
+  assert.equal(C.haulPerMinute(LOOP, p, [ST[0]]).perMinute, 0, '내릴 데가 없는데 0 이 아니다');
+});
+t('트럭은 내릴 데가 없어도 나른다 — 밖으로 싣고 나간다', () => {
+  const p = pathOf(LOOP);
+  const h = C.haulPerMinute({ ...LOOP, count: 1, loadCount: 12 }, p, [ST[0]], { truck: true });
+  assert.equal(h.perLap, 12, '트럭은 적재량 전부를 채운다');
+  assert.ok(h.perMinute > 0);
+});
+t('경로가 길수록·느릴수록 적게 나른다', () => {
+  const slow = { ...LOOP, count: 1, loadCount: 10, speed: 0.7 };
+  const fast = { ...LOOP, count: 1, loadCount: 10, speed: 1.4 };
+  assert.ok(C.haulPerMinute(slow, pathOf(slow), ST).perMinute
+          < C.haulPerMinute(fast, pathOf(fast), ST).perMinute);
+});
+t('정차 시간이 길수록 적게 나른다', () => {
+  const a = { ...LOOP, count: 1, loadCount: 10, dwell: 0 };
+  const b = { ...LOOP, count: 1, loadCount: 10, dwell: 5 };
+  assert.ok(C.haulPerMinute(b, pathOf(b), ST).perMinute
+          < C.haulPerMinute(a, pathOf(a), ST).perMinute);
+});
