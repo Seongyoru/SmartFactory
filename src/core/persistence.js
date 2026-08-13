@@ -235,6 +235,17 @@ export function downloadCSV(rows, filename) {
   saveBlob(new Blob([`﻿${text}`], { type: 'text/csv;charset=utf-8' }), filename);
 }
 
+/**
+ * 읽는 보고서 한 장을 HTML 로.
+ * ---------------------------------------------------------------------------
+ *  CSV 는 **엑셀에서 다시 계산하려고** 만드는 것이라 꾸밀 수가 없다 — 표가
+ *  여럿 붙어 있고 셀에 색도 못 넣는다. 회의에 들고 갈 것은 성질이 다르므로
+ *  따로 만든다. 브라우저로 열면 그대로 읽히고 Ctrl+P 로 PDF 가 된다.
+ */
+export function downloadHTML(html, filename) {
+  saveBlob(new Blob([html], { type: 'text/html;charset=utf-8' }), filename);
+}
+
 /** 파일 이름에 붙일 시각 — `2026-08-12_1430` */
 export function stamp(d = new Date()) {
   const p = (n) => String(n).padStart(2, '0');

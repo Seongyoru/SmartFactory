@@ -146,7 +146,9 @@ t('쉼표·따옴표가 든 이름도 한 칸으로 남는다', () => {
      누르는 순간에야 터지는데, 그 버튼은 시뮬을 한참 돌린 뒤에만 보인다.
 --------------------------------------------------------------------------- */
 const src = await readSrc('ui/Inspector.jsx');
-const body = `${cut(src, 'const buildReport = () => {', '      series,')}\n    });\n  };\n  return buildReport();`;
+/* buildReport 는 **값만** 모은다(CSV 판·HTML 판이 그 하나를 나눠 쓴다).
+   그래서 여기서도 값을 받아 두 판에 각각 태운다 — 한 번의 추출로 셋을 본다. */
+const body = `${cut(src, 'const buildReport = () => {', '      series,')}\n    };\n  };\n  return buildReport();`;
 
 const ARGS = [
   'state', 'itemOf', 'elapsed', 'ran', 'overall', 'series',
@@ -169,7 +171,7 @@ const STATE = {
 };
 const ITEMS = { MACHINE_1: { id: 'MACHINE_1' }, STILLAGE: { id: 'STILLAGE', kind: 'stillage' }, CART: { id: 'CART' } };
 
-const run = () => build(
+const payload = () => build(
   STATE, (id) => ITEMS[id] ?? null, 600, 600,
   { availability: 0.9, performance: 0.8, quality: 1, oee: 0.72 },
   [{ t: 0, shipped: 0 }],
@@ -188,6 +190,7 @@ const run = () => build(
   (steps) => steps.map((s) => s.name).join(' → '),
   O.statusOf, O.DONE_AT, R.runReportCSV,
 );
+const run = () => R.runReportCSV(payload());
 
 t('화면의 조립 함수가 실제로 돈다 — 빠진 이름이 없다', () => {
   const rows = run();
@@ -207,4 +210,91 @@ t('화면 값을 그대로 옮긴다 — 다시 계산하지 않는다', () => {
 t('오더도 실린다 — 완료 지점 이름까지', () => {
   const f = run().map((r) => r.join('|'));
   assert.ok(f.some((l) => l.startsWith('제작품 1|100|40|40.0|출하|10|')), '오더 줄이 이상하다');
+});
+
+/* ---------- 읽는 판(HTML) — CSV 와 **같은 값**에서 나온다 ------------------ */
+
+const H = await import(SRC + 'core/reportHtml.js');
+
+const SAMPLE = {
+  at: '2026-08-13 17:00',
+  elapsedSec: 3600, ranSec: 3600, throughput: 120.5, wip: 42,
+  oee: { oee: 0.78, availability: 0.98, performance: 0.81, quality: 0.985 },
+  diagnosis: '조립기1 막힘 ← 적치대1 가득(200/200)',
+  culprit: '적치대1',
+  orders: [{ kind: 'A', kindName: '조립품 1', qty: 100, done: 40, ratio: 0.4, atLabel: '출하', dueMin: 30, eta: 900, slackSec: -60, state: 'late' }],
+  shipped: [['조립품 1', 40]],
+  machines: [{ name: '제작기1', cycleSec: 3, rate: 20, uptime: 0.83, blockSec: 600, starveSec: 0, crewSec: 0, downSec: 0, oee: 0.79 }],
+  carts: [{ name: '경로1', kindName: '카트', count: 3, perMinute: 415, blockRatio: 0.06 }],
+  stores: [{ name: '적치대1', have: 200, cap: 200, arrivedTotal: 900, arrived: { A: 900 } }],
+  series: [{ t: 0, shipped: 0 }, { t: 10, shipped: 5 }, { t: 20, shipped: 14 }],
+};
+
+t('한 파일로 닫힌다 — 바깥 것을 하나도 안 부른다', () => {
+  /* 메일에 붙이든 USB 에 담든 그 파일만 있으면 열려야 한다. 바깥 것을 하나라도
+     불러오면 받은 사람 화면에서 깨지고, 깨진 보고서는 안 만든 것만 못하다. */
+  const html = H.runReportHTML(SAMPLE);
+  assert.equal(/(?:src|href)\s*=\s*["']https?:/.test(html), false, '바깥 자원을 부른다');
+  assert.equal(/<script/i.test(html), false, '스크립트가 들어 있다 — 열리지 않는 곳이 생긴다');
+  assert.ok(html.includes('<style>'), 'CSS 를 안에 안 넣었다');
+  assert.ok(html.startsWith('<!doctype html>'), '문서 선언이 없다');
+});
+t('설비 이름에 태그를 적어도 문서가 안 무너진다', () => {
+  /* 이름은 사용자가 적는다. 막지 않으면 보고서 구조가 통째로 깨진다. */
+  const html = H.runReportHTML({
+    ...SAMPLE,
+    machines: [{ ...SAMPLE.machines[0], name: '<img src=x onerror=alert(1)>제작기' }],
+  });
+  assert.equal(html.includes('<img'), false, '태그가 그대로 들어갔다');
+  assert.ok(html.includes('&lt;img'), '막고 나서 글자로는 보여야 한다');
+});
+t('빈 구획은 **없다고 말한다** — 빈 표는 고장처럼 보인다', () => {
+  const html = H.runReportHTML({ at: '지금' });
+  assert.ok(html.includes('걸어 둔 오더가 없습니다'), '오더가 없을 때 말이 없다');
+  assert.ok(html.includes('설비가 없습니다'), '설비가 없을 때 말이 없다');
+});
+t('CSV 와 **같은 값**을 받는다 — 두 파일이 다른 숫자를 말하면 안 된다', () => {
+  /* 같은 d 를 넣고 둘 다 만들어, 사람이 확인할 만한 값이 양쪽에 다 있는지 본다 */
+  const html = H.runReportHTML(SAMPLE);
+  const csv = R.runReportCSV(SAMPLE).map((r) => r.join(',')).join('\n');
+  for (const [what, inHtml, inCsv] of [
+    ['진단', SAMPLE.diagnosis, SAMPLE.diagnosis],
+    ['설비 이름', '제작기1', '제작기1'],
+    ['저장소 이름', '적치대1', '적치대1'],
+  ]) {
+    assert.ok(html.includes(inHtml), `HTML 에 ${what} 가 없다`);
+    assert.ok(csv.includes(inCsv), `CSV 에 ${what} 가 없다`);
+  }
+});
+t('원가를 넣으면 원가 구획이 붙고, 없으면 통째로 빠진다', () => {
+  const bare = H.runReportHTML(SAMPLE);
+  assert.equal(bare.includes('<h2>원가</h2>'), false, '원가 없이도 빈 구획이 생긴다');
+  const withCost = H.runReportHTML({
+    ...SAMPLE,
+    cost: { per: 12, total: 1000, perHour: 1000, idleBurn: 100, stopShare: 0.2, scrapWon: 0, kwh: 7, manHours: 1, parts: [{ key: 'power', label: '설비 전력', won: 1000 }], rates: { power: 130, wage: 12000, cartKw: 0.4, material: 0 } },
+  });
+  assert.ok(withCost.includes('<h2>원가</h2>'), '원가 구획이 없다');
+  assert.ok(withCost.includes('설비 전력'), '항목이 없다');
+});
+t('인쇄 규칙이 들어 있다 — Ctrl+P 가 곧 PDF 다', () => {
+  const html = H.runReportHTML(SAMPLE);
+  assert.ok(html.includes('@media print'), '인쇄 규칙이 없다');
+  assert.ok(html.includes('@page'), '여백 규칙이 없다');
+  assert.ok(/break-inside\s*:\s*avoid/.test(html), '표가 장 사이에서 잘린다');
+});
+
+/* ---------- 배선 — 버튼 둘이 **한 값**에서 나온다 -------------------------- */
+
+const inspectorSrc = await readSrc('ui/Inspector.jsx');
+
+t('보고서와 CSV 가 `buildReport()` 하나를 나눠 쓴다', () => {
+  assert.ok(/const d = buildReport\(\)/.test(inspectorSrc), '값을 한 번만 모으지 않는다');
+  assert.ok(inspectorSrc.includes('runReportHTML(d)'), 'HTML 판이 그 값을 안 쓴다');
+  assert.ok(inspectorSrc.includes('runReportCSV(d)'), 'CSV 판이 그 값을 안 쓴다');
+  /* buildReport 가 CSV 를 직접 만들어 버리면 HTML 이 값을 못 받는다 */
+  assert.equal(/return runReportCSV\(\{/.test(inspectorSrc), false, 'buildReport 가 CSV 로 굳어 있다');
+});
+t('내려받는 길이 둘 다 있다', () => {
+  assert.ok(/downloadHTML\(runReportHTML\(d\), `실행보고서-\$\{stamp\(\)\}\.html`\)/.test(inspectorSrc), 'HTML 을 못 받는다');
+  assert.ok(/downloadCSV\(runReportCSV\(d\), `실행보고서-\$\{stamp\(\)\}\.csv`\)/.test(inspectorSrc), 'CSV 를 못 받는다');
 });

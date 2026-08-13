@@ -17,6 +17,7 @@ import {
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
 import { runReportCSV } from '../core/report.js';
+import { runReportHTML } from '../core/reportHtml.js';
 import {
   DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
 } from '../core/orders.js';
@@ -95,7 +96,7 @@ import {
   wallLines,
 } from '../core/area.js';
 import { focusOn } from '../core/focusStore.js';
-import { downloadCSV, stamp } from '../core/persistence.js';
+import { downloadCSV, downloadHTML, stamp } from '../core/persistence.js';
 import { useCostInput } from './useCost.js';
 import { seriesCSV } from '../core/scenarios.js';
 import { sliceCountFor, tileCount } from '../scene/connectorGeometry.js';
@@ -2552,6 +2553,9 @@ export function ReportButtons() {
 
   /**
    * 보고서에 넣을 값을 모은다 — **여기서 새로 계산하는 것은 없다.**
+   *
+   *  CSV 판과 HTML 판이 **이 하나를 나눠 쓴다.** 각자 모으면 두 파일이 다른
+   *  숫자를 말하게 되고, 그러면 어느 쪽을 믿을지 알 수 없어진다.
    * -------------------------------------------------------------------------
    *  보고서가 화면과 다른 숫자를 말하면 둘 다 못 믿게 된다. 그래서 화면이 이미
    *  쓰는 함수(process · cart · orders · metrics)를 그대로 불러 담기만 한다.
@@ -2615,7 +2619,7 @@ export function ReportButtons() {
       })
       : null;
 
-    return runReportCSV({
+    return {
       at: new Date().toLocaleString('ko-KR'),
       elapsedSec: elapsed,
       ranSec: ran,
@@ -2642,7 +2646,21 @@ export function ReportButtons() {
       series,
       /* 원가는 cost.js 가 이미 낸 값 그대로 — 화면 패널과 같은 훅을 쓴다 */
       cost,
-    });
+    };
+  };
+
+  /* 눌렀는데 아무 일도 안 일어나면 사용자는 버튼이 고장 났는지 파일이 어디
+     갔는지조차 알 수 없다. 실패하면 **말은 하게** 해 둔다. */
+  const save = (kind) => {
+    try {
+      const d = buildReport();
+      if (kind === 'html') downloadHTML(runReportHTML(d), `실행보고서-${stamp()}.html`);
+      else downloadCSV(runReportCSV(d), `실행보고서-${stamp()}.csv`);
+      dispatch({ type: 'SET', patch: { hint: '실행 보고서를 내려받았습니다' } });
+    } catch (e) {
+      console.error('[보고서] 만들다 실패', e);
+      dispatch({ type: 'SET', patch: { hint: `보고서를 못 만들었습니다 — ${e.message}` } });
+    }
   };
 
   return (
@@ -2657,21 +2675,32 @@ export function ReportButtons() {
         *  눌렀는데 아무 일도 안 일어나면 사용자는 버튼이 고장 났는지 파일이
         *  어디 갔는지조차 알 수 없다. 실패하면 **말은 하게** 해 둔다.
         */}
+      {/**
+        * 같은 값을 **두 가지 판**으로 내보낸다.
+        * ---------------------------------------------------------------------
+        *  CSV 는 엑셀에서 다시 계산하려고 만드는 것이라 반올림도 단위도 없다 —
+        *  사람이 읽으라고 만든 것이 아니다. 회의에 들고 가는 것은 성질이 정반대라
+        *  한눈에 결론이 보이고 나쁜 숫자가 붉어야 한다. 하나로 만들려 들면
+        *  **양쪽 다 어중간해지므로** 갈랐다.
+        *
+        *  둘 다 `buildReport()` 하나에서 나온다 — 두 파일이 다른 숫자를 말할
+        *  자리가 없다.
+        */}
       <button
         type="button"
-        onClick={() => {
-          try {
-            downloadCSV(buildReport(), `실행보고서-${stamp()}.csv`);
-            dispatch({ type: 'SET', patch: { hint: '실행 보고서를 내려받았습니다' } });
-          } catch (e) {
-            console.error('[보고서] 만들다 실패', e);
-            dispatch({ type: 'SET', patch: { hint: `보고서를 못 만들었습니다 — ${e.message}` } });
-          }
-        }}
+        onClick={() => save('html')}
         className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
-        title="이번 실행을 CSV 한 장으로 — 오더 · 설비 · 차량 · 진단 · 원가 · 추이"
+        title="읽는 보고서 — 브라우저로 열어 보고 Ctrl+P 로 PDF 로 만듭니다"
       >
         보고서
+      </button>
+      <button
+        type="button"
+        onClick={() => save('csv')}
+        className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+        title="엑셀에서 다시 따지려면 이쪽 — 반올림하지 않은 원래 값이 들어갑니다"
+      >
+        CSV
       </button>
       {/* 아이콘 하나로 줄였다 — 띠의 머리줄은 탭에 자리를 내줘야 한다.
           누르면 기록이 통째로 날아가므로 **말은 툴팁으로 온전히** 남긴다. */}
