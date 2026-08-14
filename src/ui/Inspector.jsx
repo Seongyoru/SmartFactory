@@ -16,6 +16,7 @@ import {
 } from '../core/simStore.js';
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
+import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
 import { runReportCSV } from '../core/report.js';
 import { runReportHTML } from '../core/reportHtml.js';
 import {
@@ -2994,6 +2995,82 @@ function CrewPanel() {
   );
 }
 
+/**
+ * 라인 능력 — **돌리기 전에** 계산으로 나오는 천장.
+ * ---------------------------------------------------------------------------
+ *  「이번 실행」은 돌린 뒤의 성적이고, 이건 배치를 그리는 동안 보는 값이다.
+ *  설비를 하나 옮기거나 공정 시간을 바꾸면 **즉시** 달라지므로, 돌려 보지 않고도
+ *  「이 배치의 천장은 얼마인가」 를 알 수 있다.
+ *
+ *  묶어서 보여 주는 것이 요점이다 — 같은 능력의 고리가 둘이면 **하나만 고쳐
+ *  봐야 하나도 안 오른다.** 그것이 이 화면이 말해야 하는 가장 중요한 것이다.
+ */
+function LineCapacity() {
+  const { state, itemOf } = useEditor();
+  const version = useModelsVersion();
+  const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
+
+  const bal = useMemo(
+    () => lineBalance({
+      placed: state.placed, links: state.links, carts: state.carts,
+      itemOf, specOf, beltSpeed: state.beltSpeed,
+    }),
+    [state.placed, state.links, state.carts, state.beltSpeed, itemOf, version],
+  );
+  const chain = useMemo(() => bottleneckChain(bal.rows), [bal.rows]);
+
+  if (!bal.rows.length) {
+    return (
+      <Section title="라인 능력">
+        <p className="text-[11px] leading-relaxed text-ink4">
+          설비를 놓고 벨트로 이으면 <b className="text-ink3">돌리기 전에</b> 이 배치의 천장이 계산됩니다.
+        </p>
+      </Section>
+    );
+  }
+
+  const TONE = { equip: 'text-ink2', belt: 'text-sky-600', cart: 'text-violet-600', truck: 'text-emerald-600' };
+  return (
+    <Section title="라인 능력">
+      <Row label="이 배치의 천장">
+        <b className="text-[13px] text-ink">{rateText(bal.capacity)}</b>
+      </Row>
+      <p className="mb-1.5 text-[10px] leading-snug text-ink4">
+        레시피 비율을 반영한 <b className="text-ink3">최종 산출물</b> 기준입니다.
+        쌓는 곳(적치대·선반)은 완충이라 능력에 안 들어갑니다.
+      </p>
+
+      {chain.map((g, i) => (
+        <div key={i} className="mt-1.5 first:mt-0">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="truncate text-[10.5px] text-ink3">
+              {g.items.map((x) => (
+                <span key={x.uid} className={TONE[x.kind] ?? ''}>{x.name}{' '}</span>
+              ))}
+            </span>
+            <b className="shrink-0 text-[10.5px] tabular-nums text-ink2">{rateText(g.capacity)}</b>
+          </div>
+          <div className="text-[9.5px] leading-snug text-ink4">
+            {g.last
+              ? '여기가 천장 — 이 위로는 다른 고리가 없습니다'
+              : <>
+                {g.items.length > 1 && <b className="text-ink3">함께 </b>}
+                고치면 {rateText(g.then)} <span className="text-emerald-600">(+{rateText(g.gain)})</span>
+              </>}
+          </div>
+        </div>
+      ))}
+
+      {/* 같은 능력이 둘 이상이면 하나만 손대는 것이 헛일임을 못 박는다 */}
+      {chain[0]?.items.length > 1 && (
+        <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
+          가장 약한 고리가 <b>{chain[0].items.length}개</b>입니다 — 하나만 고치면 하나도 안 오릅니다.
+        </p>
+      )}
+    </Section>
+  );
+}
+
 function Summary() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -3026,6 +3103,9 @@ function Summary() {
         ))}
       </Section>
 
+
+      {/* 돌리기 전에 계산으로 나오는 천장 — 배치를 그리는 동안 본다 */}
+      <LineCapacity />
 
       <CrewPanel />
 
