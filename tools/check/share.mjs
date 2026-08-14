@@ -348,3 +348,14 @@ t('**켜져 있는 버튼도 손이 닿으면 반응한다**', () => {
   for (const a of active) assert.ok(/hover:bg-sky-600/.test(a), `켠 채로는 반응이 없다 — ${a}`);
   assert.ok(/hover:bg-raiseh/.test(toolbar), '스냅 고르개가 반응하지 않는다');
 });
+
+t('설명은 **두 줄까지** 보인다 — 한 줄로 자르면 요점이 잘려 나간다', () => {
+  /* 「테스트 도면입니다. 안녕하세요 이 텍스트는…」 에서 끊기면 정작 무엇을
+     시험한 배치인지가 안 보인다. 그렇다고 다 펴면 카드 높이가 제각각이 되어
+     목록이 훑어지지 않는다 — 두 줄이 그 사이다. */
+  const card = toolbar.slice(toolbar.indexOf('function LayoutCard'), toolbar.indexOf('function GalleryButton'));
+  assert.ok(/line-clamp-2/.test(card), '설명이 한 줄에서 잘린다');
+  assert.equal(/truncate text-\[10\.5px\] text-ink3/.test(card), false, '옛 한 줄 자르기가 남아 있다');
+  /* 이름은 한 줄로 남는다 — 이름까지 두 줄이 되면 카드가 흔들린다 */
+  assert.ok(/truncate text-\[12\.5px\] font-medium/.test(card), '이름이 한 줄이 아니다');
+});

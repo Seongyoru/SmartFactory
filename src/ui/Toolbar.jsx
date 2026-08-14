@@ -71,8 +71,11 @@ function LayoutCard({ row, selected, disabled, onPick }) {
       </div>
       <div className="flex min-w-0 flex-col justify-center gap-0.5">
         <div className="truncate text-[12.5px] font-medium text-ink">{row.name}</div>
+        {/* 설명은 **두 줄까지** 보인다 — 한 줄로 자르면 「테스트 도면입니다. 안녕
+            하세요 이 텍스트는…」 처럼 정작 무엇을 시험한 배치인지가 잘려 나간다.
+            그렇다고 다 펴면 카드 높이가 제각각이 되어 목록이 훑어지지 않는다. */}
         {(row.note || row.summary) && (
-          <div className="truncate text-[10.5px] text-ink3">{row.note || row.summary}</div>
+          <div className="line-clamp-2 text-[10.5px] leading-snug text-ink3">{row.note || row.summary}</div>
         )}
         <div className="text-[10px] tabular-nums text-ink4">
           {[
