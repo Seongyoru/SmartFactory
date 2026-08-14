@@ -137,8 +137,8 @@ export function stationWant(cart, st) {
 export function haulPerMinute(cart, path, stations, { truck = false } = {}) {
   if (!cart || !path || !(path.length > 0)) return null;
   const list = stations ?? [];
-  const loads = list.filter((s) => s.kind === 'load' || s.kind === 'shelf-out');
-  const drops = list.filter((s) => s.kind === 'unload' || s.kind === 'shelf-in');
+  const loads = list.filter((s) => isLoadStation(s.kind));
+  const drops = list.filter((s) => !isLoadStation(s.kind));
   /* 실을 데가 없으면 나를 것이 없고, 트럭이 아닌데 내릴 데가 없으면 한 바퀴만
      싣고 영영 못 내린다 — 둘 다 처리량 0 이다 */
   if (!loads.length || (!truck && !drops.length)) {
@@ -340,6 +340,17 @@ function closestOnPath(path, [x, z], step = 0.25, accept = null) {
  *  갑자기 다르게 움직이면 안 된다.
  */
 export const STATION_ROLE = { LOAD: 'load', UNLOAD: 'unload' };
+
+/**
+ * 이 역은 결국 **싣는 곳인가 내리는 곳인가**.
+ * ---------------------------------------------------------------------------
+ *  종류가 넷(load · unload · shelf-out · shelf-in)이지만 하는 일은 둘뿐이다.
+ *  화면도 수송 능력도 결국 이 둘로 가르므로, 가르는 규칙을 여기 한 곳에 둔다 —
+ *  `haulPerMinute` 와 화면이 각자 갈랐다가 어긋나면 「능력은 0인데 화면은
+ *  싣는다고 한다」 같은 일이 생긴다.
+ */
+export const isLoadStation = (kind) => kind === 'load' || kind === 'shelf-out';
+export const roleOfStation = (kind) => (isLoadStation(kind) ? STATION_ROLE.LOAD : STATION_ROLE.UNLOAD);
 
 /**
  * 경로 위의 정차역 목록.

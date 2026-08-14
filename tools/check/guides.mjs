@@ -306,14 +306,23 @@ t('안내 글이 **화면에 있는 이름**을 부른다', () => {
   assert.deepEqual(missing, [], `화면에 없는 이름을 부른다:\n  ${missing.join('\n  ')}`);
 });
 
-t('역할은 **세 갈래 버튼**으로 고른다 — 돌려 누르면 어디로 가는지 모른다', () => {
+t('역할은 **두 갈래 버튼**으로 고른다 — 돌려 누르면 어디로 가는지 모른다', () => {
   /* 처음에는 눌러서 자동 → 싣기 → 내리기 로 도는 한 개짜리 버튼이었다.
-     눌러야 하는 것인지 표시인지 알 수 없고, 원하는 값까지 몇 번을 눌러야 했다. */
+     눌러야 하는 것인지 표시인지 알 수 없고, 원하는 값까지 몇 번을 눌러야 했다.
+     그다음 셋을 늘어놓았더니 이번에는 「자동이면 지금 뭐라는 거지?」 가 남았다 —
+     자동은 고르는 값이 아니라 **처음 값**이므로 버튼에서 뺐다. */
   assert.ok(/const setRole = \(key, role\)/.test(inspectorSrc), '곧바로 정하는 길이 없다');
   assert.equal(/cycleRole/.test(inspectorSrc), false, '아직 돌려 누른다');
-  for (const label of ['자동', '싣기', '내리기']) {
+  for (const label of ['싣기', '내리기']) {
     assert.ok(inspectorSrc.includes(`'${label}'`), `「${label}」 버튼이 없다`);
   }
-  /* 「자동」은 값을 지우는 것이다 — 빈 값을 넣어 두면 도면에 뜻 없는 값이 쌓인다 */
-  assert.ok(/if \(role\) next\[key\] = role;\s*\n\s*else delete next\[key\]/.test(inspectorSrc), '자동이 값을 안 지운다');
+});
+
+t('안내가 없어진 「자동」 버튼을 부르지 않는다', () => {
+  /* 화면에 없는 것을 누르라고 하면 그 걸음에서 막힌다 — 앞서 「역할 칸」으로 한 번
+     겪었다. 역할을 다루는 걸음의 본문만 본다(다른 걸음의 「자동으로 정해집니다」는
+     설명이지 누르라는 말이 아니다). */
+  const step = G.GUIDES.flatMap((g) => g.steps).find((s) => s.id === 'roles');
+  assert.ok(step, '역할 걸음이 없어졌다');
+  assert.equal(/\*\*[^*]*자동[^*]*\*\*/.test(step.body), false, '없는 버튼을 굵게 부른다');
 });

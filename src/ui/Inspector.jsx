@@ -8,7 +8,8 @@ import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
-  CART_MARGIN, cartPath, cartStations, fleetFits, haulPerMinute, pickSet, stationStyle,
+  CART_MARGIN, STATION_ROLE, cartPath, cartStations, fleetFits, haulPerMinute, isLoadStation,
+  pickSet, roleOfStation, stationStyle,
 } from '../core/cart.js';
 import {
   arrivedAt, arrivedOf, clearStock, dropKind, getAllStock, getShipped, setStock, shippedTotal,
@@ -1250,11 +1251,10 @@ function CartPanel({ cart }) {
    *  「자동」은 값을 **지우는 것**이다. 빈 문자열 같은 것을 넣어 두면 도면에
    *  뜻 없는 값이 쌓이고, 옛 도면과도 달라진다.
    */
+  /* 누르면 그 값으로 **못 박는다**. 누르기 전까지는 roles 에 아무것도 없고,
+     그때는 경로가 가까이 지나간 쪽을 그때그때 따른다 — 경로를 옮기면 같이 따라온다. */
   const setRole = (key, role) => {
-    const next = { ...(cart.roles ?? {}) };
-    if (role) next[key] = role;
-    else delete next[key];
-    dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { roles: next } });
+    dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { roles: { ...(cart.roles ?? {}), [key]: role } } });
   };
 
   const slider = (label, key, min, max, step, unit, fallback) => (
@@ -1526,39 +1526,40 @@ function CartPanel({ cart }) {
                있으며, 트럭은 애초에 싣기만 한다. */
             const pickable = !truck && st.canRole;
             return (
-              <li key={i} className="text-[11px]">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="flex min-w-0 items-center gap-1.5 text-ink2">
-                    <i className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: style.color }} />
-                    <span className="truncate">{st.name}</span>
-                  </span>
-                  <span className="shrink-0 tabular-nums text-ink4">
+              <li key={i} className="flex items-center gap-2 text-[11px]">
+                <span className="flex min-w-0 flex-1 items-center gap-1.5 text-ink2">
+                  <i className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: style.color }} />
+                  <span className="truncate">{st.name}</span>
+                  <span className="shrink-0 tabular-nums text-[10px] text-ink4">
                     {qty && `${qty.trim()} · `}{st.s.toFixed(1)}m
                   </span>
-                </div>
+                </span>
                 {/**
-                  * 역할은 **세 갈래 버튼**으로 고른다.
+                  * 「자동」 버튼은 **없다.**
                   * -------------------------------------------------------------
-                  *  처음에는 눌러서 자동 → 싣기 → 내리기 로 도는 한 개짜리 버튼이었다.
-                  *  그런데 **눌러야 하는 것인지 표시가 아닌지 알 수가 없고**, 눌러
-                  *  봐도 어디로 가는지 몰라 원하는 값까지 몇 번을 눌러야 했다.
-                  *  고를 것이 셋뿐이면 셋을 다 보여 주는 편이 언제나 낫다.
+                  *  자동은 고르는 값이 아니라 **처음 값**이다. 경로를 그리는 순간
+                  *  가까운 쪽으로 이미 정해져 있으니, 화면은 그 결과(싣기/내리기)를
+                  *  켜 놓기만 하면 된다 — 셋을 늘어놓으면 「자동이면 지금 뭐라는
+                  *  거지?」 를 한 번 더 묻게 만든다.
+                  *
+                  *  누르면 그때부터 **못 박힌다**(roles 에 적힌다). 그 전까지는
+                  *  아무것도 저장하지 않으므로 경로를 옮기면 다시 따라간다.
                   */}
                 {pickable ? (
-                  <div className="mt-0.5 flex gap-0.5 rounded-md bg-field p-0.5 ring-1 ring-edge">
+                  <span className="flex shrink-0 gap-0.5 rounded-md bg-field p-0.5 ring-1 ring-edge">
                     {[
-                      [null, '자동', '경로가 더 가까이 지나간 쪽을 따릅니다'],
-                      ['load', '싣기', '여기서 물건을 싣습니다'],
-                      ['unload', '내리기', '여기에 물건을 내립니다'],
+                      [STATION_ROLE.LOAD, '싣기', '여기서 물건을 싣습니다'],
+                      [STATION_ROLE.UNLOAD, '내리기', '여기에 물건을 내립니다'],
                     ].map(([role, label, why]) => {
-                      const on = (st.role ?? null) === role;
+                      /* 못 박은 값이 있으면 그것, 없으면 **지금 하고 있는 일** */
+                      const on = (st.role ?? roleOfStation(st.kind)) === role;
                       return (
                         <button
                           key={label}
                           type="button"
                           title={why}
                           onClick={() => setRole(st.key, role)}
-                          className={`flex-1 rounded px-1 py-0.5 text-[10.5px] transition-colors ${
+                          className={`rounded px-1.5 py-0.5 text-[10.5px] transition-colors ${
                             on ? 'bg-sky-500 font-medium text-white' : 'text-ink3 hover:bg-raiseh'
                           }`}
                         >
@@ -1566,19 +1567,46 @@ function CartPanel({ cart }) {
                         </button>
                       );
                     })}
-                  </div>
+                  </span>
                 ) : (
-                  <div className="text-[10px] text-ink4">{style.label} — 형상으로 정해집니다</div>
+                  <span className="shrink-0 text-[10px] text-ink4">{style.label} · 고정</span>
                 )}
               </li>
             );
           })}
         </ul>
+        {/**
+          * **한쪽만 있으면 카트는 한 바퀴를 못 돈다.**
+          * ---------------------------------------------------------------------
+          *  싣기만 있으면 실은 채로 영원히 돌고, 내리기만 있으면 빈 차로 영원히
+          *  돈다. 둘 다 화면에서는 「경로도 있고 역도 여럿」이라 멀쩡해 보이는데
+          *  나르는 양만 0 이다 — 왜 0 인지 짚어 주지 않으면 카트 대수를 늘리거나
+          *  속도를 올리며 엉뚱한 데를 뒤지게 된다.
+          *
+          *  판정은 `haulPerMinute` 가 능력을 0 으로 두는 조건 그대로다. 트럭은
+          *  실어서 내보내는 것이 일이라 내리는 곳이 없어도 맞다.
+          */}
+        {(() => {
+          if (!stations.length) return null;
+          const loads = stations.filter((st) => isLoadStation(st.kind)).length;
+          const drops = stations.length - loads;
+          const lack = !loads ? '싣는 곳' : (!truck && !drops) ? '내리는 곳' : null;
+          if (!lack) return null;
+          return (
+            <p className="mt-2 flex gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-200 ring-1 ring-amber-500/30">
+              <AlertTriangle size={12} className="mt-[3px] shrink-0" />
+              <span>
+                <b>{lack}이 없습니다.</b> {loads ? '실어 놓고 내려놓을 데가 없어' : '빈 채로'} 돌기만 하므로
+                이 경로가 나르는 양은 <b>0</b> 입니다. 역을 하나는 <b>{loads ? '내리기' : '싣기'}</b>로
+                바꾸거나, 경로가 {loads ? '유입부' : '유출부'} 앞을 지나가게 하세요.
+              </span>
+            </p>
+          );
+        })()}
         {stations.some((st) => st.canRole) && !truck && (
           <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
-            선반의 역할을 눌러 <b className="text-ink2">싣기 / 내리기</b>를 직접 정할 수 있습니다.
-            정하지 않으면(자동) 경로가 더 가까이 지나간 쪽 구역을 따릅니다 — 그 경우
-            앞면의 왼쪽 반·오른쪽 반을 찾아다니느라 동선이 늘어납니다.
+            선반은 <b className="text-ink2">싣기 / 내리기</b>를 눌러 바꿀 수 있습니다. 경로를 그릴 때
+            더 가까이 지나간 쪽으로 이미 정해 두므로, 그대로 두어도 됩니다.
           </p>
         )}
       </Section>

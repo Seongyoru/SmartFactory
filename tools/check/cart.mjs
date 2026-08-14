@@ -1,6 +1,6 @@
 /* cart.js — 차간 간격(followDistance) · 수용 판정(fleetFits) · stepCart 와의 합 */
 import assert from 'node:assert/strict';
-import { SRC, group, readSrc, t } from './_harness.mjs';
+import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 
 group('카트 간격 · 수용');
 
@@ -215,4 +215,50 @@ t('정차 시간이 길수록 적게 나른다', () => {
   const b = { ...LOOP, count: 1, loadCount: 10, dwell: 5 };
   assert.ok(C.haulPerMinute(b, pathOf(b), ST).perMinute
           < C.haulPerMinute(a, pathOf(a), ST).perMinute);
+});
+
+/* ---------- 역할: 자동은 버튼이 아니라 처음 값 ---------- */
+group('정차역 역할 — 싣기/내리기 두 갈래');
+
+t('네 종류가 두 갈래로 갈린다 — haulPerMinute 가 가르는 것과 같게', () => {
+  assert.equal(C.isLoadStation('load'), true);
+  assert.equal(C.isLoadStation('shelf-out'), true, '선반에서 꺼내는 것은 싣기다');
+  assert.equal(C.isLoadStation('unload'), false);
+  assert.equal(C.isLoadStation('shelf-in'), false, '선반에 넣는 것은 내리기다');
+  assert.equal(C.roleOfStation('shelf-out'), C.STATION_ROLE.LOAD);
+  assert.equal(C.roleOfStation('shelf-in'), C.STATION_ROLE.UNLOAD);
+});
+
+const cartSrc = await readSrc('core/cart.js');
+const inspSrc = await readSrc('ui/Inspector.jsx');
+
+t('가르는 규칙이 haulPerMinute 안에 따로 적혀 있지 않다', () => {
+  /* 종류를 세는 곳이 둘이 되면 「능력은 0 인데 화면은 싣는다고 한다」 가 난다.
+     haulPerMinute 는 isLoadStation 을 불러 써야 한다. */
+  const fn = cut(cartSrc, 'export function haulPerMinute', '\nexport ', 'haulPerMinute');
+  assert.ok(fn.includes('isLoadStation'), 'haulPerMinute 가 isLoadStation 을 안 쓴다');
+  assert.ok(!/'shelf-out'/.test(fn), 'haulPerMinute 가 종류를 또 나열한다');
+});
+
+t('화면에 「자동」 버튼이 없다 — 켜지는 값은 못 박은 값 또는 지금 하는 일', () => {
+  const row = cut(inspSrc, 'const pickable = !truck && st.canRole', '</ul>', '정차역 목록');
+  assert.ok(!/'자동'/.test(row), '역할 버튼에 자동이 아직 남아 있다');
+  assert.ok(row.includes('st.role ?? roleOfStation(st.kind)'),
+    '못 박은 값이 없을 때 지금 하는 일을 켜지 않는다');
+});
+
+t('한쪽만 있는 경로에 경고가 붙는다 — 능력이 0 이 되는 그 조건으로', () => {
+  const body = cut(inspSrc, 'const loads = stations.filter', '</Section>', '정차역 경고');
+  assert.ok(body.includes('isLoadStation'), '경고가 종류를 자기 나름대로 센다');
+  assert.ok(/!truck && !drops/.test(body), '트럭까지 내리는 곳을 요구하고 있다');
+  assert.ok(body.includes('AlertTriangle'), '경고가 경고처럼 안 보인다');
+});
+
+t('한쪽만 있으면 실제로 0 이다 — 경고가 거짓말이 아님', () => {
+  const p = pathOf(LOOP);
+  const loadOnly = ST.filter((s) => C.isLoadStation(s.kind));
+  const dropOnly = ST.filter((s) => !C.isLoadStation(s.kind));
+  assert.ok(loadOnly.length && dropOnly.length, '표본이 한쪽으로 쏠려 있다');
+  assert.equal(C.haulPerMinute(LOOP, p, loadOnly).perMinute, 0);
+  assert.equal(C.haulPerMinute(LOOP, p, dropOnly).perMinute, 0);
 });
