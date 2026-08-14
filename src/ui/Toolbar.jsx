@@ -20,12 +20,12 @@ import {
   Play,
   Redo2,
   RotateCw,
-  Save,
   Share2,
   Sun,
   Trash2,
   Undo2,
   Upload,
+  X,
 } from 'lucide-react';
 import { SPEEDS, formatElapsed, resetClock, setSpeed, useElapsed, useSimSpeed } from '../core/clock.js';
 import { resetMetrics } from '../core/metrics.js';
@@ -33,7 +33,7 @@ import { resetFaults, resetQuality } from '../core/faults.js';
 import { resetWork } from '../core/process.js';
 import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
-import { downloadJSON, layoutSnapshot, saveLayout } from '../core/persistence.js';
+import { downloadJSON, layoutSnapshot } from '../core/persistence.js';
 import { loadGalleryIndex, loadGalleryLayout } from '../core/gallery.js';
 import { SHARE_OFF, copyText, fetchShared, listShared, shareLayout } from '../core/share.js';
 import { layoutSummary, layoutThumbSVG } from '../core/thumb.js';
@@ -53,23 +53,33 @@ const when = (at) => {
  *  한 장 있으면 라인 모양으로 바로 갈린다(core/thumb.js — 화면 캡처가 아니라
  *  도면 데이터로 그린 것이라 언제 봐도 같은 그림이다).
  */
-function LayoutCard({ row, disabled, onPick }) {
+function LayoutCard({ row, selected, disabled, onPick }) {
   return (
     <button
       type="button"
       onClick={onPick}
       disabled={disabled}
-      className="group w-full overflow-hidden rounded-lg text-left ring-1 ring-edge transition-colors hover:ring-sky-500 disabled:opacity-50"
+      className={`flex w-full items-stretch gap-3 rounded-lg p-2 text-left ring-1 transition-colors disabled:opacity-50 ${
+        selected ? 'bg-sky-500/10 ring-sky-500' : 'ring-edge hover:bg-raiseh'
+      }`}
     >
-      <div className="aspect-[16/9] w-full bg-field">
+      {/* 그림이 왼쪽 — 목록을 훑을 때 눈이 먼저 잡는 것이 모양이다 */}
+      <div className="aspect-[16/9] w-[132px] shrink-0 overflow-hidden rounded bg-field ring-1 ring-edge">
         {row.thumb
-          ? <img src={row.thumb} alt="" loading="lazy" className="h-full w-full object-cover" />
+          ? <img src={row.thumb} alt="" className="h-full w-full object-cover" />
           : <div className="grid h-full place-items-center text-[10px] text-ink4">미리보기 없음</div>}
       </div>
-      <div className="px-2 py-1.5">
-        <div className="truncate text-[11.5px] font-medium text-ink2">{row.name}</div>
-        <div className="truncate text-[9.5px] text-ink4">
-          {[row.note || row.summary, when(row.at), kb(row.size)].filter(Boolean).join(' · ')}
+      <div className="flex min-w-0 flex-col justify-center gap-0.5">
+        <div className="truncate text-[12.5px] font-medium text-ink">{row.name}</div>
+        {(row.note || row.summary) && (
+          <div className="truncate text-[10.5px] text-ink3">{row.note || row.summary}</div>
+        )}
+        <div className="text-[10px] tabular-nums text-ink4">
+          {[
+            row.from === 'share' ? '올라온 도면' : '저장소',
+            when(row.at),
+            kb(row.size),
+          ].filter(Boolean).join(' · ')}
         </div>
       </div>
     </button>
@@ -86,10 +96,12 @@ function LayoutCard({ row, disabled, onPick }) {
  *  **둘 다 비어 있으면 버튼 자체를 안 낸다.** 아무것도 없는 배포에서
  *  「공용 도면」 이 떠 있고 눌러도 빈 창이면 고장 난 것처럼 보인다.
  */
-function GalleryButton({ onPick }) {
+function GalleryButton({ onPick, onExport }) {
   const [rows, setRows] = useState(null);        // null = 아직 안 읽음
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(null);
+  /* 고른 것 — 여는 것은 한 칸 뒤다(아래 확인 줄) */
+  const [sel, setSel] = useState(null);
 
   /* 한 번 읽은 저장소 도면은 들고 있는다 — 썸네일을 그리려고 읽은 것을
      고를 때 또 읽으면 같은 파일을 두 번 받는다 */
@@ -125,7 +137,7 @@ function GalleryButton({ onPick }) {
   useEffect(() => { reload(); }, []);
   if (!rows?.length) return null;
 
-  const pick = async (row) => {
+  const open2 = async (row) => {
     setBusy(row.id);
     try {
       const data = row.from === 'share'
@@ -133,6 +145,7 @@ function GalleryButton({ onPick }) {
         : cache.current.get(row.file) ?? await loadGalleryLayout(row);
       onPick(data, row);
       setOpen(false);
+      setSel(null);
     } catch (err) {
       console.error('[공용 도면] 못 열었다', err);
       window.alert(`「${row.name}」 을 열지 못했습니다 — ${err.message}`);
@@ -141,28 +154,83 @@ function GalleryButton({ onPick }) {
     }
   };
 
+  const close = () => { setOpen(false); setSel(null); };
+
   return (
-    <div className="relative">
+    <>
       <Btn active={open} onClick={() => { if (!open) reload(); setOpen((v) => !v); }}>
         <Library size={13} /> 공용 도면
       </Btn>
+      {/**
+        * 화면 **가운데 창**으로 띄운다.
+        *  툴바에 매달아 두었더니 목록이 길어질수록 화면 밖으로 잘렸다. 도면을
+        *  고르는 일은 잠깐 스쳐 가는 것이 아니라 **들여다보는 일**이라, 자리를
+        *  제대로 내주는 편이 맞다.
+        */}
       {open && (
-        <>
-          {/* 바깥을 누르면 닫힌다 — 목록을 닫으려고 같은 버튼을 다시 찾게 하지 않는다 */}
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-30 mt-1 w-[540px] rounded-lg bg-panel shadow-xl ring-1 ring-edge">
-            <div className="grid max-h-[52vh] grid-cols-3 gap-2 overflow-y-auto p-2.5">
+        /* 가운데 정렬은 **플렉스로** 한다. 그리드에 두면 칸이 항목 크기에 맞춰
+           늘어나서 `max-w-full` 의 100% 가 620px 자신을 가리켜 안 먹는다 —
+           좁은 창에서 실제로 그렇게 넘쳤다. */
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6" onClick={close}>
+          <div
+            className="flex max-h-[78vh] w-[620px] max-w-full flex-col overflow-hidden rounded-xl bg-panel shadow-2xl ring-1 ring-edge"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-2.5">
+              <div>
+                <h2 className="text-[13px] font-semibold text-ink">공용 도면</h2>
+                <p className="text-[10.5px] text-ink4">{rows.length}개 — 눌러서 고르고, 아래에서 불러옵니다</p>
+              </div>
+              <IconBtn title="닫기" onClick={close}><X size={14} /></IconBtn>
+            </div>
+
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
               {rows.map((r) => (
-                <LayoutCard key={`${r.from}:${r.id}`} row={r} disabled={busy != null} onPick={() => pick(r)} />
+                <LayoutCard
+                  key={`${r.from}:${r.id}`}
+                  row={r}
+                  selected={sel && sel.from === r.from && sel.id === r.id}
+                  disabled={busy != null}
+                  /* 누르면 **고르기만** 한다 — 여는 것은 아래에서 한 번 더 */
+                  onPick={() => setSel(r)}
+                />
               ))}
             </div>
-            <p className="border-t border-line px-2.5 py-1.5 text-[9.5px] leading-snug text-ink4">
-              여는 순간 <b className="text-ink3">지금 도면을 덮어씁니다.</b> 되돌리기(Ctrl+Z)로 돌아올 수 있습니다.
-            </p>
+
+            {/**
+              * 고른 것을 **바로 열지 않는다.**
+              *  여는 순간 지금 도면이 덮인다. 모르고 눌렀다가 몇 시간 그린 것이
+              *  사라지면 되돌리기를 아는 사람이라도 가슴이 내려앉는다. 그래서
+              *  한 칸을 더 두고, 그 자리에 **내보내기**를 같이 놓는다 — 「먼저
+              *  꺼내 두세요」 라고 말만 하고 길을 안 주면 소용이 없다.
+              */}
+            <div className="shrink-0 border-t border-line bg-raise px-3 py-2.5">
+              {sel ? (
+                <>
+                  <p className="mb-2 text-[11px] leading-relaxed text-ink2">
+                    <b className="text-ink">{sel.name}</b> 을 엽니다 —
+                    <b className="text-rose-500"> 지금 도면은 덮어써집니다.</b>
+                    <br />
+                    <span className="text-ink4">
+                      되돌리기(Ctrl+Z)로 돌아올 수 있지만, 확실하게 하려면 먼저 내보내 두세요.
+                    </span>
+                  </p>
+                  <div className="flex justify-end gap-1.5">
+                    <Btn onClick={() => setSel(null)}>취소</Btn>
+                    <Btn onClick={onExport}><Download size={12} /> 먼저 내보내기</Btn>
+                    <Btn onClick={() => open2(sel)} disabled={busy != null}>
+                      {busy ? '여는 중…' : '덮어쓰고 열기'}
+                    </Btn>
+                  </div>
+                </>
+              ) : (
+                <p className="text-[10.5px] text-ink4">위에서 도면을 하나 고르세요.</p>
+              )}
+            </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -383,14 +451,23 @@ export default function Toolbar() {
 
       <div className="mx-1 h-6 w-px bg-kbd" />
 
-      {/* 벨트 구동 — UV 스크롤 재생/정지 + 전역 기본 속도 */}
-      <IconBtn
-        title={state.running ? '벨트 정지' : '벨트 구동'}
-        active={state.running}
-        onClick={() => dispatch({ type: 'SET', patch: { running: !state.running } })}
+      {/* 벨트 구동 — UV 스크롤 재생/정지 + 전역 기본 속도.
+          오더를 다 채워 스스로 멈췄으면 **여기가 다시 도는 문**이라 눈에 띄게
+          한다. 안 그러면 화면이 통째로 얼어붙은 것을 고장으로 읽는다. */}
+      <div className={state.haltedByOrders && !state.running
+        ? 'rounded-md ring-2 ring-emerald-500 ring-offset-1 ring-offset-head'
+        : ''}
       >
-        {state.running ? <Pause size={14} /> : <Play size={14} />}
-      </IconBtn>
+        <IconBtn
+          title={state.haltedByOrders && !state.running
+            ? '다시 돌리기 — 오더를 다 채워 멈춰 있습니다'
+            : (state.running ? '벨트 정지' : '벨트 구동')}
+          active={state.running}
+          onClick={() => dispatch({ type: 'SET', patch: { running: !state.running } })}
+        >
+          {state.running ? <Pause size={14} /> : <Play size={14} className={state.haltedByOrders ? 'text-emerald-600' : ''} />}
+        </IconBtn>
+      </div>
       {/* 배속 — 지표는 시간으로 나눈 값이라, 시간을 빨리 못 감으면 답이 안 나온다.
           1시간짜리 라인을 실시간으로 보고 있을 수는 없다. */}
       <div className="flex items-center rounded-md bg-raise p-0.5 ring-1 ring-edge" title="시뮬레이션 배속">
@@ -463,15 +540,18 @@ export default function Toolbar() {
 
       <div className="flex-1" />
 
-      {/* 저장 */}
-      <Btn
-        onClick={() => {
-          saveLayout(layoutSnapshot(state));
-          window.alert('현재 배치를 브라우저에 저장했습니다.');
-        }}
-      >
-        <Save size={13} /> 저장
-      </Btn>
+      {/**
+        * 「저장」 버튼은 없앴다.
+        * -----------------------------------------------------------------
+        *  도면은 고칠 때마다 이 브라우저에 **이미 저장되고 있다**(store 의
+        *  효과가 DOC_KEYS 가 바뀔 때마다 saveLayout 을 부른다 — 상태바의
+        *  「자동 저장됨」이 그 말이다). 그래서 이 버튼은 **이미 된 일을 한 번
+        *  더 하고 알림창을 띄우는 것**뿐이었다.
+        *
+        *  진짜 「저장」 — 이 브라우저 밖으로 꺼내는 일 — 은 「내보내기」다.
+        *  같은 낱말이 두 가지를 가리키면, 정작 내보내야 할 때 저장을 눌러
+        *  놓고 안심하게 된다.
+        */}
       <Btn
         onClick={() =>
           downloadJSON(
@@ -479,6 +559,7 @@ export default function Toolbar() {
             `egis-layout-${new Date().toISOString().slice(0, 10)}.json`,
           )
         }
+        title="도면을 파일로 꺼냅니다 — 이 브라우저를 지워도 남는 유일한 사본입니다"
       >
         <Download size={13} /> 내보내기
       </Btn>
@@ -486,7 +567,10 @@ export default function Toolbar() {
         <Upload size={13} /> 불러오기
       </Btn>
       {/* 저장소에 담아 둔 공용 도면 — 담긴 것이 없으면 버튼도 안 나온다 */}
-      <GalleryButton onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })} />
+      <GalleryButton
+        onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })}
+        onExport={() => downloadJSON(layoutSnapshot(state), `egis-layout-${new Date().toISOString().slice(0, 10)}.json`)}
+      />
       {/* 올리기 — 링크 하나로 서로 테스트. 올리기 전에 반드시 묻는다 */}
       <ShareButton snapshot={() => layoutSnapshot(state)} />
       <input

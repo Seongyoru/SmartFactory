@@ -116,6 +116,9 @@ t('받아 올 때도 서버 말을 그대로 옮긴다', () => {
 const toolbar = await readSrc('ui/Toolbar.jsx');
 const app = await readSrc('App.jsx');
 const api = await readSrc('../api/share.js');
+const store = await readSrc('core/store.jsx');
+/** 주석을 걷어낸 소스 — 「여기서는 안 부른다」 를 볼 때 주석 속 이름에 걸린다 */
+const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
 t('**올리기 전에 묻는다** — 한 번 나간 것은 되돌릴 수 없다', () => {
   assert.ok(toolbar.includes("'ask'"), '확인 단계가 없다');
@@ -234,4 +237,52 @@ t('한 줄 요약이 무엇이 든 도면인지 말한다', () => {
   assert.equal(T.layoutSummary({ placed: [1, 2], links: [1] }), '설비 2 · 연결 1');
   assert.equal(T.layoutSummary({ carts: [{ count: 3 }] }), '차량 3');
   assert.equal(T.layoutSummary({}), '빈 도면');
+});
+
+/* ---------- 고르는 창 · 덮어쓰기 전 확인 ---------------------------------- */
+
+t('목록은 **화면 가운데 창**으로 뜬다 — 툴바에 매달면 잘린다', () => {
+  assert.ok(/fixed inset-0 z-40 flex items-center justify-center/.test(toolbar), '가운데 창이 아니다');
+  /* 그리드에 두면 칸이 항목에 맞춰 늘어나 max-w-full 의 100% 가 자기 자신을
+     가리킨다 — 좁은 창에서 실제로 620px 이 그대로 넘쳤다 */
+  assert.equal(/z-40 grid place-items-center/.test(toolbar), false, '그리드로 가운데 정렬하면 폭이 안 잡힌다');
+  assert.ok(/w-\[620px\] max-w-full/.test(toolbar), '좁은 화면에서 넘친다');
+});
+t('썸네일이 **왼쪽**, 정보가 오른쪽', () => {
+  const card = toolbar.slice(toolbar.indexOf('function LayoutCard'), toolbar.indexOf('function GalleryButton'));
+  assert.ok(/flex w-full items-stretch/.test(card), '가로로 안 눕혔다');
+  assert.ok(card.indexOf('row.thumb') < card.indexOf('row.name'), '그림이 이름보다 뒤에 있다');
+});
+t('**고른다고 바로 열리지 않는다** — 모르고 눌러 몇 시간 그린 것이 날아가면 안 된다', () => {
+  assert.ok(/onPick=\{\(\) => setSel\(r\)\}/.test(toolbar), '카드를 누르면 바로 열린다');
+  assert.ok(/onClick=\{\(\) => open2\(sel\)\}/.test(toolbar), '확인 뒤 여는 길이 없다');
+  assert.ok(toolbar.includes('덮어쓰고 열기'), '무엇이 일어나는지 안 적혀 있다');
+});
+t('그 자리에서 **내보내기**까지 준다 — 말만 하고 길을 안 주면 소용없다', () => {
+  assert.ok(toolbar.includes('먼저 내보내기'), '내보내기 버튼이 없다');
+  assert.ok(/onExport/.test(toolbar), '내보내기가 이어져 있지 않다');
+});
+t('「저장」 버튼은 없앴다 — 자동 저장과 같은 일을 하고 있었다', () => {
+  /* 도면은 고칠 때마다 이미 저장된다(store 의 효과). 진짜 「저장」 은 내보내기다.
+     같은 낱말이 둘을 가리키면 정작 내보내야 할 때 저장을 눌러 놓고 안심한다. */
+  assert.equal(/<Save size=/.test(toolbar), false, '저장 버튼이 되살아났다');
+  assert.equal(/saveLayout\(/.test(code(toolbar)), false, '툴바가 저장을 직접 부른다');
+  assert.ok(toolbar.includes('내보내기'), '꺼내는 길까지 사라졌다');
+});
+
+/* ---------- 다 채워 멈췄을 때 -------------------------------------------- */
+
+const dock = await readSrc('ui/OrdersDock.jsx');
+
+t('스스로 멈춘 것을 **상태로 남긴다** — 화면이 얼면 고장으로 보인다', () => {
+  assert.ok(/haltedByOrders: true/.test(dock), '멈춘 이유를 안 남긴다');
+  assert.ok(/haltedByOrders: false/.test(dock), '다시 돌아도 강조가 안 꺼진다');
+  assert.ok(/haltedByOrders: false/.test(store), '기본값이 없다');
+});
+t('멈춘 이유와 **다시 도는 길**을 같이 말한다', () => {
+  assert.ok(dock.includes('오더를 전부 채워서 멈췄습니다'), '왜 멈췄는지 안 적는다');
+  assert.ok(/고장이 아닙니다/.test(dock), '고장이 아니라는 말이 없다');
+  assert.ok(/border-emerald-500/.test(dock), '오더 칸을 안 짚어 준다');
+  assert.ok(/ring-emerald-500/.test(toolbar), '재생 버튼을 안 짚어 준다');
+  assert.ok(/다시 돌리기/.test(toolbar), '버튼 설명이 그대로다');
 });

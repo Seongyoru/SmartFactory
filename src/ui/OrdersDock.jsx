@@ -42,15 +42,32 @@ export default function OrdersDock() {
   const orders = normalizeOrders(state.orders);
   const rows = orders.map((o) => ({ o, r: statusOf(o, { shipped, arrivedOf }, elapsed) }));
 
-  /* 전부 채우면 멈춘다 — 한 번만 */
+  /**
+   * 전부 채우면 멈춘다 — 한 번만.
+   * -------------------------------------------------------------------------
+   *  멈추는 순간 벨트도 카트도 그래프도 전부 얼어붙어서 **페이지가 죽은 것처럼**
+   *  보인다. 그래서 「스스로 멈춘 상태」 를 남겨 둔다(`haltedByOrders`) — 왜
+   *  멈췄고 어디를 누르면 다시 도는지를 화면이 짚어 줄 수 있어야 한다.
+   */
   useEffect(() => {
-    if (!allDone(rows.map((x) => x.r))) { stopped.current = false; return; }
-    if (stopped.current || !state.running) return;
-    stopped.current = true;
-    dispatch({
-      type: 'SET',
-      patch: { running: false, hint: '오더를 전부 채웠습니다 — 시뮬레이션을 멈췄습니다' },
-    });
+    const done = allDone(rows.map((x) => x.r));
+    if (!done) stopped.current = false;
+
+    if (state.running) {
+      /* 다시 돌기 시작했으면 강조를 끈다 — 켠 채로 두면 계속 붉어 보인다 */
+      if (state.haltedByOrders) dispatch({ type: 'SET', patch: { haltedByOrders: false } });
+      if (done && !stopped.current) {
+        stopped.current = true;
+        dispatch({
+          type: 'SET',
+          patch: {
+            running: false,
+            haltedByOrders: true,
+            hint: '오더를 전부 채웠습니다 — 시뮬레이션을 멈췄습니다',
+          },
+        });
+      }
+    }
   });
 
   const stores = state.placed.filter((p) => {
@@ -69,8 +86,24 @@ export default function OrdersDock() {
   const doneCount = rows.filter((x) => x.r.state === ORDER.DONE).length;
   const lateCount = rows.filter((x) => x.r.state === ORDER.LATE).length;
 
+  const halted = state.haltedByOrders && !state.running;
+
   return (
-    <div className="flex max-h-[46%] min-h-[132px] shrink-0 flex-col border-t border-line">
+    <div className={`flex max-h-[46%] min-h-[132px] shrink-0 flex-col border-t transition-colors ${
+      halted ? 'border-emerald-500 bg-emerald-500/[0.07]' : 'border-line'
+    }`}>
+      {/**
+        * 멈춘 이유를 **맨 위에서** 말한다.
+        *  다 채우면 벨트도 카트도 그래프도 전부 얼어붙어서 화면이 죽은 것처럼
+        *  보인다. 「고장이 아니라 끝난 것」 이라는 말과 다시 도는 길이 같이
+        *  있어야 사람이 새로고침부터 누르지 않는다.
+        */}
+      {halted && (
+        <div className="shrink-0 bg-emerald-500/15 px-3 py-1.5 text-[10.5px] leading-snug text-emerald-700">
+          <b>오더를 전부 채워서 멈췄습니다.</b> 고장이 아닙니다 —
+          위쪽 <b>▶</b> 를 누르면 다시 돕니다.
+        </div>
+      )}
       <div className="flex shrink-0 items-center justify-between px-3 py-1.5">
         <span className="text-[11px] font-medium text-ink2">생산 오더</span>
         <span className="text-[10px] tabular-nums text-ink4">
