@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, RotateCcw, RotateCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, FileText, RotateCcw, RotateCw, Table2, Trash2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
@@ -2701,29 +2701,29 @@ export function ReportButtons() {
       <button
         type="button"
         onClick={() => save('html')}
-        className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-sky-500 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-sky-600"
         title="읽는 보고서 — 브라우저로 열어 보고 Ctrl+P 로 PDF 로 만듭니다"
       >
-        보고서
+        <FileText size={12} /> 보고서
       </button>
       <button
         type="button"
         onClick={() => save('csv')}
-        className="rounded bg-kbd px-1.5 py-0.5 text-[10.5px] text-ink4 hover:text-ink2"
+        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium text-sky-600 ring-1 ring-sky-500/40 transition-colors hover:bg-sky-500/10"
         title="엑셀에서 다시 따지려면 이쪽 — 반올림하지 않은 원래 값이 들어갑니다"
       >
-        CSV
+        <Table2 size={12} /> CSV
       </button>
       {/* 아이콘 하나로 줄였다 — 띠의 머리줄은 탭에 자리를 내줘야 한다.
           누르면 기록이 통째로 날아가므로 **말은 툴팁으로 온전히** 남긴다. */}
       <button
         type="button"
         onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
-        className="rounded bg-kbd p-1 text-ink4 hover:text-ink2"
+        className="shrink-0 rounded-md p-1.5 text-ink3 ring-1 ring-edge transition-colors hover:bg-rose-500/10 hover:text-rose-500 hover:ring-rose-500/40"
         title="다시 재기 — 배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
         aria-label="다시 재기"
       >
-        <RotateCcw size={12} />
+        <RotateCcw size={13} />
       </button>
     </span>
   );

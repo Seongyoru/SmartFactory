@@ -243,14 +243,16 @@ function GalleryButton({ onPick, onExport }) {
  */
 function ShareButton({ snapshot }) {
   const [state, setState] = useState(null);   // null · 'ask' · 'busy' · { url, copied }
-  /* 이름을 받는다 — 목록에 「(이름 없음)」 이 늘어서면 고를 수가 없다 */
+  /* 이름과 설명을 받는다 — 목록에 「(이름 없음)」 이 늘어서면 고를 수가 없고,
+     이름만으로는 「A라인」 이 무엇을 시험한 것인지 한 달 뒤에 모른다 */
   const [name, setName] = useState('');
+  const [note, setNote] = useState('');
 
   const upload = async () => {
     setState('busy');
     try {
-      const { url } = await shareLayout(snapshot(), name);
-      setState({ url, copied: await copyText(url) });
+      const { url, listed } = await shareLayout(snapshot(), { name, note });
+      setState({ url, listed, copied: await copyText(url) });
     } catch (e) {
       console.error('[공유] 못 올렸다', e);
       setState(null);
@@ -284,6 +286,16 @@ function ShareButton({ snapshot }) {
                   maxLength={60}
                   className="mt-2 w-full rounded bg-field px-2 py-1 text-[11.5px] text-ink2 ring-1 ring-edge focus:ring-sky-500"
                 />
+                {/* 설명 — 한 달 뒤의 나를 위한 자리다. 「A라인」 만 남으면
+                    무엇을 시험해 본 도면이었는지 기억나지 않는다 */}
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="설명 — 무엇을 시험한 배치인가요? (없어도 됩니다)"
+                  maxLength={140}
+                  rows={2}
+                  className="mt-1 w-full resize-none rounded bg-field px-2 py-1 text-[11px] leading-snug text-ink2 ring-1 ring-edge focus:ring-sky-500"
+                />
                 <p className="mt-1.5 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
                   올리면 <b>누구나</b> 목록에서 보고 열 수 있습니다. 한 번 올린 것은 앱에서
                   되돌릴 수 없습니다 — 회사 도면이면 다시 생각해 주세요.
@@ -300,6 +312,13 @@ function ShareButton({ snapshot }) {
                 <p className="mb-1 text-[10.5px] text-ink4">
                   {state.copied ? '링크를 복사했습니다 — 그대로 붙여넣으세요.' : '아래 링크를 복사해 보내세요.'}
                 </p>
+                {/* 올라갔지만 목록에 못 들어간 경우 — 링크는 살아 있다는 것을
+                    말해 줘야 같은 도면을 계속 다시 올리지 않는다 */}
+                {state.listed === false && (
+                  <p className="mb-1 rounded bg-amber-500/10 px-2 py-1 text-[10px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
+                    올라갔지만 <b>공용 도면 목록에는 못 넣었습니다.</b> 이 링크로는 열립니다.
+                  </p>
+                )}
                 <input
                   readOnly
                   value={state.url}

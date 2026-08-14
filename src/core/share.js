@@ -73,17 +73,22 @@ async function complain(res) {
  *  @returns { id, url }
  *  @throws  못 올렸으면 — **삼키지 않는다.** 올린 줄 알고 링크를 보내면 낭패다
  */
-export async function shareLayout(data, name, fetchImpl = fetch) {
+export async function shareLayout(data, { name, note } = {}, fetchImpl = fetch) {
   const res = await fetchImpl(SHARE_API, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    /* 이름을 같이 보낸다 — 목록에서 「무엇인지」 를 가리는 것은 결국 이름이다 */
-    body: JSON.stringify({ name, layout: data }),
+    /* 이름과 설명을 같이 보낸다 — 목록에서 「무엇인지」 를 가리는 것은 결국 말이다 */
+    body: JSON.stringify({ name, note, layout: data }),
   });
   if (!res.ok) throw await complain(res);
-  const { id } = await res.json();
+  const { id, listed } = await res.json();
   if (!id) throw new Error('서버가 링크를 안 줬습니다');
-  return { id, url: shareUrl(id) };
+  /**
+   * `listed` 가 거짓이면 **올라갔지만 목록에는 못 들어갔다.** 링크는 살아 있으니
+   * 실패로 치지 않되, 그 사실은 그대로 넘긴다 — 목록에 없는 것을 「없어졌다」 고
+   * 오해하면 같은 도면을 계속 다시 올리게 된다.
+   */
+  return { id, url: shareUrl(id), listed: listed !== false };
 }
 
 /**

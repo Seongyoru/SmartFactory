@@ -74,9 +74,9 @@ const json = (res, code, body) => {
   res.end(JSON.stringify(body));
 };
 
-/** 이름은 사용자가 적는다 — 길이를 자르고 줄바꿈을 없앤다 */
-const cleanName = (v, fallback) => {
-  const s = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, 60);
+/** 이름·설명은 사용자가 적는다 — 길이를 자르고 줄바꿈을 없앤다 */
+const cleanName = (v, fallback, max = 60) => {
+  const s = String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
   return s || fallback;
 };
 
@@ -112,21 +112,38 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     /* ---- 목록 ---- */
     if (req.query?.list != null) {
-      let rows = await readJson(INDEX).catch(() => null);
-      if (!Array.isArray(rows)) {
-        /* 목록이 없거나 깨졌다 — 파일에서 다시 세운다. 이름·썸네일은 못 살리지만
-           **도면이 목록에서 사라지는 것**보다는 낫다. */
-        const found = await list({ prefix: `${SHARES}/`, limit: MAX_INDEX, token });
-        rows = (found.blobs ?? []).map((b) => ({
-          id: b.pathname.replace(`${SHARES}/`, '').replace(/\.json$/, ''),
+      /**
+       * 목록은 **스스로 아문다.**
+       * ---------------------------------------------------------------------
+       *  index.json 은 이름과 썸네일을 담는 편의 장부일 뿐, **사실은 파일 쪽에**
+       *  있다. 그래서 늘 실제 파일 목록을 같이 훑어서, 장부에 없는 도면은 이름
+       *  없이라도 끼워 넣는다.
+       *
+       *  이렇게 안 두었다가 실제로 당했다 — 장부 쓰기가 조용히 실패하는 동안
+       *  도면은 계속 쌓였는데 화면에는 첫 번째 하나만 보였다. **있는 것이 안
+       *  보이는 것**이 가장 나쁜 고장이다.
+       */
+      const known = await readJson(INDEX).catch(() => null);
+      const rows = (Array.isArray(known) ? known : []).filter((r) => ID_RE.test(r?.id ?? ''));
+      const seen = new Set(rows.map((r) => r.id));
+
+      const found = await list({ prefix: `${SHARES}/`, limit: MAX_INDEX, token });
+      for (const b of found.blobs ?? []) {
+        const id = b.pathname.replace(`${SHARES}/`, '').replace(/\.json$/, '');
+        if (!ID_RE.test(id) || seen.has(id)) continue;
+        rows.push({
+          id,
           name: '(이름 없음)',
-          at: Date.parse(b.uploadedAt) || Date.now(),
+          at: Date.parse(b.uploadedAt) || 0,
           size: b.size ?? 0,
           thumb: null,
-        }));
+        });
       }
+
+      /* 새것이 위로 — 장부에 있던 것과 주워 온 것이 섞이므로 시각으로 다시 세운다 */
+      rows.sort((a, b) => (b.at ?? 0) - (a.at ?? 0));
       res.setHeader('cache-control', 'public, max-age=30');
-      return json(res, 200, { layouts: rows.filter((r) => ID_RE.test(r?.id ?? '')) });
+      return json(res, 200, { layouts: rows.slice(0, MAX_INDEX) });
     }
 
     /* ---- 도면 하나 ---- */
@@ -156,7 +173,9 @@ export default async function handler(req, res) {
   }
 
   const id = newId();
-  const name = cleanName(body?.name, `도면 ${new Date().toLocaleDateString('ko-KR')}`);
+  const name = cleanName(body?.name, `도면 ${new Date().toLocaleDateString('ko-KR')}`, 60);
+  /* 설명은 없어도 된다 — 이름만으로 가려지는 도면도 많다 */
+  const note = cleanName(body?.note, '', 140);
 
   /* addRandomSuffix 를 끄면 경로가 id 그대로라 나중에 찾기 쉽다 */
   await put(`${SHARES}/${id}.json`, text, {
@@ -179,22 +198,40 @@ export default async function handler(req, res) {
     console.error('[share] 썸네일 실패', e);
   }
 
-  /* 목록에 앞에 끼운다 — 새것이 위로 */
+  /**
+   * 목록에 앞에 끼운다 — 새것이 위로.
+   * -------------------------------------------------------------------------
+   *  **`allowOverwrite` 를 빠뜨려 실제로 깨졌던 자리다.** put 은 기본적으로 같은
+   *  경로에 덮어쓰기를 거부하고 **던진다.** 목록 파일은 매번 같은 경로에 다시
+   *  써야 하므로, 첫 번째만 성공하고 두 번째부터 조용히 실패했다 — 도면(Blob)은
+   *  늘어나는데 목록은 하나에서 멈춘 채로.
+   *
+   *  캐시도 같이 끈다. 공개 주소는 CDN 이 물고 있어서, 방금 덮어쓴 목록을 다시
+   *  읽을 때 옛것이 돌아올 수 있다.
+   */
+  let listed = false;
   try {
     const rows = (await readJson(INDEX).catch(() => null)) ?? [];
     const next = [
-      { id, name, at: Date.now(), size: text.length, thumb, summary },
+      { id, name, note, at: Date.now(), size: text.length, thumb, summary },
       ...(Array.isArray(rows) ? rows : []),
     ].slice(0, MAX_INDEX);
     await put(INDEX, JSON.stringify(next), {
-      access: 'public', contentType: 'application/json', addRandomSuffix: false, token,
+      access: 'public',
+      contentType: 'application/json',
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      cacheControlMaxAge: 0,
+      token,
     });
+    listed = true;
   } catch (e) {
-    /* 목록에 못 넣어도 도면은 올라갔다 — 링크는 살아 있으므로 실패로 치지 않는다 */
+    /* 목록에 못 넣어도 도면은 올라갔다 — 링크는 살아 있으므로 실패로 치지 않는다.
+       다만 **말은 한다.** 조용히 넘기면 이번 같은 버그가 안 보인다. */
     console.error('[share] 목록 갱신 실패', e);
   }
 
-  return json(res, 200, { id });
+  return json(res, 200, { id, listed });
 }
 
 function safeParse(s) {

@@ -51,14 +51,14 @@ const notLayout = await G.loadGalleryLayout({ file: 'x.json' }, () => ({ hello: 
 const badEntry = await G.loadGalleryLayout({ file: '' }, async () => LAYOUT).catch((e) => e);
 
 const res = (status, body) => async () => ({ ok: status < 400, status, json: async () => body });
-const failed = await S.shareLayout(LAYOUT, 'A라인', res(500, { error: '터졌습니다' })).catch((e) => e);
+const failed = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, res(500, { error: '터졌습니다' })).catch((e) => e);
 const offErr = await S.shareLayout(
-  LAYOUT, 'A라인',
+  LAYOUT, { name: 'A라인', note: '2단 조립' },
   res(501, { error: '공유 저장소가 아직 연결되지 않았습니다', how: 'Vercel → Storage → Blob' }),
 ).catch((e) => e);
-const noId = await S.shareLayout(LAYOUT, 'A라인', res(200, {})).catch((e) => e);
+const noId = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, res(200, {})).catch((e) => e);
 let sentBody = null;
-const uploaded = await S.shareLayout(LAYOUT, 'A라인', async (url, opt) => {
+const uploaded = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, async (url, opt) => {
   sentBody = JSON.parse(opt.body);
   return { ok: true, status: 200, json: async () => ({ id: 'aaa111' }) };
 });
@@ -105,6 +105,7 @@ t('올릴 때 도면과 **이름**을 같이 싣는다', () => {
   /* 이름이 없으면 목록이 「(이름 없음)」 으로 뒤덮여 고를 수가 없다 */
   assert.deepEqual(sentBody.layout, LAYOUT);
   assert.equal(sentBody.name, 'A라인');
+  assert.equal(sentBody.note, '2단 조립', '설명을 안 싣는다');
   assert.equal(uploaded.id, 'aaa111');
 });
 t('받아 올 때도 서버 말을 그대로 옮긴다', () => {
@@ -117,6 +118,8 @@ const toolbar = await readSrc('ui/Toolbar.jsx');
 const app = await readSrc('App.jsx');
 const api = await readSrc('../api/share.js');
 const store = await readSrc('core/store.jsx');
+const shareSrc = await readSrc('core/share.js');
+const inspectorSrc = await readSrc('ui/Inspector.jsx');
 /** 주석을 걷어낸 소스 — 「여기서는 안 부른다」 를 볼 때 주석 속 이름에 걸린다 */
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
@@ -147,7 +150,7 @@ t('서버도 도면인지 보고, 너무 크면 받지 않는다', () => {
 });
 
 /* dev 서버에는 함수가 아예 없다 — 「404」 만 보여 주면 뭘 해야 할지 모른다 */
-const noServer = await S.shareLayout(LAYOUT, 'A라인', async () => ({
+const noServer = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, async () => ({
   ok: false, status: 404, json: async () => { throw new Error('본문 없음'); },
 })).catch((e) => e);
 
@@ -178,10 +181,10 @@ t('목록을 못 읽으면 **빈 배열** — 안 쓰는 배포가 오류를 띄
   assert.deepEqual(listOff, []);
   assert.deepEqual(listBroke, []);
 });
-t('서버가 목록을 낸다 — 그리고 깨지면 다시 세운다', () => {
+t('서버가 목록을 낸다', () => {
   assert.ok(/req\.query\?\.list/.test(api), '목록 길이 없다');
   assert.ok(api.includes('MAX_INDEX'), '목록이 무한정 길어진다');
-  assert.ok(/rows = \(found\.blobs/.test(api), '목록이 깨지면 도면이 통째로 사라진다');
+  /* 「깨지면 다시 세운다」 는 아래 「스스로 아문다」 가 더 넓게 본다 */
 });
 t('썸네일은 **도면으로 그린다** — 화면 캡처가 아니다', () => {
   assert.ok(api.includes('draw.layoutThumbSVG(data)'), '서버가 썸네일을 안 그린다');
@@ -285,4 +288,44 @@ t('멈춘 이유와 **다시 도는 길**을 같이 말한다', () => {
   assert.ok(/border-emerald-500/.test(dock), '오더 칸을 안 짚어 준다');
   assert.ok(/ring-emerald-500/.test(toolbar), '재생 버튼을 안 짚어 준다');
   assert.ok(/다시 돌리기/.test(toolbar), '버튼 설명이 그대로다');
+});
+
+/* ---------- 실제로 났던 버그: 목록이 첫 번째에서 멈췄다 -------------------- */
+
+t('**덮어쓰기를 켠다** — put 은 기본적으로 거부하고 던진다', () => {
+  /* @vercel/blob 의 put 은 같은 경로가 이미 있으면 던진다(allowOverwrite 기본 false).
+     목록 파일은 매번 같은 경로에 다시 써야 하는데 그것을 빠뜨려서, 첫 번째만
+     성공하고 두 번째부터 조용히 실패했다 — Blob 은 늘어나는데 목록은 하나였다. */
+  const idx = api.slice(api.indexOf('await put(INDEX'), api.indexOf('await put(INDEX') + 300);
+  assert.ok(idx.includes('allowOverwrite: true'), '목록을 덮어쓸 수 없어 두 번째부터 실패한다');
+  assert.ok(idx.includes('cacheControlMaxAge: 0'), 'CDN 이 옛 목록을 물고 있을 수 있다');
+});
+t('도면 파일은 **덮어쓰지 않는다** — id 가 겹치면 남의 도면이 날아간다', () => {
+  const one = api.slice(api.indexOf(`put(\`\${SHARES}`), api.indexOf(`put(\`\${SHARES}`) + 220);
+  assert.equal(/allowOverwrite/.test(one), false, '도면까지 덮어쓰게 열어 두었다');
+});
+t('목록은 **스스로 아문다** — 장부가 틀려도 도면이 안 숨는다', () => {
+  /* 있는 것이 안 보이는 것이 가장 나쁜 고장이다. 사실은 파일 쪽에 있으므로
+     늘 실제 목록을 같이 훑어서 장부에 없는 것을 끼워 넣는다. */
+  assert.ok(/const known = await readJson\(INDEX\)/.test(api), '장부만 읽는다');
+  assert.ok(/for \(const b of found\.blobs/.test(api), '실제 파일을 안 훑는다');
+  assert.ok(/seen\.has\(id\)/.test(api), '같은 것이 두 번 뜬다');
+  assert.ok(/rows\.sort/.test(api), '섞인 뒤 순서가 뒤죽박죽이 된다');
+});
+t('목록에 못 넣었으면 **말한다** — 없어진 줄 알고 또 올리게 된다', () => {
+  assert.ok(/listed = true/.test(api) && /\{ id, listed \}/.test(api), '서버가 안 알려 준다');
+  assert.ok(/listed: listed !== false/.test(shareSrc), '클라이언트가 안 받는다');
+  assert.ok(/state\.listed === false/.test(toolbar), '화면이 안 말해 준다');
+});
+t('올릴 때 **이름과 설명**을 받는다', () => {
+  assert.ok(/placeholder="도면 이름/.test(toolbar), '이름 칸이 없다');
+  assert.ok(/placeholder="설명 —/.test(toolbar), '설명 칸이 없다');
+  assert.ok(/const note = cleanName\(body\?\.note/.test(api), '서버가 설명을 안 받는다');
+  assert.ok(/\{ id, name, note,/.test(api), '설명이 목록에 안 남는다');
+});
+t('보고서·CSV 버튼이 **눈에 띈다** — 들고 나가는 유일한 길이다', () => {
+  assert.ok(/bg-sky-500 px-2\.5 py-1 .*text-white/.test(inspectorSrc), '보고서가 여전히 흐리다');
+  assert.ok(/ring-sky-500\/40/.test(inspectorSrc), 'CSV 가 여전히 흐리다');
+  assert.equal(/rounded bg-kbd px-1\.5 py-0\.5 text-\[10\.5px\] text-ink4/.test(inspectorSrc), false,
+    '옛 흐린 모양이 남아 있다');
 });
