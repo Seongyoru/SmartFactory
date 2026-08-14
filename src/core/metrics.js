@@ -20,7 +20,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { downTimeOf, quality } from './faults.js';
+import { downTimeOf, quality, qualityOf } from './faults.js';
 
 /** 추이 그래프를 위해 남기는 표본 간격(시뮬 초)과 최대 개수 */
 const SAMPLE_SEC = 10;
@@ -312,7 +312,9 @@ export function oeeOf(uid) {
 
   const availability = Math.max(0, 1 - (downSec + crewSec) / ran);
   const performance = able > 0 ? Math.max(0, 1 - (blockSec + starveSec) / able) : 1;
-  const q = quality();
+  /* **그 설비의** 양품률이다. 라인 합계를 쓰면 설비 하나의 불량률을 올렸을 때
+     아무 상관 없는 설비의 OEE 까지 같이 떨어진다 — 실제로 그랬다. */
+  const q = qualityOf(uid);
   return {
     availability, performance, quality: q,
     oee: availability * performance * q,
@@ -320,7 +322,17 @@ export function oeeOf(uid) {
   };
 }
 
-/** 라인 전체 — 설비들의 평균. 볼 설비가 없으면 null */
+/**
+ * 라인 전체 — 설비들의 평균. 볼 설비가 없으면 null.
+ * ---------------------------------------------------------------------------
+ *  **품질만 평균이 아니라 합계다.** 가동률·성능은 설비마다의 시간이라 평균이
+ *  뜻을 갖지만, 양품률은 「이 라인이 만든 것 중 쓸 수 있는 것의 비율」이라
+ *  개수로 세야 한다 — 한 개 만든 설비와 천 개 만든 설비를 같은 무게로 평균 내면
+ *  거의 안 돌린 설비가 라인 성적을 좌우한다.
+ *
+ *  (설비 하나를 볼 때는 `oeeOf` 가 **그 설비의** 양품률을 쓴다. 둘이 다른 것이
+ *  맞다 — 하나는 「이 기계가 잘 만드나」, 하나는 「라인이 잘 만드나」다.)
+ */
 export function oeeOverall(uids) {
   const rows = (uids ?? []).map((u) => oeeOf(u)).filter(Boolean);
   if (!rows.length) return null;

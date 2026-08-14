@@ -138,9 +138,24 @@ export const useFaults = () => useSyncExternalStore(subscribe, getDown, () => EM
  */
 let made = 0;
 let scrapped = 0;
+/** 설비마다 따로 — 불량은 **만든 설비의** 문제다 (screen 주석 참고) */
+let madeBy = {};
+let scrappedBy = {};
 
-/** @returns 이번에 실제로 쓸 수 있는(양품) 개수 */
-export function screen(count, scrapRate) {
+/**
+ * 만든 것 중 쓸 수 있는 것만 골라낸다.
+ * ---------------------------------------------------------------------------
+ *  **누가 만들었는지도 같이 센다.** 처음에는 라인 전체 합만 두었더니, 설비
+ *  하나의 불량률을 올리자 **아무 상관 없는 설비들의 OEE 까지 같이 떨어졌다** —
+ *  OEE 의 품질 항이 전부 같은 전역 값을 보고 있었기 때문이다.
+ *
+ *  불량은 만든 설비의 문제다. 옆 설비가 대신 뒤집어쓰면 「어디를 손볼까」 가
+ *  통째로 어긋난다.
+ *
+ *  @param uid 만든 설비. 없으면 라인 합계에만 들어간다
+ *  @returns 이번에 실제로 쓸 수 있는(양품) 개수
+ */
+export function screen(count, scrapRate, uid = null) {
   const n = Math.max(0, Math.round(count));
   if (!n) return 0;
   const rate = Math.min(1, Math.max(0, scrapRate ?? 0));
@@ -148,6 +163,10 @@ export function screen(count, scrapRate) {
   for (let i = 0; i < n; i++) if (Math.random() < rate) bad++;
   made += n;
   scrapped += bad;
+  if (uid) {
+    madeBy = { ...madeBy, [uid]: (madeBy[uid] ?? 0) + n };
+    if (bad) scrappedBy = { ...scrappedBy, [uid]: (scrappedBy[uid] ?? 0) + bad };
+  }
   if (bad) {
     const now = performance.now();
     if (now - lastNotify >= NOTIFY_MS) { lastNotify = now; emit(); }
@@ -157,10 +176,26 @@ export function screen(count, scrapRate) {
 
 export const getMade = () => made;
 export const getScrapped = () => scrapped;
+export const madeOf = (uid) => madeBy[uid] ?? 0;
+export const scrappedOf = (uid) => scrappedBy[uid] ?? 0;
+
+/** 라인 전체 양품률 — 배치끼리 견줄 때 쓴다(scenarios) */
 export const quality = () => (made > 0 ? 1 - scrapped / made : 1);
+
+/**
+ * **그 설비의** 양품률.
+ *  아직 아무것도 안 만들었으면 1 로 본다 — 0 으로 두면 방금 놓은 설비와
+ *  재료를 안 쓰는 설비가 전부 「불량 100%」 로 보인다.
+ */
+export const qualityOf = (uid) => {
+  const n = madeBy[uid] ?? 0;
+  return n > 0 ? 1 - (scrappedBy[uid] ?? 0) / n : 1;
+};
 
 export function resetQuality() {
   made = 0;
   scrapped = 0;
+  madeBy = {};
+  scrappedBy = {};
   emit();
 }

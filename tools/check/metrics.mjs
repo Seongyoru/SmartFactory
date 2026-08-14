@@ -74,3 +74,57 @@ t('다시 재기가 굶음도 지운다', () => {
 
 /* SimClock 의 갈라 세기는 이유가 넷으로 늘어 check-metrics2.mjs 로 옮겼다 */
 
+
+/* ---------- 불량은 **만든 설비의** 문제다 ---------------------------------
+     설비 하나의 불량률을 올렸더니 아무 상관 없는 설비의 OEE 까지 떨어졌다.
+     OEE 의 품질 항이 전부 라인 합계를 보고 있었기 때문이다 — 사용자가 찾았다.
+--------------------------------------------------------------------------- */
+
+const f = await import(SRC + 'core/faults.js');
+
+t('불량을 낸 설비만 품질이 떨어진다 — 옆 설비는 그대로', () => {
+  m.resetMetrics();
+  f.resetQuality();
+  m.accumulate(600, new Set(), 0, null, null);       // 둘 다 정상 가동
+  f.screen(100, 0, 'GOOD');                          // 불량 0%
+  f.screen(100, 1, 'BAD');                           // 전부 불량
+
+  assert.equal(m.oeeOf('GOOD').quality, 1, '남의 불량을 뒤집어썼다');
+  assert.equal(m.oeeOf('BAD').quality, 0);
+  assert.equal(m.oeeOf('GOOD').oee, 1, 'OEE 까지 끌려 내려갔다');
+});
+t('아직 아무것도 안 만든 설비는 품질 1 — 0 이면 전부 불량으로 보인다', () => {
+  m.resetMetrics();
+  f.resetQuality();
+  m.accumulate(600, new Set(), 0, null, null);
+  f.screen(50, 1, 'BAD');
+  assert.equal(m.oeeOf('NEW').quality, 1, '방금 놓은 설비가 불량 100% 로 보인다');
+});
+t('uid 를 안 넘기면 라인 합계에만 들어간다 — 옛 호출도 안 깨진다', () => {
+  f.resetQuality();
+  f.screen(10, 1);
+  assert.equal(f.getScrapped(), 10);
+  assert.equal(f.qualityOf('아무개'), 1, '주인 없는 불량이 남에게 붙었다');
+});
+t('**라인 전체 양품률은 개수로 센다** — 평균이 아니다', () => {
+  /* 한 개 만든 설비와 천 개 만든 설비를 같은 무게로 평균 내면, 거의 안 돌린
+     설비가 라인 성적을 좌우한다. */
+  m.resetMetrics();
+  f.resetQuality();
+  m.accumulate(600, new Set(), 0, null, null);
+  f.screen(1000, 0, 'BIG');                          // 1000개 전부 양품
+  f.screen(1, 1, 'TINY');                            // 1개 불량
+
+  const line = m.oeeOverall(['BIG', 'TINY']);
+  near(line.quality, 1000 / 1001, 1e-9);
+  /* 설비별 품질을 평균 냈다면 0.5 가 나왔을 것이다 */
+  assert.ok(line.quality > 0.99, `개수가 아니라 평균으로 셌다 (${line.quality})`);
+});
+t('다시 재기는 설비별 기록도 지운다', () => {
+  f.resetQuality();
+  f.screen(10, 1, 'X');
+  assert.equal(f.qualityOf('X'), 0);
+  f.resetQuality();
+  assert.equal(f.qualityOf('X'), 1, '지난 실행의 불량이 남아 있다');
+  assert.equal(f.madeOf('X'), 0);
+});

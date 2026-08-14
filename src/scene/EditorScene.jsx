@@ -2473,7 +2473,9 @@ function SceneContent() {
           onArrive={sink ? (n) => {
             /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
                적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다. */
-            const good = screen(n, owner.scrapRate ?? 0);
+            /* 누가 만들었는지도 같이 넘긴다 — 불량은 **만든 설비의** 문제다.
+               안 넘기면 그 설비의 OEE 품질 항이 라인 합계를 보게 된다. */
+            const good = screen(n, owner.scrapRate ?? 0, owner.uid);
             if (good <= 0) return;
             /* 재료를 먹는 설비는 **그 종류 몫**까지만 받는다. 안 쓰는 종류면
                몫이 0 이라 한 개도 안 들어간다(위 sink 주석 참고). */
