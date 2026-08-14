@@ -120,11 +120,19 @@ export function saveAppearance(value) {
  *  단계별 진행도는 저장하지 않는다. 그건 도면을 보면 알 수 있고(바닥이 있는가,
  *  설비가 있는가), 따로 적어 두면 도면과 어긋날 수 있다.
  */
+/**
+ * 저장하는 값은 **지금 어느 화면인가** 하나다 — `'welcome'` · `'pick'` ·
+ * 갈래 이름(`'basics'` · `'cost'` …) · 닫힘(`'done'`).
+ *
+ *  안내가 갈래로 나뉘면서 값의 가짓수가 늘었다. 여기서 이름을 하나하나 알 필요는
+ *  없으므로 **글자를 그대로 오간다** — 모르는 이름이 남아 있으면(옛 판이 적어 둔
+ *  `'steps'` 같은 것) 화면 쪽이 고르는 창으로 돌린다.
+ */
 export function loadGuidePhase() {
   try {
     const v = localStorage.getItem(GUIDE_KEY);
     if (v === null) return 'welcome';          // 이 브라우저에서 처음 연다
-    return v === 'steps' ? 'steps' : null;     // 그 밖('done')은 닫아 둔 것
+    return v === 'done' ? null : v;            // 'done' 은 닫아 둔 것
   } catch {
     return null;
   }
@@ -132,7 +140,7 @@ export function loadGuidePhase() {
 
 export function saveGuidePhase(phase) {
   try {
-    localStorage.setItem(GUIDE_KEY, phase === 'steps' ? 'steps' : 'done');
+    localStorage.setItem(GUIDE_KEY, phase ? String(phase) : 'done');
   } catch { /* 무시 */ }
 }
 

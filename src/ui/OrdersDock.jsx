@@ -104,7 +104,7 @@ export default function OrdersDock() {
           위쪽 <b>▶</b> 를 누르면 다시 돕니다.
         </div>
       )}
-      <div className="flex shrink-0 items-center justify-between px-3 py-1.5">
+      <div className="flex shrink-0 items-center justify-between px-3 py-1.5" data-guide="dock-orders">
         <span className="text-[11px] font-medium text-ink2">생산 오더</span>
         <span className="text-[10px] tabular-nums text-ink4">
           {orders.length > 0 && (

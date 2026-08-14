@@ -273,7 +273,7 @@ function GalleryButton({ onPick, onExport }) {
 
   return (
     <>
-      <Btn active={open} onClick={() => { if (!open) reload(); setOpen((v) => !v); }}>
+      <Btn active={open} onClick={() => { if (!open) reload(); setOpen((v) => !v); }} data-guide="btn-gallery">
         <Library size={13} /> 공용 도면
       </Btn>
       {/**
@@ -388,7 +388,7 @@ function ShareButton({ snapshot }) {
 
   return (
     <div className="relative">
-      <Btn active={!!state} onClick={() => setState(state ? null : 'ask')}>
+      <Btn active={!!state} onClick={() => setState(state ? null : 'ask')} data-guide="btn-share">
         <Share2 size={13} /> 공유
       </Btn>
       {state && (
@@ -665,9 +665,11 @@ export default function Toolbar() {
 
       {/* 따라 하기 — 처음 한 번은 저절로 뜨고, 그 뒤로는 여기서 다시 연다 */}
       <IconBtn
-        title="따라 하기 — 순서대로 도면 하나 만들어 보기"
+        title="따라 하기 — 배우고 싶은 것을 골라서"
         active={!!state.guide}
-        onClick={() => dispatch({ type: 'SET', patch: { guide: state.guide ? null : 'steps' } })}
+        /* 열면 **고르는 화면**으로 — 갈래가 여럿이니 바로 한 갈래로 들어가면
+           나머지가 있다는 것조차 모른다 */
+        onClick={() => dispatch({ type: 'SET', patch: { guide: state.guide ? null : 'pick' } })}
       >
         <GraduationCap size={14} />
       </IconBtn>
@@ -703,6 +705,7 @@ export default function Toolbar() {
           )
         }
         title="도면을 파일로 꺼냅니다 — 이 브라우저를 지워도 남는 유일한 사본입니다"
+        data-guide="btn-export"
       >
         <Download size={13} /> 내보내기
       </Btn>

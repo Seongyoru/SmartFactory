@@ -27,6 +27,7 @@ await import('./report.mjs');
 await import('./cost.mjs');
 await import('./share.mjs');
 await import('./balance.mjs');
+await import('./guides.mjs');
 await import('./shelfrows.mjs');
 await import('./process.mjs');
 

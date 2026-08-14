@@ -257,7 +257,7 @@ function CrewFields({ placed }) {
   const rank = rows.filter((r) => r.need > 0).findIndex((r) => r.uid === placed.uid) + 1;
 
   return (
-    <Section title="작업자">
+    <Section title="작업자" data-guide="panel-crew">
       <Slider
         label="필요 인원"
         min={CREW_RANGE[0]} max={CREW_RANGE[1]} step={CREW_RANGE[2]}
@@ -303,7 +303,7 @@ function FaultFields({ placed }) {
   const mtbf = placed.mtbf ?? 0;
 
   return (
-    <Section title="고장 · 불량">
+    <Section title="고장 · 불량" data-guide="panel-fault">
       <Slider
         label="평균 고장 간격 (MTBF)"
         min={MTBF_RANGE[0]} max={MTBF_RANGE[1]} step={MTBF_RANGE[2]}
@@ -356,7 +356,7 @@ function PowerFields({ placed }) {
   const price = normalizeRates(state.rates).power;
 
   return (
-    <Section title="전력 · 고정비">
+    <Section title="전력 · 고정비" data-guide="panel-power">
       <Slider
         label="가동 중" value={run} text={`${run} kW`}
         min={KW_RANGE[0]} max={60} step={0.1}
@@ -446,7 +446,7 @@ function RecipeSection({ placed, item }) {
   const minCap = source ? 0 : recipe.in.reduce((s, r) => s + r.qty, 0) * per;
 
   return (
-    <Section title="만드는 것">
+    <Section title="만드는 것" data-guide="panel-recipe">
       {/* 무엇을 만드는지는 **도면에만** 적힌다 — 라이브러리로 되돌아가는
           「기본값」 같은 선택지는 없다. 라이브러리가 정하는 것은 갈래뿐이다 */}
       <label className="block py-1">
@@ -655,7 +655,7 @@ function EquipmentPanel({ placed }) {
         *  이제 맨 위에 답이 있고, 아래 슬라이더들은 **그 답을 어떻게 바꾸는지**만
         *  보여 준다. 슬라이더마다 자기 값이 무엇으로 환산되는지 한 줄씩 붙는다.
         */}
-      <Section title="생산">
+      <Section title="생산" data-guide="panel-production">
         <div className="rounded-md border border-edge bg-field px-2.5 py-2">
           <div className="flex items-baseline justify-between">
             <span className="text-[11px] text-ink4">이 설비의 처리량</span>
@@ -1078,7 +1078,7 @@ function ShelfPanel({ placed }) {
         *  예전에는 줄을 늘리려면 선반을 새로 그려 위치와 설정을 손으로 맞춰야
         *  했다. 한 덩어리로 다루면 옮길 때도 같이 움직이고 규격도 한 번만 맞춘다.
         */}
-      <Section title="줄">
+      <Section title="줄" data-guide="panel-shelfrows">
         {num('줄 수', 'rows', MIN_ROWS, MAX_ROWS, 1, rows,
           `${rows} 줄 · 전체 깊이 ${shelfDepth(placed, spec).toFixed(2)} m`)}
         {rows > 1 && num('통로 폭', 'rowGap', MIN_ROW_GAP, MAX_ROW_GAP, 0.1, aisle, `${aisle.toFixed(2)} m`)}
@@ -1148,7 +1148,7 @@ function ShelfPanel({ placed }) {
         </div>
       </Section>
 
-      <Section title="입출고">
+      <Section title="입출고" data-guide="panel-slots">
         <label className="block">
           <span className="mb-1 flex items-center justify-between text-[11px] text-ink4">
             빈 카트에 실어 보낼 수량
@@ -1276,7 +1276,7 @@ function CartPanel({ cart }) {
 
   return (
     <>
-      <Section title={truck ? '트럭' : '카트'}>
+      <Section title={truck ? '트럭' : '카트'} data-guide="panel-cart">
         <Field
           label="이름"
           value={cart.name}
@@ -2891,7 +2891,7 @@ function CrewPanel() {
   const nameOf = (uid) => state.placed.find((p) => p.uid === uid)?.name ?? uid;
 
   return (
-    <Section title="인력">
+    <Section title="인력" data-guide="panel-shifts">
       <Row label="이 도면에 필요한 인원">{need} 명 / 조</Row>
       {!unlimited && (
         <>

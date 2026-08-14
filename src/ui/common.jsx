@@ -39,9 +39,10 @@ export function IconBtn({ active, title, children, ...rest }) {
   );
 }
 
-export function Section({ title, right, children }) {
+export function Section({ title, right, children, ...rest }) {
+  /* 남는 속성은 그대로 흘린다 — 따라 하기가 `data-guide` 로 이 칸을 짚는다 */
   return (
-    <div className="border-b border-line px-3 py-3 last:border-b-0">
+    <div className="border-b border-line px-3 py-3 last:border-b-0" {...rest}>
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-ink4">{title}</h3>
         {right}

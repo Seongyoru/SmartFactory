@@ -509,6 +509,10 @@ function Rates({ rates, set, untouched }) {
  * 띠
  * ======================================================================== */
 
+/* 따라 하기가 짚는 손잡이 — 문자열로 못 박아 두면 검사가 「없는 곳을 가리키는 단계」를 잡는다 */
+export const DOCK_RUN = 'dock-run';
+export const DOCK_COST = 'dock-cost';
+
 const TABS = [['run', '실행'], ['cost', '원가']];
 
 export default function RunDock() {
@@ -579,6 +583,7 @@ export default function RunDock() {
           <button
             key={id}
             type="button"
+            data-guide={id === 'cost' ? DOCK_COST : DOCK_RUN}
             /* 접힌 채로 탭을 누르면 **펴면서** 그 탭으로 간다 — 두 번 누르게 하지 않는다 */
             onClick={() => dispatch({ type: 'SET', patch: { runTab: id, showRunDock: true } })}
             className={`-mb-px h-full border-b-2 px-3 text-[11px] font-medium transition-colors ${
@@ -594,7 +599,9 @@ export default function RunDock() {
         <div className="flex-1" />
         {/* 보고서·다시 재기는 **실행 쪽 일**이다 — 단가를 만지는 중에 「다시 재기」가
             옆에 있으면 잘못 누르기 쉽고, 누르면 기록이 통째로 날아간다 */}
-        {open && tab === 'run' && <ReportButtons />}
+        <span data-guide="dock-report">
+          {open && tab === 'run' && <ReportButtons />}
+        </span>
       </div>
 
       {open && tab === 'run' && (
