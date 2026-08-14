@@ -2530,6 +2530,21 @@ function MultiPanel({ items }) {
  *  가동률은 **막히지 않고 돈 시간의 비율**이다(적치대가 차서 선 시간을 뺀 것).
  *  아직 아무것도 안 돌았으면 나눌 것이 없으므로 통째로 감춘다.
  */
+/**
+ * 결과를 **꺼내는 버튼**의 생김새.
+ * ---------------------------------------------------------------------------
+ *  높이를 못 박는 것이 요점이다. 「보고서」(한글)와 「CSV」(라틴)는 글자 높이가
+ *  달라서, 안쪽 여백만 맞추면 두 버튼 높이가 1~2px 어긋나 한 줄로 안 보인다.
+ *  `leading-none` 으로 글자 높이를 지우고 상자 높이를 직접 준다.
+ *
+ *  평소에는 테두리만, 손이 닿으면 **채워지고 글자·아이콘이 하얘진다** — 눌리는
+ *  것임을 색이 먼저 말해 준다.
+ */
+const OUT_H = 'flex h-[26px] items-center';
+const OUT_BTN = `${OUT_H} shrink-0 gap-1.5 whitespace-nowrap rounded-md px-2.5`
+  + ' text-[11px] font-medium leading-none text-sky-600 ring-1 ring-sky-500/40'
+  + ' transition-colors hover:bg-sky-500 hover:text-white hover:ring-sky-500';
+
 export function ReportButtons() {
   const { state, dispatch, itemOf } = useEditor();
   useMetrics();
@@ -2698,32 +2713,27 @@ export function ReportButtons() {
         *  둘 다 `buildReport()` 하나에서 나온다 — 두 파일이 다른 숫자를 말할
         *  자리가 없다.
         */}
-      <button
-        type="button"
-        onClick={() => save('html')}
-        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md bg-sky-500 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm transition-colors hover:bg-sky-600"
+      <button type="button" onClick={() => save('html')} className={OUT_BTN}
         title="읽는 보고서 — 브라우저로 열어 보고 Ctrl+P 로 PDF 로 만듭니다"
       >
-        <FileText size={12} /> 보고서
+        <FileText size={14} /> 보고서
       </button>
-      <button
-        type="button"
-        onClick={() => save('csv')}
-        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-medium text-sky-600 ring-1 ring-sky-500/40 transition-colors hover:bg-sky-500/10"
+      <button type="button" onClick={() => save('csv')} className={OUT_BTN}
         title="엑셀에서 다시 따지려면 이쪽 — 반올림하지 않은 원래 값이 들어갑니다"
       >
-        <Table2 size={12} /> CSV
+        <Table2 size={14} /> CSV
       </button>
       {/* 아이콘 하나로 줄였다 — 띠의 머리줄은 탭에 자리를 내줘야 한다.
-          누르면 기록이 통째로 날아가므로 **말은 툴팁으로 온전히** 남긴다. */}
+          누르면 기록이 통째로 날아가므로 **말은 툴팁으로 온전히** 남긴다.
+          그래서 색도 다르다 — 옆의 둘은 꺼내는 일, 이건 지우는 일이다. */}
       <button
         type="button"
         onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
-        className="shrink-0 rounded-md p-1.5 text-ink3 ring-1 ring-edge transition-colors hover:bg-rose-500/10 hover:text-rose-500 hover:ring-rose-500/40"
+        className={`${OUT_H} w-[26px] shrink-0 justify-center rounded-md text-ink3 ring-1 ring-edge transition-colors hover:bg-rose-500 hover:text-white hover:ring-rose-500`}
         title="다시 재기 — 배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
         aria-label="다시 재기"
       >
-        <RotateCcw size={13} />
+        <RotateCcw size={14} />
       </button>
     </span>
   );

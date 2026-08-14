@@ -11,7 +11,7 @@ export function Btn({ active, danger, className = '', children, ...rest }) {
   const base =
     'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
   const tone = active
-    ? 'bg-sky-500 text-white shadow-[0_0_0_1px_rgba(56,189,248,0.5)]'
+    ? 'bg-sky-500 text-white shadow-[0_0_0_1px_rgba(56,189,248,0.5)] hover:bg-sky-600'
     : danger
       ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 ring-1 ring-red-500/30'
       : 'bg-raise text-ink2 hover:bg-raiseh ring-1 ring-edge';
@@ -30,7 +30,7 @@ export function IconBtn({ active, title, children, ...rest }) {
       /* relative — 버튼 위에 배지(개수 표시)를 얹는 곳이 있다. 기준이 없으면
          배지가 화면 구석으로 날아간다. */
       className={`relative grid h-8 w-8 place-items-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-35 ${
-        active ? 'bg-sky-500 text-white' : 'bg-raise text-ink2 hover:bg-raiseh ring-1 ring-edge'
+        active ? 'bg-sky-500 text-white hover:bg-sky-600' : 'bg-raise text-ink2 hover:bg-raiseh ring-1 ring-edge'
       }`}
       {...rest}
     >

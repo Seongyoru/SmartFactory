@@ -120,6 +120,7 @@ const api = await readSrc('../api/share.js');
 const store = await readSrc('core/store.jsx');
 const shareSrc = await readSrc('core/share.js');
 const inspectorSrc = await readSrc('ui/Inspector.jsx');
+const commonSrc = await readSrc('ui/common.jsx');
 /** 주석을 걷어낸 소스 — 「여기서는 안 부른다」 를 볼 때 주석 속 이름에 걸린다 */
 const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
@@ -324,8 +325,26 @@ t('올릴 때 **이름과 설명**을 받는다', () => {
   assert.ok(/\{ id, name, note,/.test(api), '설명이 목록에 안 남는다');
 });
 t('보고서·CSV 버튼이 **눈에 띈다** — 들고 나가는 유일한 길이다', () => {
-  assert.ok(/bg-sky-500 px-2\.5 py-1 .*text-white/.test(inspectorSrc), '보고서가 여전히 흐리다');
-  assert.ok(/ring-sky-500\/40/.test(inspectorSrc), 'CSV 가 여전히 흐리다');
+  assert.ok(/ring-sky-500\/40/.test(inspectorSrc), '테두리가 없다');
+  assert.ok(/hover:bg-sky-500 hover:text-white/.test(inspectorSrc), '손이 닿아도 안 채워진다');
   assert.equal(/rounded bg-kbd px-1\.5 py-0\.5 text-\[10\.5px\] text-ink4/.test(inspectorSrc), false,
     '옛 흐린 모양이 남아 있다');
+});
+t('**높이를 못 박는다** — 한글과 라틴은 글자 높이가 달라 줄이 어긋난다', () => {
+  /* 「보고서」와 「CSV」에 안쪽 여백만 맞췄더니 두 버튼이 1~2px 어긋났다.
+     leading-none 으로 글자 높이를 지우고 상자 높이를 직접 준다. */
+  assert.ok(/const OUT_H = 'flex h-\[26px\] items-center'/.test(inspectorSrc), '높이를 안 박았다');
+  assert.ok(/leading-none/.test(inspectorSrc), '글자 높이가 살아 있어 어긋난다');
+  /* 셋이 같은 자를 쓴다 — 하나만 고치면 또 어긋난다 */
+  assert.equal((inspectorSrc.match(/className=\{OUT_BTN\}/g) ?? []).length, 2, '두 버튼이 같은 모양이 아니다');
+  assert.ok(/\$\{OUT_H\} w-\[26px\]/.test(inspectorSrc), '다시 재기만 높이가 다르다');
+});
+t('**켜져 있는 버튼도 손이 닿으면 반응한다**', () => {
+  /* 일시정지·그리드·면 맞춤은 켜져 있어 active 였는데, active 에 hover 가 아예
+     없어서 미동도 없었다 — 눌리는 것인지 그냥 표시인지 알 수가 없었다. */
+  const common = commonSrc.slice(commonSrc.indexOf('export function Btn'), commonSrc.indexOf('export function Section'));
+  const active = [...common.matchAll(/bg-sky-500 text-white[^']*/g)].map((m) => m[0]);
+  assert.ok(active.length >= 2, 'Btn·IconBtn 의 켠 모양을 못 찾았다');
+  for (const a of active) assert.ok(/hover:bg-sky-600/.test(a), `켠 채로는 반응이 없다 — ${a}`);
+  assert.ok(/hover:bg-raiseh/.test(toolbar), '스냅 고르개가 반응하지 않는다');
 });

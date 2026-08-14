@@ -443,7 +443,7 @@ export default function Toolbar() {
         <select
           value={state.gridSize}
           onChange={(e) => dispatch({ type: 'SET', patch: { gridSize: Number(e.target.value) } })}
-          className="rounded border border-edge bg-field px-1.5 py-1 text-[11px] text-ink outline-none"
+          className="cursor-pointer rounded border border-edge bg-field px-1.5 py-1 text-[11px] text-ink outline-none transition-colors hover:border-sky-500/60 hover:bg-raiseh focus:border-sky-500"
         >
           {GRID_SIZES.map((g) => (
             <option key={g} value={g}>
