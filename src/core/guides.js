@@ -87,7 +87,10 @@ export const GUIDES = [
         title: '돌려 보기',
         body: '위쪽 **▶** 를 누르고 배속을 올려 보세요. 벨트가 돌고 카트가 움직입니다.\n**Tab** 으로 3D 를 한 번 보고 오세요.',
         spot: ['[data-guide="view-iso"]'],
-        done: (f) => f.view === 'iso' || f.ranSec > 0,
+        /* 돈 시간(ranSec)은 못 쓴다 — 시뮬은 **기본으로 돌고 있어서** 페이지를
+           연 순간부터 쌓인다. 아무것도 안 했는데 체크되면 안내가 아니다.
+           3D 를 봤거나, 물건이 실제로 나갔거나 — 둘 다 사람이 한 일이다. */
+        done: (f) => f.view === 'iso' || f.shipped > 0,
       },
     ],
   },
@@ -264,7 +267,9 @@ export const GUIDES = [
         title: '보고서 꺼내기',
         body: '조금 돌린 뒤 아래 띠 **실행** 탭의 **보고서** 를 누르세요. 브라우저로 열어 **Ctrl+P** 하면 PDF 가 됩니다.\n엑셀에서 다시 따지려면 옆의 **CSV** 입니다.',
         spot: ['[data-guide="dock-report"]'],
-        done: (f) => f.ranSec > 0,
+        /* 버튼을 눌렀는지는 도면으로 알 수 없다. 대신 **꺼낼 것이 생겼는지**를 본다 —
+           물건이 하나라도 나가야 보고서에 적을 것이 있다 */
+        done: (f) => f.shipped > 0,
       },
     ],
   },

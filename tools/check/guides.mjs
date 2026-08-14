@@ -168,6 +168,7 @@ t('공정 시간은 **기본값에서 바뀌었을 때만** 손댄 것으로 본
 /* ---------- 배선 ------------------------------------------------------------ */
 
 const tut = await readSrc('ui/Tutorial.jsx');
+const guidesSrc = await readSrc('core/guides.js');
 const toolbar = await readSrc('ui/Toolbar.jsx');
 
 t('12시 버튼은 **고르는 화면**을 연다 — 바로 한 갈래로 들어가면 나머지를 모른다', () => {
@@ -189,4 +190,22 @@ t('셀 것이 없는 갈래는 **「다 했습니다」가 아니다**', () => {
     assert.ok(/읽어 보기/.test(tut), '셀 것 없는 갈래를 「다 했습니다」로 보여 준다');
     assert.ok(/const readOnly = p\.total === 0/.test(tut), '그 경우를 안 가른다');
   }
+});
+
+t('**앱을 켜 두기만 해도 체크되는 단계가 없다**', () => {
+  /* 시뮬은 기본으로 돌고 있다(running: true). 그래서 페이지를 연 순간부터
+     ranSec 가 쌓이는데, 그것을 「돌려 봤다」로 읽으면 아무것도 안 한 사람에게
+     1/7 · 1/3 이 찍힌다 — 실제로 그렇게 나왔다. 사람이 한 일을 봐야 한다. */
+  const idle = F.guideFacts({ view: 'top', ranSec: 3600, shipped: 0 }, itemOf);
+  for (const { g, s } of allSteps) {
+    if (s.optional) continue;
+    assert.equal(s.done(idle), false, `${g.id}/${s.id} 가 켜 두기만 해도 통과다`);
+  }
+});
+t('돈 시간(ranSec)으로는 판정하지 않는다 — 켜 두면 저절로 쌓인다', () => {
+  const src = guidesSrc.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.equal(/f\.ranSec/.test(src), false, '아직 돈 시간으로 판정하는 단계가 있다');
+});
+t('체크가 왜 되어 있는지 화면이 말한다', () => {
+  assert.ok(/도면에서 읽어 체크됩니다/.test(tut), '미리 체크된 이유를 안 알려 준다 — 고장으로 보인다');
 });

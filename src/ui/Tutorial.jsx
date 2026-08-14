@@ -142,7 +142,10 @@ function Picker({ facts, onPick, onClose }) {
             </span>
             <div>
               <h2 className="text-[13px] font-semibold text-ink">따라 하기</h2>
-              <p className="text-[10.5px] text-ink4">궁금한 것을 고르세요 — 순서대로 할 필요는 없습니다</p>
+              {/* 체크가 미리 되어 있으면 「고장인가?」 싶다 — 왜 그런지 먼저 말한다 */}
+              <p className="text-[10.5px] text-ink4">
+                궁금한 것을 고르세요 · <b className="text-ink3">이미 해 둔 것은 도면에서 읽어 체크됩니다</b>
+              </p>
             </div>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1 text-ink4 hover:bg-raiseh hover:text-ink2" title="닫기">
