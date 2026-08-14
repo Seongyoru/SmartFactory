@@ -73,16 +73,34 @@ async function complain(res) {
  *  @returns { id, url }
  *  @throws  못 올렸으면 — **삼키지 않는다.** 올린 줄 알고 링크를 보내면 낭패다
  */
-export async function shareLayout(data, fetchImpl = fetch) {
+export async function shareLayout(data, name, fetchImpl = fetch) {
   const res = await fetchImpl(SHARE_API, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(data),
+    /* 이름을 같이 보낸다 — 목록에서 「무엇인지」 를 가리는 것은 결국 이름이다 */
+    body: JSON.stringify({ name, layout: data }),
   });
   if (!res.ok) throw await complain(res);
   const { id } = await res.json();
   if (!id) throw new Error('서버가 링크를 안 줬습니다');
   return { id, url: shareUrl(id) };
+}
+
+/**
+ * 올라와 있는 도면 목록 — 링크가 없어도 **누구나** 여기서 고른다.
+ *  목록이 없거나 못 읽으면 **빈 배열**이다. 공유를 안 쓰는 배포에서 오류를
+ *  띄우면 쓰지도 않는 기능이 화면을 어지럽힌다(갤러리와 같은 태도).
+ */
+export async function listShared(fetchImpl = fetch) {
+  try {
+    const res = await fetchImpl(`${SHARE_API}?list=1`, { cache: 'no-store' });
+    if (!res.ok) return [];
+    const body = await res.json();
+    const rows = Array.isArray(body) ? body : body?.layouts;
+    return (Array.isArray(rows) ? rows : []).filter((r) => /^[a-z0-9]{4,32}$/.test(r?.id ?? ''));
+  } catch {
+    return [];
+  }
 }
 
 /** 공유 id 로 도면을 가져온다 */

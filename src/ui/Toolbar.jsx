@@ -35,34 +35,107 @@ import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
 import { downloadJSON, layoutSnapshot, saveLayout } from '../core/persistence.js';
 import { loadGalleryIndex, loadGalleryLayout } from '../core/gallery.js';
-import { SHARE_OFF, copyText, shareLayout } from '../core/share.js';
+import { SHARE_OFF, copyText, fetchShared, listShared, shareLayout } from '../core/share.js';
+import { layoutSummary, layoutThumbSVG } from '../core/thumb.js';
 import { Btn, IconBtn } from './common.jsx';
 
+const kb = (n) => (n > 0 ? `${(n / 1024).toFixed(1)} KB` : '');
+const when = (at) => {
+  if (!at) return '';
+  const d = new Date(at);
+  return Number.isNaN(+d) ? '' : d.toLocaleDateString('ko-KR', { month: 'numeric', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+};
+
 /**
- * 공용 도면 — 저장소에 담아 둔 것을 목록에서 골라 연다.
+ * 도면 카드 하나 — 그림 · 이름 · 언제 · 얼마나.
+ *  이름만 늘어놓으면 「어느 도면이었더라」 가 된다. **위에서 본 미니맵**이
+ *  한 장 있으면 라인 모양으로 바로 갈린다(core/thumb.js — 화면 캡처가 아니라
+ *  도면 데이터로 그린 것이라 언제 봐도 같은 그림이다).
+ */
+function LayoutCard({ row, disabled, onPick }) {
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      disabled={disabled}
+      className="group w-full overflow-hidden rounded-lg text-left ring-1 ring-edge transition-colors hover:ring-sky-500 disabled:opacity-50"
+    >
+      <div className="aspect-[16/9] w-full bg-field">
+        {row.thumb
+          ? <img src={row.thumb} alt="" loading="lazy" className="h-full w-full object-cover" />
+          : <div className="grid h-full place-items-center text-[10px] text-ink4">미리보기 없음</div>}
+      </div>
+      <div className="px-2 py-1.5">
+        <div className="truncate text-[11.5px] font-medium text-ink2">{row.name}</div>
+        <div className="truncate text-[9.5px] text-ink4">
+          {[row.note || row.summary, when(row.at), kb(row.size)].filter(Boolean).join(' · ')}
+        </div>
+      </div>
+    </button>
+  );
+}
+
+/**
+ * 공용 도면 — **저장소에 담아 둔 것**과 **올라온 것**을 한 자리에.
  * ---------------------------------------------------------------------------
- *  매번 JSON 파일을 주고받는 대신, 도면을 `public/layouts/` 에 넣고 배포한다.
- *  주소에 들어온 사람은 누구나 여기서 골라 쓴다 — 서버가 필요 없다.
+ *  둘은 들어오는 길이 다르다. 저장소(`public/layouts/`)는 git push 로 넣는
+ *  것이고, 올라온 것은 앱의 「공유」로 들어온다. 그런데 **쓰는 사람에게는 같은
+ *  것**이다 — 남이 만든 도면을 열어 보는 일. 그래서 한 목록에 둔다.
  *
- *  **목록이 비어 있으면 버튼 자체를 안 낸다.** 갤러리를 안 쓰는 배포에서
- *  「공용 도면 (0)」 이 떠 있으면 고장 난 것처럼 보인다.
+ *  **둘 다 비어 있으면 버튼 자체를 안 낸다.** 아무것도 없는 배포에서
+ *  「공용 도면」 이 떠 있고 눌러도 빈 창이면 고장 난 것처럼 보인다.
  */
 function GalleryButton({ onPick }) {
   const [rows, setRows] = useState(null);        // null = 아직 안 읽음
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(null);
 
-  useEffect(() => { loadGalleryIndex().then(setRows); }, []);
+  /* 한 번 읽은 저장소 도면은 들고 있는다 — 썸네일을 그리려고 읽은 것을
+     고를 때 또 읽으면 같은 파일을 두 번 받는다 */
+  const cache = useRef(new Map());
+
+  const reload = async () => {
+    const [repo, up] = await Promise.all([loadGalleryIndex(), listShared()]);
+    /* 올라온 것이 위 — 방금 올린 것을 바로 찾을 수 있어야 한다 */
+    setRows([
+      ...up.map((r) => ({ ...r, from: 'share' })),
+      ...repo.map((r) => ({ ...r, from: 'repo' })),
+    ]);
+
+    /**
+     * 저장소 도면의 썸네일은 **열 때 그린다.**
+     *  SVG 를 같이 커밋해 두면 도면을 고친 뒤 그림만 옛것으로 남아 목록이
+     *  거짓말을 한다. 도면은 작고(1~2KB) CDN 이 물고 있으니, 그때그때 그려서
+     *  **항상 맞는 그림**을 보여 주는 편이 낫다. 개수·크기도 여기서 나온다.
+     */
+    for (const e of repo) {
+      loadGalleryLayout(e).then((data) => {
+        cache.current.set(e.file, data);
+        setRows((prev) => (prev ?? []).map((r) => (r.from === 'repo' && r.file === e.file
+          ? {
+            ...r,
+            thumb: `data:image/svg+xml;utf8,${encodeURIComponent(layoutThumbSVG(data))}`,
+            summary: layoutSummary(data),
+          }
+          : r)));
+      }).catch(() => { /* 못 읽으면 「미리보기 없음」 으로 남는다 */ });
+    }
+  };
+  useEffect(() => { reload(); }, []);
   if (!rows?.length) return null;
 
-  const pick = async (e) => {
-    setBusy(e.id);
+  const pick = async (row) => {
+    setBusy(row.id);
     try {
-      onPick(await loadGalleryLayout(e), e);
+      const data = row.from === 'share'
+        ? await fetchShared(row.id)
+        : cache.current.get(row.file) ?? await loadGalleryLayout(row);
+      onPick(data, row);
       setOpen(false);
     } catch (err) {
       console.error('[공용 도면] 못 열었다', err);
-      window.alert(`「${e.name}」 을 열지 못했습니다 — ${err.message}`);
+      window.alert(`「${row.name}」 을 열지 못했습니다 — ${err.message}`);
     } finally {
       setBusy(null);
     }
@@ -70,27 +143,20 @@ function GalleryButton({ onPick }) {
 
   return (
     <div className="relative">
-      <Btn active={open} onClick={() => setOpen((v) => !v)}>
+      <Btn active={open} onClick={() => { if (!open) reload(); setOpen((v) => !v); }}>
         <Library size={13} /> 공용 도면
       </Btn>
       {open && (
         <>
           {/* 바깥을 누르면 닫힌다 — 목록을 닫으려고 같은 버튼을 다시 찾게 하지 않는다 */}
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-30 mt-1 max-h-[60vh] w-[300px] overflow-y-auto rounded-lg bg-panel p-1 shadow-xl ring-1 ring-edge">
-            {rows.map((e) => (
-              <button
-                key={e.id}
-                type="button"
-                onClick={() => pick(e)}
-                disabled={busy != null}
-                className="block w-full rounded px-2 py-1.5 text-left hover:bg-raiseh disabled:opacity-50"
-              >
-                <div className="text-[11.5px] font-medium text-ink2">{e.name}</div>
-                {e.note && <div className="text-[10px] leading-snug text-ink4">{e.note}</div>}
-              </button>
-            ))}
-            <p className="mt-1 border-t border-line px-2 py-1 text-[9.5px] leading-snug text-ink4">
+          <div className="absolute left-0 top-full z-30 mt-1 w-[540px] rounded-lg bg-panel shadow-xl ring-1 ring-edge">
+            <div className="grid max-h-[52vh] grid-cols-3 gap-2 overflow-y-auto p-2.5">
+              {rows.map((r) => (
+                <LayoutCard key={`${r.from}:${r.id}`} row={r} disabled={busy != null} onPick={() => pick(r)} />
+              ))}
+            </div>
+            <p className="border-t border-line px-2.5 py-1.5 text-[9.5px] leading-snug text-ink4">
               여는 순간 <b className="text-ink3">지금 도면을 덮어씁니다.</b> 되돌리기(Ctrl+Z)로 돌아올 수 있습니다.
             </p>
           </div>
@@ -109,11 +175,13 @@ function GalleryButton({ onPick }) {
  */
 function ShareButton({ snapshot }) {
   const [state, setState] = useState(null);   // null · 'ask' · 'busy' · { url, copied }
+  /* 이름을 받는다 — 목록에 「(이름 없음)」 이 늘어서면 고를 수가 없다 */
+  const [name, setName] = useState('');
 
   const upload = async () => {
     setState('busy');
     try {
-      const { url } = await shareLayout(snapshot());
+      const { url } = await shareLayout(snapshot(), name);
       setState({ url, copied: await copyText(url) });
     } catch (e) {
       console.error('[공유] 못 올렸다', e);
@@ -136,11 +204,21 @@ function ShareButton({ snapshot }) {
             {state === 'ask' && (
               <>
                 <p className="text-[11.5px] leading-relaxed text-ink2">
-                  지금 도면을 올리고 <b className="text-ink">링크</b>를 받습니다.
+                  지금 도면을 올립니다. <b className="text-ink">링크</b>가 나오고,
+                  <b className="text-ink"> 「공용 도면」 목록</b>에도 올라갑니다.
                 </p>
+                <input
+                  autoFocus
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && name.trim()) upload(); }}
+                  placeholder="도면 이름 (예: A라인 조립 2단)"
+                  maxLength={60}
+                  className="mt-2 w-full rounded bg-field px-2 py-1 text-[11.5px] text-ink2 ring-1 ring-edge focus:ring-sky-500"
+                />
                 <p className="mt-1.5 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
-                  링크를 가진 사람은 <b>누구나</b> 열 수 있고, 한 번 올린 것은 되돌릴 수 없습니다.
-                  회사 도면이면 올리기 전에 다시 생각해 주세요.
+                  올리면 <b>누구나</b> 목록에서 보고 열 수 있습니다. 한 번 올린 것은 앱에서
+                  되돌릴 수 없습니다 — 회사 도면이면 다시 생각해 주세요.
                 </p>
                 <div className="mt-2 flex justify-end gap-1.5">
                   <Btn onClick={() => setState(null)}>취소</Btn>
