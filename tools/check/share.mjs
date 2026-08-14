@@ -250,7 +250,7 @@ t('목록은 **화면 가운데 창**으로 뜬다 — 툴바에 매달면 잘�
   /* 그리드에 두면 칸이 항목에 맞춰 늘어나 max-w-full 의 100% 가 자기 자신을
      가리킨다 — 좁은 창에서 실제로 620px 이 그대로 넘쳤다 */
   assert.equal(/z-40 grid place-items-center/.test(toolbar), false, '그리드로 가운데 정렬하면 폭이 안 잡힌다');
-  assert.ok(/w-\[620px\] max-w-full/.test(toolbar), '좁은 화면에서 넘친다');
+  assert.ok(/w-\[900px\] max-w-full/.test(toolbar), '좁은 화면에서 넘친다');
 });
 t('썸네일이 **왼쪽**, 정보가 오른쪽', () => {
   const card = toolbar.slice(toolbar.indexOf('function LayoutCard'), toolbar.indexOf('function GalleryButton'));
@@ -258,7 +258,7 @@ t('썸네일이 **왼쪽**, 정보가 오른쪽', () => {
   assert.ok(card.indexOf('row.thumb') < card.indexOf('row.name'), '그림이 이름보다 뒤에 있다');
 });
 t('**고른다고 바로 열리지 않는다** — 모르고 눌러 몇 시간 그린 것이 날아가면 안 된다', () => {
-  assert.ok(/onPick=\{\(\) => setSel\(r\)\}/.test(toolbar), '카드를 누르면 바로 열린다');
+  assert.ok(/onPick=\{\(\) => choose\(r\)\}/.test(toolbar), '카드를 누르면 바로 열린다');
   assert.ok(/onClick=\{\(\) => open2\(sel\)\}/.test(toolbar), '확인 뒤 여는 길이 없다');
   assert.ok(toolbar.includes('덮어쓰고 열기'), '무엇이 일어나는지 안 적혀 있다');
 });
@@ -358,4 +358,63 @@ t('설명은 **두 줄까지** 보인다 — 한 줄로 자르면 요점이 잘�
   assert.equal(/truncate text-\[10\.5px\] text-ink3/.test(card), false, '옛 한 줄 자르기가 남아 있다');
   /* 이름은 한 줄로 남는다 — 이름까지 두 줄이 되면 카드가 흔들린다 */
   assert.ok(/truncate text-\[12\.5px\] font-medium/.test(card), '이름이 한 줄이 아니다');
+});
+
+/* ---------- 열기 전에 속을 편다 ------------------------------------------- */
+
+const LI = await import(SRC + 'core/layoutInfo.js');
+
+t('넓이는 **구멍을 뺀다** — 다 더하면 뚫린 자리를 두 번 센다', () => {
+  const ring = [[-30, -30], [30, -30], [30, 30], [-30, 30]];
+  const hole = [[-10, -10], [10, -10], [10, 10], [-10, 10]];
+  assert.equal(LI.ringArea(ring), 3600);
+  assert.equal(LI.mpArea([[ring]]), 3600);
+  assert.equal(LI.mpArea([[ring, hole]]), 3200, '구멍이 안 빠졌다');
+  assert.equal(LI.mpArea([[ring], [hole]]), 4000, '도형 둘은 더해야 한다');   // 3600 + 20×20
+  assert.equal(LI.mpArea(null), 0);
+  assert.equal(LI.ringArea([[0, 0], [1, 1]]), 0, '점 둘로는 면이 안 된다');
+});
+t('**선반·적치대는 설비에서 뺀다** — 섞으면 규모가 부풀어 보인다', () => {
+  const itemOf = (id) => ({ M: { id: 'M' }, S: { id: 'S', kind: 'shelf' }, T: { id: 'T', kind: 'stillage' } })[id] ?? null;
+  const info = LI.layoutInfo({
+    placed: [{ uid: 'a', itemId: 'M' }, { uid: 'b', itemId: 'M' }, { uid: 'c', itemId: 'S' }, { uid: 'd', itemId: 'T' }],
+  }, itemOf);
+  assert.equal(info.scale.machines, 2);
+  assert.equal(info.scale.stores, 2);
+});
+t('설비 구성은 **많은 것부터** — 라인의 성격은 가장 많은 설비가 정한다', () => {
+  const itemOf = (id) => ({ A: { id: 'A', name: '조립기' }, M: { id: 'M', name: '제작기' } })[id] ?? null;
+  const info = LI.layoutInfo({
+    placed: [{ itemId: 'A' }, { itemId: 'M' }, { itemId: 'M' }, { itemId: 'M' }],
+  }, itemOf);
+  assert.deepEqual(info.kinds.map((k) => [k.name, k.n]), [['제작기', 3], ['조립기', 1]]);
+});
+t('차량은 **대수**로 센다 — 경로 수와 다르다', () => {
+  const info = LI.layoutInfo({ carts: [{ count: 3 }, { count: 2 }, {}] });
+  assert.equal(info.scale.paths, 3);
+  assert.equal(info.scale.vehicles, 6, 'count 없는 경로는 1대로 본다');
+});
+t('빈 도면도 터지지 않는다', () => {
+  const info = LI.layoutInfo({});
+  assert.equal(info.scale.machines, 0);
+  assert.equal(info.building.floor, 0);
+  assert.equal(info.crew.shifts.length, 1, '교대는 기본값으로 채워진다');
+});
+t('**돌려야 나오는 값은 없다** — 있는 척하면 그게 더 나쁘다', () => {
+  const info = LI.layoutInfo({ placed: [{ itemId: 'M' }] });
+  for (const k of ['throughput', 'oee', 'cost', 'uptime']) {
+    assert.equal(k in info, false, `${k} 는 도면만 보고 알 수 없다`);
+  }
+});
+t('고르면 **미리 읽어** 속을 보여 준다 — 열 때 쓸 그 파일이다', () => {
+  assert.ok(/const choose = async \(row\)/.test(toolbar), '고를 때 안 읽는다');
+  assert.ok(/setDetail\(\{ row, data: await fetchOne\(row\) \}\)/.test(toolbar), '읽은 것을 안 넘긴다');
+  /* 미리 읽어 둔 것을 열 때 다시 받으면 미리 읽은 뜻이 없다 */
+  assert.ok(/onPick\(await fetchOne\(row\), row\)/.test(toolbar), '열 때 또 받는다');
+  assert.ok(/if \(cache\.current\.has\(key\)\) return cache\.current\.get\(key\)/.test(toolbar), '들고 있지 않는다');
+  assert.ok(/cache\.current\.set\(`repo:\$\{e\.id\}`/.test(toolbar), '썸네일용으로 읽은 것을 못 쓴다');
+});
+t('속을 못 읽어도 **창은 산다** — 목록까지 죽으면 안 된다', () => {
+  assert.ok(/setDetail\(\{ row, error:/.test(toolbar), '못 읽은 것을 안 알린다');
+  assert.ok(/error\}/.test(toolbar) && /text-rose-500/.test(toolbar), '오류가 안 보인다');
 });

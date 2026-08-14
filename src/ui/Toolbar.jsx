@@ -2,7 +2,7 @@
  * 상단 툴바 — 뷰 전환 · 도구 · 스냅 설정 · 저장
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Download,
   Eraser,
@@ -37,6 +37,8 @@ import { downloadJSON, layoutSnapshot } from '../core/persistence.js';
 import { loadGalleryIndex, loadGalleryLayout } from '../core/gallery.js';
 import { SHARE_OFF, copyText, fetchShared, listShared, shareLayout } from '../core/share.js';
 import { layoutSummary, layoutThumbSVG } from '../core/thumb.js';
+import { layoutInfo } from '../core/layoutInfo.js';
+import { PAYLOAD_ITEMS } from '../data/library.js';
 import { Btn, IconBtn } from './common.jsx';
 
 const kb = (n) => (n > 0 ? `${(n / 1024).toFixed(1)} KB` : '');
@@ -89,6 +91,89 @@ function LayoutCard({ row, selected, disabled, onPick }) {
   );
 }
 
+const InfoRow = ({ label, children }) => (
+  <div className="flex items-baseline justify-between gap-2 py-[1px]">
+    <span className="shrink-0 text-[10px] text-ink4">{label}</span>
+    <span className="truncate text-right text-[10.5px] tabular-nums text-ink2">{children}</span>
+  </div>
+);
+const InfoHead = ({ children }) => (
+  <h4 className="mb-0.5 mt-2.5 text-[9.5px] font-semibold uppercase tracking-wider text-ink4 first:mt-0">{children}</h4>
+);
+
+/**
+ * 고른 도면의 **속** — 열지 않고도 무엇인지 알게.
+ * ---------------------------------------------------------------------------
+ *  여는 순간 지금 그리던 것이 덮이므로, 「열어 보고 아니면 되돌리기」 는 값이
+ *  비싸다. 그래서 열기 전에 편다 — 규모 · 건물 · 설비 구성 · 오더 · 인력 · 단가.
+ *
+ *  **시뮬을 돌려야 나오는 값(처리량·가동률·원가)은 여기 없다.** 도면만 보고
+ *  알 수 있는 것이 아니고, 있는 척하면 그게 더 나쁘다.
+ */
+function LayoutDetail({ row, data, error }) {
+  const { itemOf } = useEditor();
+  const info = useMemo(() => (data ? layoutInfo(data, itemOf) : null), [data, itemOf]);
+
+  if (error) return <p className="p-3 text-[10.5px] leading-snug text-rose-500">{error}</p>;
+  if (!info) return <p className="p-3 text-[10.5px] text-ink4">읽는 중…</p>;
+
+  const { scale: s, building: b, crew } = info;
+  return (
+    <div className="p-3">
+      <div className="aspect-[16/9] w-full overflow-hidden rounded bg-field ring-1 ring-edge">
+        {row.thumb
+          ? <img src={row.thumb} alt="" className="h-full w-full object-cover" />
+          : <div className="grid h-full place-items-center text-[10px] text-ink4">미리보기 없음</div>}
+      </div>
+      <h3 className="mt-2 text-[12.5px] font-semibold leading-snug text-ink">{row.name}</h3>
+      {(row.note) && <p className="mt-0.5 text-[10.5px] leading-snug text-ink3">{row.note}</p>}
+
+      <InfoHead>규모</InfoHead>
+      <InfoRow label="설비">{s.machines} 대</InfoRow>
+      <InfoRow label="쌓는 곳">{s.stores} 개 (선반·적치대)</InfoRow>
+      <InfoRow label="연결장치">{s.links} 개</InfoRow>
+      <InfoRow label="차량">
+        {s.vehicles} 대 / 경로 {s.paths}{s.trucks > 0 ? ` · 트럭 ${s.trucks}` : ''}
+      </InfoRow>
+
+      <InfoHead>건물</InfoHead>
+      <InfoRow label="바닥">{Math.round(b.floor).toLocaleString()} m²</InfoRow>
+      <InfoRow label="벽 · 기둥">{b.walls} · {b.pillars}</InfoRow>
+      <InfoRow label="구역 · 개구부">{b.zones} · {b.openings}</InfoRow>
+
+      {info.kinds.length > 0 && (
+        <>
+          <InfoHead>설비 구성</InfoHead>
+          {info.kinds.slice(0, 6).map((k) => <InfoRow key={k.id} label={k.name}>{k.n} 대</InfoRow>)}
+          {info.kinds.length > 6 && (
+            <p className="text-[9.5px] text-ink4">외 {info.kinds.length - 6}종</p>
+          )}
+        </>
+      )}
+
+      <InfoHead>생산 오더</InfoHead>
+      {info.orders.length ? info.orders.map((o, i) => (
+        <InfoRow key={i} label={PAYLOAD_ITEMS[o.kind]?.name ?? o.kind}>
+          {o.qty.toLocaleString()}개 · {o.at}
+        </InfoRow>
+      )) : <p className="text-[10px] text-ink4">걸어 둔 오더가 없습니다</p>}
+
+      <InfoHead>인력 · 설정</InfoHead>
+      <InfoRow label="필요 인원">{crew.need} 명 / 조</InfoRow>
+      {crew.shifts.map((sh, i) => (
+        <InfoRow key={i} label={`· ${sh.name}`}>
+          {sh.label} · {sh.headcount ? `${sh.headcount}명` : '제한 없음'}
+        </InfoRow>
+      ))}
+      <InfoRow label="벨트 기본 속도">{info.beltSpeed} m/s</InfoRow>
+      <InfoRow label="단가">
+        전기 {info.rates.power} · 인건 {(info.rates.wage / 1000).toFixed(0)}천
+        {info.rates.material ? ` · 자재 ${info.rates.material.toLocaleString()}` : ''}
+      </InfoRow>
+    </div>
+  );
+}
+
 /**
  * 공용 도면 — **저장소에 담아 둔 것**과 **올라온 것**을 한 자리에.
  * ---------------------------------------------------------------------------
@@ -105,6 +190,8 @@ function GalleryButton({ onPick, onExport }) {
   const [busy, setBusy] = useState(null);
   /* 고른 것 — 여는 것은 한 칸 뒤다(아래 확인 줄) */
   const [sel, setSel] = useState(null);
+  /* 고른 것의 속 — 미리 읽어 둔다 */
+  const [detail, setDetail] = useState(null);
 
   /* 한 번 읽은 저장소 도면은 들고 있는다 — 썸네일을 그리려고 읽은 것을
      고를 때 또 읽으면 같은 파일을 두 번 받는다 */
@@ -126,7 +213,9 @@ function GalleryButton({ onPick, onExport }) {
      */
     for (const e of repo) {
       loadGalleryLayout(e).then((data) => {
-        cache.current.set(e.file, data);
+        /* 키를 `repo:<id>` 로 맞춰 둔다 — fetchOne 이 같은 열쇠로 찾으므로,
+           썸네일을 그리려고 읽은 것이 고를 때 그대로 쓰인다 */
+        cache.current.set(`repo:${e.id}`, data);
         setRows((prev) => (prev ?? []).map((r) => (r.from === 'repo' && r.file === e.file
           ? {
             ...r,
@@ -140,15 +229,38 @@ function GalleryButton({ onPick, onExport }) {
   useEffect(() => { reload(); }, []);
   if (!rows?.length) return null;
 
+  /** 도면 하나를 읽어 온다 — 한 번 읽은 것은 들고 있는다 */
+  const fetchOne = async (row) => {
+    const key = `${row.from}:${row.id}`;
+    if (cache.current.has(key)) return cache.current.get(key);
+    const data = row.from === 'share' ? await fetchShared(row.id) : await loadGalleryLayout(row);
+    cache.current.set(key, data);
+    return data;
+  };
+
+  /**
+   * 고르면 **미리 읽어 둔다.**
+   *  속을 보여 주려면 어차피 도면이 있어야 하고, 그건 열 때도 필요한 그 파일이다.
+   *  미리 받아 두면 「덮어쓰고 열기」 가 기다림 없이 열린다.
+   */
+  const choose = async (row) => {
+    setSel(row);
+    setDetail(null);
+    try {
+      setDetail({ row, data: await fetchOne(row) });
+    } catch (err) {
+      console.error('[공용 도면] 속을 못 읽었다', err);
+      setDetail({ row, error: `이 도면을 읽지 못했습니다 — ${err.message}` });
+    }
+  };
+
   const open2 = async (row) => {
     setBusy(row.id);
     try {
-      const data = row.from === 'share'
-        ? await fetchShared(row.id)
-        : cache.current.get(row.file) ?? await loadGalleryLayout(row);
-      onPick(data, row);
+      onPick(await fetchOne(row), row);
       setOpen(false);
       setSel(null);
+      setDetail(null);
     } catch (err) {
       console.error('[공용 도면] 못 열었다', err);
       window.alert(`「${row.name}」 을 열지 못했습니다 — ${err.message}`);
@@ -157,7 +269,7 @@ function GalleryButton({ onPick, onExport }) {
     }
   };
 
-  const close = () => { setOpen(false); setSel(null); };
+  const close = () => { setOpen(false); setSel(null); setDetail(null); };
 
   return (
     <>
@@ -176,7 +288,7 @@ function GalleryButton({ onPick, onExport }) {
            좁은 창에서 실제로 그렇게 넘쳤다. */
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6" onClick={close}>
           <div
-            className="flex max-h-[78vh] w-[620px] max-w-full flex-col overflow-hidden rounded-xl bg-panel shadow-2xl ring-1 ring-edge"
+            className="flex max-h-[78vh] w-[900px] max-w-full flex-col overflow-hidden rounded-xl bg-panel shadow-2xl ring-1 ring-edge"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-2.5">
@@ -187,17 +299,26 @@ function GalleryButton({ onPick, onExport }) {
               <IconBtn title="닫기" onClick={close}><X size={14} /></IconBtn>
             </div>
 
-            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
-              {rows.map((r) => (
-                <LayoutCard
-                  key={`${r.from}:${r.id}`}
-                  row={r}
-                  selected={sel && sel.from === r.from && sel.id === r.id}
-                  disabled={busy != null}
-                  /* 누르면 **고르기만** 한다 — 여는 것은 아래에서 한 번 더 */
-                  onPick={() => setSel(r)}
-                />
-              ))}
+            {/* 목록 왼쪽 · 고른 것의 속 오른쪽 — 카드만으로는 「볼 만한
+                도면인가」 를 못 가린다 */}
+            <div className="flex min-h-0 flex-1">
+              <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
+                {rows.map((r) => (
+                  <LayoutCard
+                    key={`${r.from}:${r.id}`}
+                    row={r}
+                    selected={sel && sel.from === r.from && sel.id === r.id}
+                    disabled={busy != null}
+                    /* 누르면 **고르기만** 한다 — 여는 것은 아래에서 한 번 더 */
+                    onPick={() => choose(r)}
+                  />
+                ))}
+              </div>
+              {sel && (
+                <div className="w-[262px] shrink-0 overflow-y-auto border-l border-line bg-raise">
+                  <LayoutDetail row={sel} data={detail?.data} error={detail?.error} />
+                </div>
+              )}
             </div>
 
             {/**
