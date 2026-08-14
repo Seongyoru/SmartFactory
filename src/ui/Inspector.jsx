@@ -8,7 +8,7 @@ import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
-  CART_MARGIN, cartPath, cartStations, fleetFits, haulPerMinute, nextRole, pickSet, stationStyle,
+  CART_MARGIN, cartPath, cartStations, fleetFits, haulPerMinute, pickSet, stationStyle,
 } from '../core/cart.js';
 import {
   arrivedAt, arrivedOf, clearStock, dropKind, getAllStock, getShipped, setStock, shippedTotal,
@@ -1245,10 +1245,14 @@ function CartPanel({ cart }) {
   );
 
   /** 역 하나의 역할을 자동 → 싣기 → 내리기 → 자동 으로 돌린다 */
-  const cycleRole = (key) => {
+  /**
+   * 역 하나의 역할을 **곧바로** 정한다 — 자동(null) · 싣기 · 내리기.
+   *  「자동」은 값을 **지우는 것**이다. 빈 문자열 같은 것을 넣어 두면 도면에
+   *  뜻 없는 값이 쌓이고, 옛 도면과도 달라진다.
+   */
+  const setRole = (key, role) => {
     const next = { ...(cart.roles ?? {}) };
-    const now = nextRole(next[key]);
-    if (now) next[key] = now;
+    if (role) next[key] = role;
     else delete next[key];
     dispatch({ type: 'UPDATE_CART', uid: cart.uid, patch: { roles: next } });
   };
@@ -1522,25 +1526,49 @@ function CartPanel({ cart }) {
                있으며, 트럭은 애초에 싣기만 한다. */
             const pickable = !truck && st.canRole;
             return (
-              <li key={i} className="flex items-center justify-between gap-2 text-[11px]">
-                <span className="flex min-w-0 items-center gap-1.5 text-ink2">
-                  <i className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: style.color }} />
-                  <span className="truncate">{st.name}</span>
-                </span>
-                {pickable ? (
-                  <button
-                    onClick={() => cycleRole(st.key)}
-                    title="눌러서 자동 → 싣기 → 내리기"
-                    className={`shrink-0 rounded px-1.5 py-0.5 text-[10.5px] tabular-nums ${
-                      st.role ? 'bg-sky-500/15 text-sky-500' : 'bg-kbd text-ink4'
-                    }`}
-                  >
-                    {st.role ? style.label : `자동 · ${style.label}`}{qty} · {st.s.toFixed(1)}m
-                  </button>
-                ) : (
-                  <span className="shrink-0 tabular-nums text-ink4">
-                    {style.label}{qty} · {st.s.toFixed(1)}m
+              <li key={i} className="text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="flex min-w-0 items-center gap-1.5 text-ink2">
+                    <i className="inline-block h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: style.color }} />
+                    <span className="truncate">{st.name}</span>
                   </span>
+                  <span className="shrink-0 tabular-nums text-ink4">
+                    {qty && `${qty.trim()} · `}{st.s.toFixed(1)}m
+                  </span>
+                </div>
+                {/**
+                  * 역할은 **세 갈래 버튼**으로 고른다.
+                  * -------------------------------------------------------------
+                  *  처음에는 눌러서 자동 → 싣기 → 내리기 로 도는 한 개짜리 버튼이었다.
+                  *  그런데 **눌러야 하는 것인지 표시가 아닌지 알 수가 없고**, 눌러
+                  *  봐도 어디로 가는지 몰라 원하는 값까지 몇 번을 눌러야 했다.
+                  *  고를 것이 셋뿐이면 셋을 다 보여 주는 편이 언제나 낫다.
+                  */}
+                {pickable ? (
+                  <div className="mt-0.5 flex gap-0.5 rounded-md bg-field p-0.5 ring-1 ring-edge">
+                    {[
+                      [null, '자동', '경로가 더 가까이 지나간 쪽을 따릅니다'],
+                      ['load', '싣기', '여기서 물건을 싣습니다'],
+                      ['unload', '내리기', '여기에 물건을 내립니다'],
+                    ].map(([role, label, why]) => {
+                      const on = (st.role ?? null) === role;
+                      return (
+                        <button
+                          key={label}
+                          type="button"
+                          title={why}
+                          onClick={() => setRole(st.key, role)}
+                          className={`flex-1 rounded px-1 py-0.5 text-[10.5px] transition-colors ${
+                            on ? 'bg-sky-500 font-medium text-white' : 'text-ink3 hover:bg-raiseh'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-ink4">{style.label} — 형상으로 정해집니다</div>
                 )}
               </li>
             );

@@ -280,12 +280,40 @@ t('안내 글이 **화면에 있는 이름**을 부른다', () => {
    *
    * 실제로 없던 「**자리 나누기**에서」 가 이 규칙에 걸린다.
    */
+  /**
+   * 「**X** 칸」 이라고 썼으면 X 는 **진짜 칸 이름**이어야 한다.
+   *  낱말이 화면 어딘가에 있기만 하면 통과시켰더니 「**역할** 칸」 이 새어 나갔다 —
+   *  실제 칸 이름은 「정차역」 이고, 「역할」 은 그 칸의 **설명문**에만 있었다.
+   *  그래서 `<Section title=…>` 에 실제로 걸린 이름인지를 본다.
+   */
+  const sections = new Set([
+    ...[...ui.matchAll(/<Section title="([^"]+)"/g)].map((m) => m[1]),
+    /* 제목이 식인 것들 — `{`정차역 ${n}개`}` 처럼 */
+    ...[...ui.matchAll(/<Section title=\{`([^$`]+)/g)].map((m) => m[1].trim()),
+    ...[...ui.matchAll(/<Section title=\{[^}]*'([^']+)'/g)].map((m) => m[1]),
+  ]);
   const missing = [];
   for (const { g, s } of allSteps) {
     for (const m of s.body.matchAll(/\*\*([^*]+)\*\*\s*(칸|탭|버튼|에서)/g)) {
       const w = m[1].trim();
-      if (!ui.includes(w)) missing.push(`${g.id}/${s.id} → 「${w}」`);
+      const where = m[2];
+      /* 「… 칸」 은 인스펙터의 칸 이름이어야 한다. 탭·버튼은 이름이 여러 곳에
+         흩어져 있어 낱말이 있는지만 본다. */
+      const ok = where === '칸' ? [...sections].some((t) => t.includes(w)) : ui.includes(w);
+      if (!ok) missing.push(`${g.id}/${s.id} → 「${w}」`);
     }
   }
   assert.deepEqual(missing, [], `화면에 없는 이름을 부른다:\n  ${missing.join('\n  ')}`);
+});
+
+t('역할은 **세 갈래 버튼**으로 고른다 — 돌려 누르면 어디로 가는지 모른다', () => {
+  /* 처음에는 눌러서 자동 → 싣기 → 내리기 로 도는 한 개짜리 버튼이었다.
+     눌러야 하는 것인지 표시인지 알 수 없고, 원하는 값까지 몇 번을 눌러야 했다. */
+  assert.ok(/const setRole = \(key, role\)/.test(inspectorSrc), '곧바로 정하는 길이 없다');
+  assert.equal(/cycleRole/.test(inspectorSrc), false, '아직 돌려 누른다');
+  for (const label of ['자동', '싣기', '내리기']) {
+    assert.ok(inspectorSrc.includes(`'${label}'`), `「${label}」 버튼이 없다`);
+  }
+  /* 「자동」은 값을 지우는 것이다 — 빈 값을 넣어 두면 도면에 뜻 없는 값이 쌓인다 */
+  assert.ok(/if \(role\) next\[key\] = role;\s*\n\s*else delete next\[key\]/.test(inspectorSrc), '자동이 값을 안 지운다');
 });

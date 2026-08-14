@@ -341,12 +341,6 @@ function closestOnPath(path, [x, z], step = 0.25, accept = null) {
  */
 export const STATION_ROLE = { LOAD: 'load', UNLOAD: 'unload' };
 
-/** 역 하나의 역할을 다음 상태로 넘긴다 (자동 → 싣기 → 내리기 → 자동) */
-export function nextRole(role) {
-  if (!role) return STATION_ROLE.LOAD;
-  return role === STATION_ROLE.LOAD ? STATION_ROLE.UNLOAD : null;
-}
-
 /**
  * 경로 위의 정차역 목록.
  *  { s, kind:'load'|'unload'|'shelf-in'|'shelf-out', uid, portId, count }
