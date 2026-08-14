@@ -209,3 +209,30 @@ t('돈 시간(ranSec)으로는 판정하지 않는다 — 켜 두면 저절로 �
 t('체크가 왜 되어 있는지 화면이 말한다', () => {
   assert.ok(/도면에서 읽어 체크됩니다/.test(tut), '미리 체크된 이유를 안 알려 준다 — 고장으로 보인다');
 });
+
+/* ---------- 실제로 났던 버그: 없는 필드를 읽었다 -------------------------- */
+
+const PR = await import(SRC + 'core/process.js');
+const balanceSrc = await readSrc('core/balance.js');
+const factsSrc = await readSrc('core/guideFacts.js');
+
+t('한 번에 내보내는 개수는 **`outputCount`** 다 — `layers` 라는 필드는 없다', () => {
+  /* 화면에서는 「층」이라 부르지만 코드에 그런 필드는 없다. `p.layers` 를 읽는
+     바람에 따라 하기 단계가 안 넘어가고, 라인 능력의 벨트가 3배 낮게 나왔다. */
+  assert.equal(PR.bundleOf({ outputCount: 4 }), 4);
+  assert.equal(PR.bundleOf({}), PR.DEFAULT_BUNDLE, '안 적은 설비는 기본값이다');
+  assert.equal(PR.bundleOf({ layers: 8 }), PR.DEFAULT_BUNDLE, 'layers 를 읽고 있다');
+  assert.equal(PR.bundleOf(null), PR.DEFAULT_BUNDLE);
+});
+t('읽는 자리를 하나로 모았다 — 세 번째 실수를 막는다', () => {
+  for (const [name, src] of [['balance.js', balanceSrc], ['guideFacts.js', factsSrc]]) {
+    assert.equal(/\.layers\b/.test(src.replace(/\/\*[\s\S]*?\*\//g, '')), false, `${name} 이 없는 필드를 읽는다`);
+    assert.ok(/bundleOf\(/.test(src), `${name} 이 공용 접근자를 안 쓴다`);
+  }
+});
+t('개수를 바꾸면 그 단계가 넘어간다', () => {
+  const p = { uid: 'M', itemId: 'MACHINE_1', pos: [0, 0] };
+  assert.equal(F.guideFacts({ placed: [p] }, itemOf).layered, false, '안 건드렸는데 통과다');
+  assert.equal(F.guideFacts({ placed: [{ ...p, outputCount: 4 }] }, itemOf).layered, true, '바꿨는데 안 넘어간다');
+  assert.equal(F.guideFacts({ placed: [{ ...p, outputCount: 1 }] }, itemOf).layered, true, '줄인 것도 손댄 것이다');
+});

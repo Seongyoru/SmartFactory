@@ -15,7 +15,7 @@
 import { CATEGORY, isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations } from './cart.js';
 import { recipeOf, isSource } from './bom.js';
-import { cycleOf, DEFAULT_CYCLE } from './process.js';
+import { bundleOf, cycleOf, DEFAULT_BUNDLE, DEFAULT_CYCLE } from './process.js';
 import { crewOf, isWorkable, normalizeShifts } from './crew.js';
 import { DEFAULT_RATES, fixedOf, normalizeRates } from './cost.js';
 import { shelfRows, rowKinds } from './shelf.js';
@@ -90,7 +90,8 @@ export function guideFacts(d = {}, itemOf = () => null) {
     cycleTuned: some(machines, (p) => cycleOf(p, kindOf(p)) !== DEFAULT_CYCLE),
     /** 재료를 먹는 설비 — 레시피에 입력이 있으면 조립 공정이다 */
     hasRecipe: some(machines, (p) => !isSource(recipeOf(p))),
-    layered: some(machines, (p) => (Number(p.layers) || 1) > 1),
+    /** 한 번에 내보내는 개수를 **기본값에서 바꿨는가** */
+    layered: some(machines, (p) => bundleOf(p) !== DEFAULT_BUNDLE),
     scrapSet: some(machines, (p) => (Number(p.scrapRate) || 0) > 0),
     mtbfSet: some(machines, (p) => (Number(p.mtbf) || 0) > 0),
     /** 전력·고정비를 손댄 설비 */

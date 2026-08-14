@@ -615,46 +615,6 @@ function EquipmentPanel({ placed }) {
         <EquipUptime uid={placed.uid} />
       </Section>
 
-      <RecipeSection placed={placed} item={item} />
-
-      <CrewFields placed={placed} />
-
-      <FaultFields placed={placed} />
-
-      <PowerFields placed={placed} />
-
-      <Section title="배치">
-        <Row label="위치 X / Z">
-          {placed.pos[0].toFixed(2)} , {placed.pos[1].toFixed(2)} m
-        </Row>
-        <Row label="회전">{ROT_LABEL[placed.rot]}</Row>
-        {rect && (
-          <Row label="점유 크기">
-            {(rect.maxX - rect.minX).toFixed(2)} × {(rect.maxZ - rect.minZ).toFixed(2)} m
-          </Row>
-        )}
-        {spec && <Row label="높이">{spec.bbox.size[1].toFixed(2)} m</Row>}
-        <div className="mt-2 flex gap-2">
-          <Btn onClick={() => dispatch({ type: 'ROTATE', uid: placed.uid })}>
-            <RotateCw size={13} /> 90° 회전
-          </Btn>
-          <Btn danger onClick={() => dispatch({ type: 'DELETE', kind: 'equip', uid: placed.uid })}>
-            <Trash2 size={13} /> 삭제
-          </Btn>
-        </div>
-      </Section>
-
-      {/**
-        * 생산 — **결론부터 보여 준다.**
-        * -------------------------------------------------------------------
-        *  예전에는 「공정 시간」 과 「출하」 두 섹션에 슬라이더 넷이 흩어져 있었고,
-        *  개/분 이 두 군데에 서로 다른 값으로 떠 있었다(한쪽이 층수를 빠뜨렸다).
-        *  사용자가 초·%·층·m 을 머릿속에서 곱해야 "그래서 몇 개 나오는데?" 를
-        *  알 수 있었다 — 그건 도구가 할 일이다.
-        *
-        *  이제 맨 위에 답이 있고, 아래 슬라이더들은 **그 답을 어떻게 바꾸는지**만
-        *  보여 준다. 슬라이더마다 자기 값이 무엇으로 환산되는지 한 줄씩 붙는다.
-        */}
       <Section title="생산" data-guide="panel-production">
         <div className="rounded-md border border-edge bg-field px-2.5 py-2">
           <div className="flex items-baseline justify-between">
@@ -740,6 +700,47 @@ function EquipmentPanel({ placed }) {
           </p>
         </div>
       </Section>
+
+      <RecipeSection placed={placed} item={item} />
+
+      <CrewFields placed={placed} />
+
+      <FaultFields placed={placed} />
+
+      <PowerFields placed={placed} />
+
+      <Section title="배치">
+        <Row label="위치 X / Z">
+          {placed.pos[0].toFixed(2)} , {placed.pos[1].toFixed(2)} m
+        </Row>
+        <Row label="회전">{ROT_LABEL[placed.rot]}</Row>
+        {rect && (
+          <Row label="점유 크기">
+            {(rect.maxX - rect.minX).toFixed(2)} × {(rect.maxZ - rect.minZ).toFixed(2)} m
+          </Row>
+        )}
+        {spec && <Row label="높이">{spec.bbox.size[1].toFixed(2)} m</Row>}
+        <div className="mt-2 flex gap-2">
+          <Btn onClick={() => dispatch({ type: 'ROTATE', uid: placed.uid })}>
+            <RotateCw size={13} /> 90° 회전
+          </Btn>
+          <Btn danger onClick={() => dispatch({ type: 'DELETE', kind: 'equip', uid: placed.uid })}>
+            <Trash2 size={13} /> 삭제
+          </Btn>
+        </div>
+      </Section>
+
+      {/**
+        * 생산 — **결론부터 보여 준다.**
+        * -------------------------------------------------------------------
+        *  예전에는 「공정 시간」 과 「출하」 두 섹션에 슬라이더 넷이 흩어져 있었고,
+        *  개/분 이 두 군데에 서로 다른 값으로 떠 있었다(한쪽이 층수를 빠뜨렸다).
+        *  사용자가 초·%·층·m 을 머릿속에서 곱해야 "그래서 몇 개 나오는데?" 를
+        *  알 수 있었다 — 그건 도구가 할 일이다.
+        *
+        *  이제 맨 위에 답이 있고, 아래 슬라이더들은 **그 답을 어떻게 바꾸는지**만
+        *  보여 준다. 슬라이더마다 자기 값이 무엇으로 환산되는지 한 줄씩 붙는다.
+        */}
 
       <Section title={`포트 ${ports.length}개`}>
         {ports.length === 0 && <p className="text-[11px] text-ink4">모델 로딩 중…</p>}

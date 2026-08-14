@@ -74,6 +74,19 @@ export const MIN_GAP = 0.4;
  */
 export const OUT_SPARE = 1;
 
+/** 한 번에 내보내는 개수의 기본값 — 아무것도 안 적은 설비가 쓰는 값 */
+export const DEFAULT_BUNDLE = 3;
+
+/**
+ * 이 설비가 한 번에 내보내는 개수.
+ * ---------------------------------------------------------------------------
+ *  **속성 이름은 `outputCount` 다.** 「층(layers)」 은 화면에서 부르는 말이고
+ *  코드에 그런 필드는 없다 — 실제로 `p.layers` 를 읽는 코드를 두 군데 쓰는
+ *  바람에 벨트 능력이 3배 낮게 나오고 따라 하기 단계가 안 넘어갔다.
+ *  그래서 읽는 자리를 하나로 모은다.
+ */
+export const bundleOf = (p) => Math.max(1, Math.round(p?.outputCount ?? DEFAULT_BUNDLE) || 1);
+
 /** 이 설비가 놓아 둘 수 있는 완성품 수 */
 export const outputCapFor = (layers) =>
   Math.max(1, Math.round(layers) || 1) + OUT_SPARE;

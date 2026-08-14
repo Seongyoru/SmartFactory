@@ -26,7 +26,7 @@
  */
 
 import { flowEdges, isSource, outputKindOf, recipeOf } from './bom.js';
-import { beltPerMinute, cycleOf, perMinute, spacingFor } from './process.js';
+import { beltPerMinute, bundleOf, cycleOf, perMinute, spacingFor } from './process.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
 
@@ -98,7 +98,8 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     if (!item || isUtility(item)) continue;
     const from = byUid.get(l.from?.uid);
     if (!from || !makes(itemOf(from.itemId))) continue;
-    const layers = Math.max(1, Math.round(from.layers ?? 1) || 1);
+    /* 한 번에 내보내는 개수 — 이름이 outputCount 다(process.bundleOf) */
+    const layers = bundleOf(from);
     const v = Number(l.speed) > 0 ? Number(l.speed) : beltSpeed;
     const gap = spacingFor(cycleOf(from, itemOf(from.itemId)), layers, v);
     const own = beltPerMinute(gap, v, layers);
