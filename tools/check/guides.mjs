@@ -169,7 +169,13 @@ t('공정 시간은 **기본값에서 바뀌었을 때만** 손댄 것으로 본
 
 const tut = await readSrc('ui/Tutorial.jsx');
 const guidesSrc = await readSrc('core/guides.js');
+const factsSrc = await readSrc('core/guideFacts.js');
 const toolbar = await readSrc('ui/Toolbar.jsx');
+const inspectorSrc = await readSrc('ui/Inspector.jsx');
+const balanceSrc = await readSrc('core/balance.js');
+/* 안내 글이 부르는 이름이 화면에 실제로 있는지 볼 때 쓴다 */
+const UI_TEXT = inspectorSrc + toolbar + dock
+  + (await readSrc('ui/OrdersDock.jsx')) + (await readSrc('ui/LibraryPanel.jsx'));
 
 t('12시 버튼은 **고르는 화면**을 연다 — 바로 한 갈래로 들어가면 나머지를 모른다', () => {
   assert.ok(/guide: state\.guide \? null : 'pick'/.test(toolbar), '옛 단일 안내로 들어간다');
@@ -213,8 +219,6 @@ t('체크가 왜 되어 있는지 화면이 말한다', () => {
 /* ---------- 실제로 났던 버그: 없는 필드를 읽었다 -------------------------- */
 
 const PR = await import(SRC + 'core/process.js');
-const balanceSrc = await readSrc('core/balance.js');
-const factsSrc = await readSrc('core/guideFacts.js');
 
 t('한 번에 내보내는 개수는 **`outputCount`** 다 — `layers` 라는 필드는 없다', () => {
   /* 화면에서는 「층」이라 부르지만 코드에 그런 필드는 없다. `p.layers` 를 읽는
@@ -235,4 +239,53 @@ t('개수를 바꾸면 그 단계가 넘어간다', () => {
   assert.equal(F.guideFacts({ placed: [p] }, itemOf).layered, false, '안 건드렸는데 통과다');
   assert.equal(F.guideFacts({ placed: [{ ...p, outputCount: 4 }] }, itemOf).layered, true, '바꿨는데 안 넘어간다');
   assert.equal(F.guideFacts({ placed: [{ ...p, outputCount: 1 }] }, itemOf).layered, true, '줄인 것도 손댄 것이다');
+});
+
+/* ---------- 실제로 났던 버그: **없는 기능**을 안내했다 -------------------- */
+
+t('**사용자가 정할 수 있는 값으로만 판정한다**', () => {
+  /* 「적치대 자리를 종류별로 나누기」라는 단계를 넣었는데, 그 값(p.slots)은
+     레시피에서 자동으로 나오는 것이라 정하는 UI가 아예 없었다 — 영원히 안
+     끝나는 단계였다. 없는 기능을 안내한 셈이다.
+     그래서 판정이 읽는 **설비 속성**은 화면 어딘가에서 쓸 수 있어야 한다. */
+  const src = factsSrc.replace(/\/\*[\s\S]*?\*\//g, '');
+  /* guideFacts 가 읽는 placed 속성들 — `p.xxx` 꼴 */
+  const read = new Set([...src.matchAll(/\bp\.(\w+)/g)].map((m) => m[1]));
+  /* 화면이 UPDATE_PLACED 로 쓰는 속성들 */
+  /* 쓰는 길이 두 가지다 — `patch: { key` 와, 그것을 감싼 `set({ key` */
+  const written = new Set([
+    ...[...inspectorSrc.matchAll(/patch:\s*\{\s*(\w+)/g)].map((m) => m[1]),
+    ...[...inspectorSrc.matchAll(/\bset\(\{\s*(\w+)/g)].map((m) => m[1]),
+  ]);
+  /* 도면 구조에서 오는 것(uid·itemId·pos…)은 사용자가 「쓰는」 값이 아니다 */
+  const structural = new Set(['uid', 'itemId', 'pos', 'rot', 'y', 'points', 'slots']);
+  const unreachable = [...read].filter((k) => !written.has(k) && !structural.has(k));
+  assert.deepEqual(unreachable, [],
+    `화면에서 정할 수 없는 값으로 판정한다: ${unreachable.join(', ')}`);
+});
+t('그 단계가 실제 도면으로 끝난다 — 적치대 수용량', () => {
+  const bare = { placed: [{ uid: 'S', itemId: 'STILLAGE', pos: [0, 0] }] };
+  assert.equal(F.guideFacts(bare, itemOf).stillageTuned, false, '안 건드렸는데 통과다');
+  const tuned = { placed: [{ uid: 'S', itemId: 'STILLAGE', pos: [0, 0], capacity: 80 }] };
+  assert.equal(F.guideFacts(tuned, itemOf).stillageTuned, true, '바꿨는데 안 넘어간다');
+});
+t('안내 글이 **화면에 있는 이름**을 부른다', () => {
+  /* 「자리 나누기」라는 칸은 없는데 그렇게 적어 두었다. 글이 가리키는 굵은
+     낱말 중 화면에 없는 것이 있으면 사람이 그 자리를 못 찾는다. */
+  const ui = UI_TEXT;
+  /**
+   * 낱말만 봐서는 **칸 이름과 강조 어구를 못 가른다**(「막혀서 섭니다」도 굵게
+   * 쓴다). 그래서 **뒤에 오는 말**로 가른다 — 칸을 가리킬 때는 「… 칸」 ·
+   * 「… 탭」 · 「… 버튼」 · 「…에서」 처럼 쓰기 때문이다.
+   *
+   * 실제로 없던 「**자리 나누기**에서」 가 이 규칙에 걸린다.
+   */
+  const missing = [];
+  for (const { g, s } of allSteps) {
+    for (const m of s.body.matchAll(/\*\*([^*]+)\*\*\s*(칸|탭|버튼|에서)/g)) {
+      const w = m[1].trim();
+      if (!ui.includes(w)) missing.push(`${g.id}/${s.id} → 「${w}」`);
+    }
+  }
+  assert.deepEqual(missing, [], `화면에 없는 이름을 부른다:\n  ${missing.join('\n  ')}`);
 });

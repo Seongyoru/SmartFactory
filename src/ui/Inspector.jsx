@@ -1117,7 +1117,7 @@ function ShelfPanel({ placed }) {
             ))}
             {rowList.every((k) => k) && (
               <p className="mt-1.5 rounded bg-amber-500/10 px-2 py-1 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
-                모든 줄에 종류를 정했습니다 — 여기 없는 종류는 이 선반에 **못 들어갑니다.**
+                모든 줄에 종류를 정했습니다 — 여기 없는 종류는 이 선반에 <b>못 들어갑니다.</b>
                 한 줄은 비워 두면 나머지가 섞여 들어갑니다.
               </p>
             )}
@@ -1920,7 +1920,7 @@ function StillagePanel({ placed }) {
         <Row label="한 층 적재수">{grid.nx} × {grid.nz} = {grid.perLevel} 개</Row>
       </Section>
 
-      <Section title="적재">
+      <Section title="적재" data-guide="panel-stillage">
         <Slider
           label="최대 적재량" min={MIN_CAPACITY} max={MAX_CAPACITY} step={1} value={capacity}
           text={`${capacity} 개`}

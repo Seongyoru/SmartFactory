@@ -19,6 +19,7 @@ import { bundleOf, cycleOf, DEFAULT_BUNDLE, DEFAULT_CYCLE } from './process.js';
 import { crewOf, isWorkable, normalizeShifts } from './crew.js';
 import { DEFAULT_RATES, fixedOf, normalizeRates } from './cost.js';
 import { shelfRows, rowKinds } from './shelf.js';
+import { DEFAULT_CAPACITY } from './stillage.js';
 import { normalizeOrders } from './orders.js';
 
 const some = (list, fn) => (list ?? []).some(fn);
@@ -100,7 +101,14 @@ export function guideFacts(d = {}, itemOf = () => null) {
     /* ---- 쌓는 곳 ---- */
     shelfRows: some(placed, (p) => isShelf(kindOf(p)) && shelfRows(p) > 1),
     shelfSplit: some(placed, (p) => isShelf(kindOf(p)) && (rowKinds(p) ?? []).some(Boolean)),
-    stillageSlots: some(placed, (p) => isStillage(kindOf(p)) && !!p.slots),
+    /**
+     * 적치대의 **수용량이나 반출 수량**을 손댔는가.
+     *  처음에는 「자리를 종류별로 나눴는가」(p.slots)를 봤는데, 그것은 레시피에서
+     *  자동으로 나오는 값이라 **사용자가 정하는 UI가 없다** — 영원히 안 끝나는
+     *  단계였다. 없는 기능을 안내하고 있었던 셈이다.
+     */
+    stillageTuned: some(placed, (p) => isStillage(kindOf(p))
+      && ((p.capacity != null && p.capacity !== DEFAULT_CAPACITY) || p.dispatchCount != null)),
 
     /* ---- 나르기 ---- */
     carts: cartCount,
