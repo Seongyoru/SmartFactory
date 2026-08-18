@@ -102,6 +102,7 @@ import {
 import { focusOn } from '../core/focusStore.js';
 import { downloadCSV, downloadHTML, layoutSnapshot, stamp } from '../core/persistence.js';
 import { layoutInfo } from '../core/layoutInfo.js';
+import { zoneInfo } from '../core/zoneInfo.js';
 import { planReportHTML } from '../core/planReport.js';
 import { useCostInput } from './useCost.js';
 import { seriesCSV } from '../core/scenarios.js';
@@ -2120,6 +2121,67 @@ function OpeningPanel({ opening }) {
  *  묶어 부르기 위한 것이라, 이름만 있고 내용물을 못 보면 쓸 데가 없다.
  *  이름을 누르면 그 설비를 선택하고 화면을 그리로 옮긴다.
  */
+/**
+ * 구역이 말해 주는 것 — **가르려고 그린 것이니 그 단위로 따진다.**
+ * ---------------------------------------------------------------------------
+ *  넓이와 이름만 있는 색칠이었다. 그런데 「가공 구역」 「출하 구역」 으로 나누는
+ *  이유는 색칠이 아니라 그 단위로 묻고 싶어서다 — 여기 더 들어가나, 몇 명이
+ *  붙나, 시간당 얼마가 타나, 카트가 얼마나 지나가나.
+ *
+ *  계산은 `core/zoneInfo.js` 가 한다. 비용은 원가 화면과 **같은 함수**를 쓴다.
+ */
+function ZoneStats({ zone }) {
+  const { state, itemOf } = useEditor();
+  const version = useModelsVersion();
+  const info = useMemo(
+    () => zoneInfo(zone, {
+      placed: state.placed, carts: state.carts, shifts: state.shifts, rates: state.rates,
+      /* 실제 치수는 여기서만 안다 — 모델 규격은 GLB 에서 읽어 캐시되고,
+         선반은 칸 수·줄 수 같은 설정값에서 나온다 (정렬 칸과 같은 규칙) */
+      bboxOf: (p, it) => (isShelf(it)
+        ? shelfBBox(p, it.modelKey ? getSpec(it.modelKey) : null)
+        : it?.modelKey ? getSpec(it.modelKey)?.bbox : null),
+    }, itemOf),
+    [zone, state.placed, state.carts, state.shifts, state.rates, itemOf, version],
+  );
+
+  /* 90% 라고 못 다니는 것도, 40% 라고 넉넉한 것도 아니다 — 통로는 사람이
+     보고 정할 몫이라 색으로 좋고 나쁨을 말하지 않는다. 눈금만 그린다. */
+  const pct = info.fill == null ? null : Math.round(info.fill * 100);
+
+  return (
+    <>
+      {pct != null && (
+        <>
+          <Row label="찬 비율">
+            <span className="tabular-nums">{pct} %</span>
+          </Row>
+          <div className="-mt-1 mb-1 h-1 w-full overflow-hidden rounded bg-kbd">
+            <div className="h-full bg-ink4" style={{ width: `${Math.min(100, pct)}%` }} />
+          </div>
+          <p className="-mt-0.5 mb-1.5 text-[9.5px] leading-snug text-ink4">
+            설비가 바닥에 깔린 넓이({info.covered.toFixed(1)} ㎡)입니다 —
+            <b className="text-ink4"> 통로를 뺀 값이 아닙니다.</b>
+          </p>
+        </>
+      )}
+      <Row label="설비">
+        {info.machines} 대{info.stores > 0 && <span className="text-ink4"> · 쌓는 곳 {info.stores}</span>}
+      </Row>
+      <Row label="인원">{info.crew} 명</Row>
+      <Row label="시간당 비용">{won(info.hourly)}</Row>
+      <Row label="지나는 카트">
+        {info.carts === 0 ? <span className="text-ink4">없음</span>
+          : <>{info.carts} 경로 · {info.pathM.toFixed(1)} m</>}
+      </Row>
+      <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+        비용은 안에 있는 설비만, <b className="text-ink4">쉬지 않고 돌 때</b> 기준입니다.
+        카트 전력은 경로가 여러 구역에 걸쳐 있어 뺐습니다.
+      </p>
+    </>
+  );
+}
+
 function ZonePanel({ zone }) {
   const { state, dispatch, itemOf } = useEditor();
   const set = (patch) => dispatch({ type: 'UPDATE_ZONE', uid: zone.uid, patch });
@@ -2140,6 +2202,7 @@ function ZonePanel({ zone }) {
         <Field label="이름" value={zone.name} onChange={(e) => set({ name: e.target.value })} />
         <Row label="넓이">{mpArea(zone.mp).toFixed(1)} ㎡</Row>
         <Row label="꼭짓점">{mpVertices(zone.mp).length} 개</Row>
+        <ZoneStats zone={zone} />
         <ColorField label="색" value={zone.color} onChange={(v) => set({ color: v })} />
         <Slider
           label="투명도" min={0.05} max={0.9} step={0.05} value={zone.opacity ?? 0.28}
