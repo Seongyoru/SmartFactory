@@ -314,3 +314,20 @@ export function won(v) {
   if (a >= 1e4) return `${Math.round(v / 1e4).toLocaleString()}만 원`;
   return `${Math.round(v).toLocaleString()}원`;
 }
+
+/**
+ * **개당** 원가처럼 작고 촘촘한 금액.
+ * ---------------------------------------------------------------------------
+ *  `won()` 은 원 단위로 반올림한다. 총액에서는 그게 맞지만 개당 원가에서는
+ *  **3.03원과 2.87원이 둘 다 「3원」이 된다** — 개당 원가를 나란히 놓고 견주는
+ *  자리에서 그 반올림은 곧 「안 바뀌었다」 는 거짓말이다. 개선 계산이 「싸진다」
+ *  고 말하는데 숫자 둘이 똑같이 찍히면 그 화면은 못 믿는다.
+ */
+export function unitWon(v) {
+  if (!Number.isFinite(v)) return '—';
+  const a = Math.abs(v);
+  if (a >= 1e4) return won(v);
+  if (a >= 100) return `${Math.round(v).toLocaleString()}원`;
+  if (a >= 1) return `${v.toFixed(2)}원`;
+  return `${v.toFixed(3)}원`;
+}

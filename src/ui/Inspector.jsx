@@ -18,6 +18,7 @@ import {
 import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
 import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
 import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
+import { deltaText, improvePlan } from '../core/improve.js';
 import { runReportCSV } from '../core/report.js';
 import { runReportHTML } from '../core/reportHtml.js';
 import {
@@ -30,6 +31,7 @@ import {
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
   assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts, shiftsVary,
+  totalCrewNeed,
   shiftAt, shiftLabel, splitHM,
 } from '../core/crew.js';
 import {
@@ -46,7 +48,7 @@ import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
   getMade, getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
 } from '../core/faults.js';
-import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, won } from '../core/cost.js';
+import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, unitWon, won } from '../core/cost.js';
 import {
   PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
 } from '../data/library.js';
@@ -3062,6 +3064,17 @@ function CrewPanel() {
  *  묶어서 보여 주는 것이 요점이다 — 같은 능력의 고리가 둘이면 **하나만 고쳐
  *  봐야 하나도 안 오른다.** 그것이 이 화면이 말해야 하는 가장 중요한 것이다.
  */
+/**
+ * 「남는 장사인가」 — **세 갈래다.** 둘로 가르면 가장 흔한 판이 거짓말이 된다:
+ *  설비를 통째로 두 배 하면 능력도 돈도 두 배라 개당 원가가 **정확히 같은데**,
+ *  그걸 빨갛게 「밑지는 장사」 라고 찍게 된다. 밑지는 게 아니라 본전이다.
+ */
+const VERDICT = {
+  win: { label: '남는 장사', chip: 'bg-emerald-500/15 text-emerald-600', tone: 'text-emerald-600' },
+  even: { label: '본전 — 양만 는다', chip: 'bg-sky-500/15 text-sky-600', tone: 'text-ink2' },
+  lose: { label: '밑지는 장사', chip: 'bg-rose-500/15 text-rose-600', tone: 'text-rose-600' },
+};
+
 function LineCapacity() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -3075,6 +3088,25 @@ function LineCapacity() {
     [state.placed, state.links, state.carts, state.beltSpeed, itemOf, version],
   );
   const chain = useMemo(() => bottleneckChain(bal.rows), [bal.rows]);
+
+  /**
+   * 「그래서 얼마 이득인가」 — 능력과 돈을 잇는다.
+   * -------------------------------------------------------------------------
+   *  단가·교대를 **도면에서 그대로** 가져온다. 여기서 자기 나름의 값을 쓰면
+   *  아래 원가 탭과 숫자가 갈리고, 그러면 둘 다 못 믿게 된다.
+   */
+  const plan = useMemo(
+    () => improvePlan({
+      rows: bal.rows,
+      /* 전기를 먹는 것만 — 선반·적치대에 전기료를 물리면 안 된다 */
+      machines: state.placed.filter((p) => isWorkable(itemOf(p.itemId))),
+      carts: state.carts,
+      shifts: state.shifts,
+      crewNeed: totalCrewNeed(state.placed, (p) => isWorkable(itemOf(p.itemId))),
+      rates: state.rates,
+    }),
+    [bal.rows, state.placed, state.carts, state.shifts, state.rates, itemOf],
+  );
 
   if (!bal.rows.length) {
     return (
@@ -3123,6 +3155,92 @@ function LineCapacity() {
         <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
           가장 약한 고리가 <b>{chain[0].items.length}개</b>입니다 — 하나만 고치면 하나도 안 오릅니다.
         </p>
+      )}
+      {/**
+        * 「그래서 얼마 이득인가」
+        * ---------------------------------------------------------------------
+        *  위 목록은 「고치면 10개/분」 까지만 말한다. 그런데 정작 정할 것은
+        *  **고칠 값어치가 있는가** 이고, 그건 능력만으로도 돈만으로도 안 나온다.
+        *  설비를 한 대 더 놓으면 만드는 개수와 나가는 돈이 **함께** 커지므로,
+        *  어느 쪽이 더 크게 커지는지를 개당 원가 하나로 보여 준다.
+        */}
+      {plan && plan.gain > 0 && (
+        <div className="mt-2.5 rounded-md border border-edge bg-field px-2.5 py-2">
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="text-[11px] font-medium text-ink3">손보면 얼마 이득인가</span>
+            {plan.free ? (
+              <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[9.5px] font-medium text-emerald-600">
+                돈 안 듦
+              </span>
+            ) : (
+              <span className={`rounded px-1.5 py-0.5 text-[9.5px] font-medium ${VERDICT[plan.verdict]?.chip ?? ''}`}>
+                {VERDICT[plan.verdict]?.label ?? '—'}
+              </span>
+            )}
+          </div>
+
+          {/* 무엇을 손보나 — 종류마다 「푼다」의 뜻이 다르다 */}
+          <ul className="mt-1.5 space-y-0.5">
+            {plan.steps.map((s) => (
+              <li key={s.uid} className="flex items-baseline justify-between gap-2 text-[10.5px]">
+                <span className="truncate text-ink3">{s.name}</span>
+                <span className="shrink-0 text-ink4">{s.what}</span>
+              </li>
+            ))}
+          </ul>
+
+          <table className="mt-1.5 w-full border-t border-line pt-1 text-[10.5px] tabular-nums">
+            <tbody>
+              <tr className="text-ink4">
+                <td className="py-0.5" />
+                <td className="py-0.5 text-right">지금</td>
+                <td className="py-0.5 text-right">손본 뒤</td>
+              </tr>
+              <tr>
+                <td className="py-0.5 text-ink4">천장</td>
+                <td className="py-0.5 text-right text-ink3">{rateText(plan.now.capacity)}</td>
+                <td className="py-0.5 text-right font-medium text-ink">{rateText(plan.after.capacity)}</td>
+              </tr>
+              <tr>
+                <td className="py-0.5 text-ink4">시간당 비용</td>
+                <td className="py-0.5 text-right text-ink3">{won(plan.now.hourly)}</td>
+                <td className="py-0.5 text-right text-ink2">{won(plan.after.hourly)}</td>
+              </tr>
+              <tr>
+                <td className="py-0.5 text-ink4">개당 원가</td>
+                {/* 원 단위로 반올림하면 3.03원과 2.87원이 똑같이 찍힌다 */}
+                <td className="py-0.5 text-right text-ink3">{unitWon(plan.now.unit)}</td>
+                <td className={`py-0.5 text-right font-medium ${VERDICT[plan.verdict]?.tone ?? 'text-ink2'}`}>
+                  {unitWon(plan.after.unit)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p className="mt-1 border-t border-line pt-1 text-[9.5px] leading-snug text-ink4">
+            {plan.free
+              ? '값만 바꾸면 되는 자리입니다 — 설비를 사기 전에 여기부터 보세요.'
+              : <>
+                시간당 <b className="text-ink3">{won(plan.addWon)}</b>이 더 듭니다
+                {plan.addCrew > 0 && <> (사람 <b className="text-ink3">{plan.addCrew}명</b> 포함)</>}.{' '}
+                {plan.verdict === 'even'
+                  ? <>개당 원가는 <b className="text-ink3">그대로</b>고 <b className="text-ink3">양만</b> 늡니다.</>
+                  : <>개당 <b className={VERDICT[plan.verdict]?.tone}>{deltaText(plan.unitDelta)}</b>.</>}
+              </>}
+            {/* 위 목록의 「고치면 10개/분」은 고리를 통째로 치웠을 때다. 한 대로는
+                거기까지 못 가는 일이 흔한데, 아무 말도 안 하면 모순처럼 읽힌다 */}
+            {!plan.reaches && (
+              <>
+                <br />
+                한 대로는 <b className="text-ink3">{rateText(plan.after.capacity)}</b>까지입니다 —
+                위에 적힌 <b className="text-ink3">{rateText(plan.ceiling)}</b>까지 올리려면 더 놓아야 합니다.
+              </>
+            )}
+            <br />
+            고장도 굶음도 없이 <b className="text-ink3">쉬지 않고 도는</b> 라인의 값입니다 —
+            실제로 돌린 원가는 아래 <b className="text-ink3">원가</b> 탭에서 봅니다.
+          </p>
+        </div>
       )}
     </Section>
   );
