@@ -29,13 +29,13 @@ import { longEnough, projectRun } from './cost.js';
      설비 이름은 사용자가 적는다. `<b>` 같은 것을 이름에 넣어 두면 보고서
      구조가 통째로 무너지므로, 넣기 전에 반드시 막는다.
 --------------------------------------------------------------------------- */
-const esc = (v) => String(v ?? '')
+export const esc = (v) => String(v ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
-const num = (v, n = 1) => (Number.isFinite(v) ? v.toFixed(n) : '—');
-const int = (v) => (Number.isFinite(v) ? Math.round(v).toLocaleString() : '—');
-const pc = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : '—');
+export const num = (v, n = 1) => (Number.isFinite(v) ? v.toFixed(n) : '—');
+export const int = (v) => (Number.isFinite(v) ? Math.round(v).toLocaleString() : '—');
+export const pc = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : '—');
 
 /** 나쁜 값은 붉게, 좋은 값은 푸르게 — 표를 훑을 때 눈이 먼저 잡는 것이 색이다 */
 const rate = (v, warn = 0.85, bad = 0.5) =>
@@ -54,7 +54,7 @@ const ORDER_TONE = {
 };
 
 /** 표 한 장 — 줄이 없으면 「없다」 고 **말한다**. 빈 표는 고장처럼 보인다 */
-function table(head, rows, empty = '기록 없음') {
+export function table(head, rows, empty = '기록 없음') {
   if (!rows.length) return `<p class="none">${esc(empty)}</p>`;
   const th = head.map((h) => `<th>${esc(h)}</th>`).join('');
   const tr = rows
@@ -64,7 +64,7 @@ function table(head, rows, empty = '기록 없음') {
 }
 
 /** 값이 큰 칸 — 결론을 먼저 읽게 한다 */
-const card = (label, value, sub = '', cls = '') =>
+export const card = (label, value, sub = '', cls = '') =>
   `<div class="card"><div class="k">${esc(label)}</div>`
   + `<div class="v${cls}">${value}</div>`
   + (sub ? `<div class="s">${esc(sub)}</div>` : '')
@@ -92,7 +92,7 @@ function chart(series) {
   <div class="axis"><span>${esc(hms(t0))}</span><span>${int(top)} 개 누적</span></div>`;
 }
 
-const CSS = `
+export const REPORT_CSS = `
 :root{--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--line:#e2e8f0;--bg:#fff;--raise:#f8fafc}
 *{box-sizing:border-box}
 body{margin:0;padding:32px 28px 56px;background:var(--bg);color:var(--ink);
@@ -307,6 +307,6 @@ export function runReportHTML(d = {}) {
 
   return `<!doctype html><html lang="ko"><head><meta charset="utf-8">`
     + `<meta name="viewport" content="width=device-width,initial-scale=1">`
-    + `<title>실행 보고서 — ${esc(d.at ?? '')}</title><style>${CSS}</style></head>`
+    + `<title>실행 보고서 — ${esc(d.at ?? '')}</title><style>${REPORT_CSS}</style></head>`
     + `<body>${s.join('\n')}</body></html>`;
 }

@@ -100,7 +100,9 @@ import {
   wallLines,
 } from '../core/area.js';
 import { focusOn } from '../core/focusStore.js';
-import { downloadCSV, downloadHTML, stamp } from '../core/persistence.js';
+import { downloadCSV, downloadHTML, layoutSnapshot, stamp } from '../core/persistence.js';
+import { layoutInfo } from '../core/layoutInfo.js';
+import { planReportHTML } from '../core/planReport.js';
 import { useCostInput } from './useCost.js';
 import { seriesCSV } from '../core/scenarios.js';
 import { sliceCountFor, tileCount } from '../scene/connectorGeometry.js';
@@ -3246,6 +3248,71 @@ function LineCapacity() {
   );
 }
 
+/**
+ * 도면 보고서 — **안 돌려도 나오는 한 장.**
+ * ---------------------------------------------------------------------------
+ *  실행 보고서는 돌려야 나온다. 그런데 도면을 남에게 건넬 때 필요한 것은 대개
+ *  그 앞이다 — 「무엇이 몇 대 놓였고, 이 라인의 천장은 얼마인가」. 그래서 이
+ *  버튼은 아래 띠가 아니라 **도면 요약** 안에 있다. 그쪽은 「이번 실행」의 자리다.
+ *
+ *  값은 전부 화면이 이미 보여 주고 있는 것과 **같은 계산**에서 나온다 —
+ *  종이와 화면이 다른 숫자를 말하면 둘 다 못 믿는다.
+ */
+function PlanReportButton() {
+  const { state, dispatch, itemOf } = useEditor();
+  const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
+
+  const save = () => {
+    try {
+      const layout = layoutSnapshot(state);
+      const workable = (p) => isWorkable(itemOf(p.itemId));
+      const bal = lineBalance({
+        placed: state.placed, links: state.links, carts: state.carts,
+        itemOf, specOf, beltSpeed: state.beltSpeed,
+      });
+      const html = planReportHTML({
+        at: stamp(),
+        layout,
+        info: layoutInfo(layout, itemOf),
+        rows: bal.rows,
+        capacity: bal.capacity,
+        plan: improvePlan({
+          rows: bal.rows,
+          machines: state.placed.filter(workable),
+          carts: state.carts,
+          shifts: state.shifts,
+          crewNeed: totalCrewNeed(state.placed, workable),
+          rates: state.rates,
+        }),
+        nameOf: (p) => itemOf(p.itemId)?.name ?? '',
+      });
+      downloadHTML(html, `도면보고서-${stamp()}.html`);
+      dispatch({ type: 'SET', patch: { hint: '도면 보고서를 내려받았습니다' } });
+    } catch (e) {
+      /* 눌렀는데 아무 일도 안 일어나면 버튼이 고장 났는지조차 알 수 없다 */
+      console.error('[도면 보고서] 만들다 실패', e);
+      dispatch({ type: 'SET', patch: { hint: '도면 보고서를 만들지 못했습니다' } });
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={save}
+        className={OUT_BTN}
+        title="평면도 · 설비 목록 · 라인 능력 · 예상 원가 한 장 — 브라우저로 열고 Ctrl+P 로 PDF"
+      >
+        <FileText size={14} /> 도면 보고서
+      </button>
+      <p className="mt-1.5 text-[10px] leading-snug text-ink4">
+        <b className="text-ink3">돌리지 않아도</b> 나옵니다 — 평면도와 설비 목록, 라인 천장,
+        쉬지 않고 돌 때의 원가. 잰 값은 아래 띠의 <b className="text-ink3">보고서</b>입니다.
+      </p>
+    </>
+  );
+}
+
 function Summary() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -3276,6 +3343,9 @@ function Summary() {
         {Object.entries(shipped).map(([kind, n]) => (
           <Row key={kind} label={`· ${PAYLOAD_ITEMS[kind]?.name ?? kind}`}>{n} 개</Row>
         ))}
+        <div className="mt-2.5 border-t border-line pt-2">
+          <PlanReportButton />
+        </div>
       </Section>
 
 

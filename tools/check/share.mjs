@@ -335,8 +335,12 @@ t('**높이를 못 박는다** — 한글과 라틴은 글자 높이가 달라 �
      leading-none 으로 글자 높이를 지우고 상자 높이를 직접 준다. */
   assert.ok(/const OUT_H = 'flex h-\[26px\] items-center'/.test(inspectorSrc), '높이를 안 박았다');
   assert.ok(/leading-none/.test(inspectorSrc), '글자 높이가 살아 있어 어긋난다');
-  /* 셋이 같은 자를 쓴다 — 하나만 고치면 또 어긋난다 */
-  assert.equal((inspectorSrc.match(/className=\{OUT_BTN\}/g) ?? []).length, 2, '두 버튼이 같은 모양이 아니다');
+  /* 다 같은 자를 쓴다 — 하나만 고치면 또 어긋난다.
+     **개수를 못 박지 않는다.** 버튼은 늘어난다(도면 보고서가 그랬다). 지킬 것은
+     「몇 개인가」가 아니라 **「그 모양을 손으로 다시 적은 데가 없는가」** 다. */
+  assert.ok((inspectorSrc.match(/className=\{OUT_BTN\}/g) ?? []).length >= 2, '같은 자를 쓰는 버튼이 없다');
+  assert.equal((inspectorSrc.match(/ring-1 ring-sky-500\/40/g) ?? []).length, 1,
+    '같은 모양을 손으로 다시 적은 데가 있다 — OUT_BTN 을 쓸 것');
   assert.ok(/\$\{OUT_H\} w-\[26px\]/.test(inspectorSrc), '다시 재기만 높이가 다르다');
 });
 t('**켜져 있는 버튼도 손이 닿으면 반응한다**', () => {

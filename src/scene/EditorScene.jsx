@@ -49,6 +49,7 @@ import {
   edgeSpec,
   mpEdges,
 } from '../core/area.js';
+import { measureOf, measureText } from '../core/measure.js';
 import AreaView from './AreaView.jsx';
 import {
   FLOOR_HALF,
@@ -604,6 +605,44 @@ function BuildPreview({ tool, isTop, rect, poly, wallFrom, cursor, color }) {
     return <PolyLine points={[wallFrom, cursor]} color={color} />;
   }
   return null;
+}
+
+/**
+ * 자 — 두 점과 그 사이의 치수.
+ * ---------------------------------------------------------------------------
+ *  둘째 점을 찍기 전에는 **커서까지** 이어 그린다. 재는 동안 값이 따라 움직이지
+ *  않으면 「여기가 3m 인가」 를 확인하려고 매번 두 번씩 눌러야 한다.
+ *
+ *  치수는 셋을 함께 말한다 — 비스듬한 두 점에서 정작 알고 싶은 것은 대개
+ *  **축에 붙은 값**이기 때문이다(measure.js).
+ */
+function MeasureView({ measure, cursor, color }) {
+  const a = measure?.a;
+  const b = measure?.b ?? (a ? cursor : null);
+  const mm = measureOf(a, b);
+  if (!a) return null;
+
+  const dot = (at, key) => (
+    <mesh key={key} position={[at[0], 0.07, at[1]]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={9} raycast={() => null}>
+      <circleGeometry args={[0.18, 16]} />
+      <meshBasicMaterial color={color} depthWrite={false} depthTest={false} />
+    </mesh>
+  );
+
+  return (
+    <group>
+      {dot(a, 'a')}
+      {b && dot(b, 'b')}
+      {mm && <PolyLine points={[a, b]} color={color} />}
+      {mm && (
+        <Html position={[mm.mid[0], 0.2, mm.mid[1]]} center style={{ pointerEvents: 'none' }}>
+          <span className="whitespace-nowrap rounded bg-panel/90 px-1.5 py-0.5 text-[10px] tabular-nums text-ink ring-1 ring-line">
+            {measureText(mm)}
+          </span>
+        </Html>
+      )}
+    </group>
+  );
 }
 
 /* ==========================================================================
@@ -1654,6 +1693,14 @@ function SceneContent() {
     (p) => {
       if (pickedRef.current) return; // 설비/연결을 집은 클릭이면 여기선 아무것도 안 한다
 
+      /* ---- 자 --------------------------------------------------------- */
+      if (tool === TOOL.MEASURE) {
+        /* 다른 도구와 **같은 커서**를 쓴다 — 스냅을 켜 두었으면 잰 값도 그리드에
+           떨어진다. 그리는 자리와 재는 자리가 다르면 잰 값이 소용없다. */
+        dispatch({ type: 'MEASURE_POINT', point: [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))] });
+        return;
+      }
+
       /* ---- 작업 영역 도구 ---------------------------------------------- */
       if (isBuildTool(tool) && isTop) {
         const cur = [clean(snap(p[0], gridSize)), clean(snap(p[1], gridSize))];
@@ -2313,6 +2360,11 @@ function SceneContent() {
         cursor={cursor}
         color={theme.select}
       />
+
+      {/* 자 — 잰 것은 도면이 아니라 손놀림이라 저장되지 않는다 */}
+      {tool === TOOL.MEASURE && isTop && (
+        <MeasureView measure={state.measure} cursor={cursor} color={theme.select} />
+      )}
 
       {/* 배치된 설비 · 선반 */}
       {placed.map((p) => {

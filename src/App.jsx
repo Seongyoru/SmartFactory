@@ -126,6 +126,8 @@ function useShortcuts() {
           /* 꼭짓점 편집이 먼저다 — 편집 중에 Esc 가 도구까지 바꿔 버리면
              "고치던 것만 그만두기" 를 할 수 없다 */
           if (state.editShape) dispatch({ type: 'EDIT_SHAPE', target: null });
+          /* 잰 것부터 지운다 — 도구까지 바꿔 버리면 자를 다시 집어야 한다 */
+          else if (state.measure) dispatch({ type: 'MEASURE_CLEAR' });
           else if (state.polyDraft?.points.length || state.wallDraft) dispatch({ type: 'POLY_CANCEL' });
           else if (state.pathDraft?.points.length) dispatch({ type: 'PATH_CANCEL' });
           else if (state.connectFrom) dispatch({ type: 'CANCEL_CONNECT' });

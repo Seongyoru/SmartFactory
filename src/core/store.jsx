@@ -16,6 +16,7 @@ import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.j
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
 import { DEFAULT_SHIFT, normalizeShifts } from './crew.js';
 import { normalizeOrders } from './orders.js';
+import { nextMeasure } from './measure.js';
 import { DEFAULT_RATES, normalizeRates } from './cost.js';
 import {
   OPENING_DEFAULTS,
@@ -67,6 +68,8 @@ export const TOOL = {
   PILLAR: 'pillar',
   ZONE: 'zone',
   OPENING: 'opening',
+  /** 자 대기 — 두 점을 눌러 거리를 잰다. 도면에 남지 않는다(core/measure.js) */
+  MEASURE: 'measure',
 };
 
 /** 면을 그리는 방식 — 사각형 드래그 / 펜(점 찍기) */
@@ -255,6 +258,8 @@ const initialState = {
   pathDraft: null,      // 카트 경로를 그리는 중 { itemId, points:[[x,z],…] }
   polyDraft: null,      // 펜으로 면을 그리는 중 { kind:'area'|'zone', points:[[x,z],…] }
   wallDraft: null,      // 내벽 첫 점을 찍은 상태 [x, z]
+  /** 자 — { a:[x,z], b:[x,z]|null }. **DOC_KEYS 밖이라 저장도 되돌리기도 안 된다** */
+  measure: null,
   hint: null,
 
   /** 복사해 둔 것 — 붙여넣기 전까지 들고 있는다 (도면이 아니라 작업 중 상태) */
@@ -348,8 +353,11 @@ function reducer(state, action) {
            클릭을 먹어 버리면 무엇이 그려질지 예측할 수 없다 */
         polyDraft: null,
         wallDraft: null,
-        /* 건물 도구는 탑뷰에서만 그린다 (배치와 같은 이유) */
-        view: isBuildTool(action.tool) ? VIEW.TOP : state.view,
+        /* 자는 도구를 떠나면 지운다 — 다른 도구로 그리는 동안 남은 선이
+           도면 위를 가로지르면 그린 것인지 잰 것인지 헷갈린다 */
+        measure: action.tool === TOOL.MEASURE ? state.measure : null,
+        /* 건물 도구와 자는 탑뷰에서만 — 비스듬히 보면서 잰 거리는 못 믿는다 */
+        view: isBuildTool(action.tool) || action.tool === TOOL.MEASURE ? VIEW.TOP : state.view,
         selected: action.tool === TOOL.SELECT ? state.selected : null,
       };
 
@@ -731,6 +739,13 @@ function reducer(state, action) {
 
     case 'WALL_START':
       return { ...state, wallDraft: action.point };
+
+    /* 자 — 첫 점 → 둘째 점 → 다시 처음. 규칙은 measure.js 한 곳에만 있다 */
+    case 'MEASURE_POINT':
+      return { ...state, measure: nextMeasure(state.measure, action.point) };
+
+    case 'MEASURE_CLEAR':
+      return state.measure ? { ...state, measure: null } : state;
 
     case 'ADD_PILLAR': {
       const uid = `P${state.seq}`;

@@ -87,7 +87,11 @@ const n1 = (v) => (Math.round(v * 10) / 10).toString();
  *  겹치는 순서가 곧 읽는 순서다 — 바닥 → 구역 → 경로 → 벨트 → 기둥 → 설비.
  *  설비가 맨 위여야 「무엇이 어디에 있는가」 가 먼저 보인다.
  */
-export function layoutThumbSVG(d, { w = THUMB_W, h = THUMB_H } = {}) {
+/**
+ * @param o.labels   설비에 **번호**를 찍는다(이름이 아니다 — 아래 주석 참고)
+ * @param o.scaleBar 축척 막대. 인쇄해서 볼 때만 뜻이 있다
+ */
+export function layoutThumbSVG(d, { w = THUMB_W, h = THUMB_H, labels = false, scaleBar = false } = {}) {
   const b = layoutBounds(d);
   const t = fitTransform(b, w, h);
   const body = [];
@@ -145,6 +149,44 @@ export function layoutThumbSVG(d, { w = THUMB_W, h = THUMB_H } = {}) {
       if (!p.pos) continue;
       const [x, y] = t.at(p.pos[0], p.pos[1]);
       body.push(`<rect x="${n1(x - side / 2)}" y="${n1(y - side / 2)}" width="${n1(side)}" height="${n1(side)}" rx="1" fill="#1e293b"/>`);
+    }
+
+    /**
+     * 번호 — **이름을 안 적는 이유가 있다.**
+     * -----------------------------------------------------------------------
+     *  이름을 그대로 얹으면 설비가 조금만 붙어 있어도 글자끼리 겹쳐 둘 다 못
+     *  읽는다. 실제 평면도가 하는 대로 **번호만 찍고 옆에 범례**를 둔다 —
+     *  보고서의 설비 목록이 같은 번호를 쓰므로 표와 그림이 서로를 가리킨다.
+     */
+    if (labels) {
+      let n = 0;
+      for (const p of d.placed ?? []) {
+        if (!p.pos) continue;
+        n += 1;
+        const [x, y] = t.at(p.pos[0], p.pos[1]);
+        body.push(
+          `<text x="${n1(x)}" y="${n1(y)}" text-anchor="middle" dominant-baseline="central"`
+          + ` font-size="${n1(Math.max(6, Math.min(11, side * 0.62)))}" font-weight="700"`
+          + ` fill="#f8fafc" stroke="#1e293b" stroke-width="2.5" paint-order="stroke">${n}</text>`,
+        );
+      }
+    }
+
+    /* 축척 막대 — 인쇄물에서 「이게 몇 m 짜리 공장인가」 를 알 길이 이것뿐이다.
+       1·2·5·10… 중 가로폭 1/4 을 안 넘는 가장 큰 눈금을 고른다 */
+    if (scaleBar) {
+      const want = (w - PAD * 2) / 4 / t.s;                    // 그만큼의 미터
+      const pow = 10 ** Math.floor(Math.log10(Math.max(1e-6, want)));
+      const m = [10, 5, 2, 1].map((k) => k * pow).find((v) => v <= want) ?? pow;
+      const px = m * t.s;
+      const x0 = PAD;
+      const y0 = h - PAD / 2;
+      body.push(
+        `<line x1="${n1(x0)}" y1="${n1(y0)}" x2="${n1(x0 + px)}" y2="${n1(y0)}" stroke="#334155" stroke-width="1.5"/>`
+        + `<line x1="${n1(x0)}" y1="${n1(y0 - 3)}" x2="${n1(x0)}" y2="${n1(y0 + 3)}" stroke="#334155" stroke-width="1.5"/>`
+        + `<line x1="${n1(x0 + px)}" y1="${n1(y0 - 3)}" x2="${n1(x0 + px)}" y2="${n1(y0 + 3)}" stroke="#334155" stroke-width="1.5"/>`
+        + `<text x="${n1(x0 + px + 5)}" y="${n1(y0)}" dominant-baseline="central" font-size="9" fill="#475569">${m} m</text>`,
+      );
     }
   } else {
     body.push(`<text x="${w / 2}" y="${h / 2}" text-anchor="middle" dominant-baseline="middle" font-size="12" fill="#94a3b8">빈 도면</text>`);

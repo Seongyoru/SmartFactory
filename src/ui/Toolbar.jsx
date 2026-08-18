@@ -20,6 +20,7 @@ import {
   Play,
   Redo2,
   RotateCw,
+  Ruler,
   Share2,
   Sun,
   Trash2,
@@ -525,6 +526,15 @@ export default function Toolbar() {
         </IconBtn>
         <IconBtn title="지우개 (X)" active={state.tool === TOOL.ERASE} onClick={() => setTool(TOOL.ERASE)}>
           <Eraser size={14} />
+        </IconBtn>
+        {/* 자 — 배치 에디터인데 거리를 잴 길이 없었다. 통로 폭이 몇 m 인지,
+            설비 사이가 카트가 지날 만한지는 눈대중으로 답할 것이 아니다 */}
+        <IconBtn
+          title="치수 재기 — 두 점을 눌러 거리를 잽니다 (Esc 로 지움)"
+          active={state.tool === TOOL.MEASURE}
+          onClick={() => setTool(TOOL.MEASURE)}
+        >
+          <Ruler size={14} />
         </IconBtn>
         <IconBtn
           title="90° 회전 (R)"
