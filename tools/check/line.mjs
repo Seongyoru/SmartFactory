@@ -19,23 +19,21 @@ const B = await import(SRC + 'core/belt.js');
 const sim = await import(SRC + 'core/simStore.js');
 const bom = await import(SRC + 'core/bom.js');
 
-/* ---- SimClock 의 생산 루프를 그대로 ---------------------------------------- */
-const src = await readSrc('scene/EditorScene.jsx');
-const loop = cut(
-  src,
-  'for (const m of machines) {',
-  'if (n > 0) addMade(m.uid, n);',
-  '설비 생산 루프',
-) + '\n}';
-
-const produce = new Function(
-  'machines', 'dt', 'nowDown', 'unmanned', 'getMade', 'addMade', 'takeEach', 'runMachine',
-  loop,
-);
+/* ---- 설비 생산 루프 ---------------------------------------------------------
+     예전에는 EditorScene 의 useFrame 에서 소스를 떼어 `new Function` 에 넣었다.
+     `core/sim.js` 로 옮기고 나서는 **그 함수를 그대로 부른다** — 화면이 부르는
+     것과 글자 하나까지 같은 코드다.
+--------------------------------------------------------------------------- */
+const S = await import(SRC + 'core/sim.js');
 
 const NONE = new Set();
 const step = (machines, dt, { down = NONE, unmanned = NONE } = {}) =>
-  produce(machines, dt, down, unmanned, sim.getMade, sim.addMade, sim.takeEach, P.runMachine);
+  /* 고장은 여기서 안 굴린다 — down 에 든 것만 선 것으로 친다.
+     mttr 를 길게 준 뒤 rand 를 0 으로 고정하면 그 설비만 계속 서 있다. */
+  S.runMachines(dt, {
+    equips: [...down].map((uid) => ({ uid, mtbf: 1e-9, mttr: 3600 })),
+    machines, unmanned, halted: NONE, shipped: 0, rand: () => 0,
+  });
 
 /* ---- 도면 ------------------------------------------------------------------
      A(공급원, 6초/개) ──벨트──▶ C(조립 2R+1G, 12초/개) ──벨트──▶ S(적치대)

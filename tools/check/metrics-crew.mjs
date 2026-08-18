@@ -75,15 +75,23 @@ t('다시 재기가 카트 기록도 지운다', () => {
   assert.deepEqual(m.getCartRan(), {});
 });
 
-/* ---------- SimClock 의 네 갈래 (소스에서 떼어) ---------- */
-const src = await readSrc('scene/EditorScene.jsx');
-/* 갈라 세는 부분만 — 마지막 accumulate 호출은 빼고 결과를 돌려받는다 */
-const CALL = 'accumulate(dt, blockedOnly, shipped, starvedOnly, downOnly);';
-const body = cut(src, 'const downOnly = new Set();', CALL, 'SimClock 갈라 세기').slice(0, -CALL.length);
-const split = new Function(
-  'halted', 'jammed', 'starved', 'unmanned', 'nowDown',
-  `${body}\nreturn { downOnly, blockedOnly, starvedOnly };`,
-);
+/* ---------- 서는 이유 네 갈래 ----------------------------------------------
+     예전에는 EditorScene 의 useFrame 안에 있어서 소스를 떼어 `new Function` 에
+     넣어야 했다. `core/sim.js` 로 옮기고 나서는 **그냥 돌려 보면 된다** —
+     이유를 어떻게 가르는지는 metrics 에 쌓인 값이 그대로 말해 준다.
+--------------------------------------------------------------------------- */
+const S = await import(SRC + 'core/sim.js');
+
+/** 한 틱 돌리고, 어느 통에 시간이 쌓였는지 본다 */
+const split = (halted, jammed, starved, unmanned, nowDown) => {
+  m.resetMetrics();
+  /* 고장은 faults 가 굴린다 — 여기서는 「고장 중이면 MTBF 를 0 으로 두지 않는다」
+     대신 mtbf 를 아주 크게 줘서 새 고장이 안 나게 하고, 이미 선 것만 흉내 낸다 */
+  const equips = [...nowDown].map((uid) => ({ uid, mtbf: 1e-9, mttr: 3600 }));
+  S.runMachines(1, { equips, machines: [], halted, jammed, starved, unmanned, shipped: 0, rand: () => 0 });
+  const has = (o) => new Set(Object.keys(o).filter((k) => o[k] > 0));
+  return { downOnly: has(m.getUnmanned()), blockedOnly: has(m.getBlocked()), starvedOnly: has(m.getStarved()) };
+};
 
 const only = (r) => Object.entries(r).filter(([, v]) => v.size).map(([k]) => k);
 

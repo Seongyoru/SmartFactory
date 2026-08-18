@@ -18,17 +18,10 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
-import {
-  CART_MARGIN, followDistance, forgetStation, loadRoom, pickSet, stationStyle, stepCart,
-} from '../core/cart.js';
+import { CART_MARGIN, stationStyle } from '../core/cart.js';
 import { simStep } from '../core/clock.js';
-import { accumulateCart } from '../core/metrics.js';
-import {
-  addByGroup, addLots, addLotsShared, addShipped, getMade, takeLots, takeMade,
-} from '../core/simStore.js';
-import { slotShares } from '../core/bom.js';
+import { newCartUnit, runCart } from '../core/sim.js';
 import { usePayloadSpecs } from '../core/payload.js';
-import { inGate, pointInMP } from '../core/area.js';
 import { canonKind } from '../data/library.js';
 
 const CART_COLOR = '#a78bfa';
@@ -80,39 +73,39 @@ function CartUnit({
   onPointerDown,
 }) {
   const groupRef = useRef(null);
-  const sRef = useRef(startS);
   /**
-   * 어느 쪽으로 달리는가 (+1 정방향 · −1 역방향).
+   * 이 차의 **모든 가변 상태**가 여기 하나에 들어 있다.
    * -------------------------------------------------------------------------
-   *  `reverse` 는 원래 **모델만 180° 돌려** 놓는 값이었다. 차가 뒤로 가는 것처럼
-   *  보이지만 실제로는 그대로 앞으로 갔고, 정차역을 만나는 순서도 그대로였다 —
-   *  보이는 것과 도는 것이 달랐다. 이제 **진행 방향 자체**를 뒤집는다.
+   *  예전에는 useRef 일곱 개와 useState 둘로 흩어져 있었다. 그러면 굴리는 코드가
+   *  화면에 묶여 **화면 없이는 못 돈다** — 반복 실행을 막고 있던 것이 그것이다.
+   *  평범한 객체 하나로 모으니 `core/sim.js` 가 그대로 굴릴 수 있다.
+   *
+   *  `reverse` 는 모델만 돌리는 값이 아니라 **진행 방향 자체**를 뒤집는다.
    *  모델 방향은 진행 방향에서 나오므로(아래 rotation.y) 저절로 따라온다.
    */
-  const dirRef = useRef(cart.reverse ? -1 : 1);
-  const pauseRef = useRef(0);
-  const lastKeyRef = useRef(null);
-  /** 그 기억을 남긴 자리 — 충분히 멀어지면 잊는다 (cart.js 의 forgetStation) */
-  const lastSRef = useRef(null);
-  /** 지금 싣고 있는 짐을 어디서 받았는가 — 같은 곳에 도로 내려놓지 않기 위해 */
-  const sourceRef = useRef(null);
-  const [carried, setCarried] = useState(0);
-  /** 무엇을 싣고 있는가 — 실은 곳에서 따라오고, 내릴 때 그대로 넘긴다 */
-  /** 싣고 있는 물건들의 종류 (아래에서부터). 섞어 실으면 섞인 채로 간다 */
+  const unit = useRef(null);
+  if (!unit.current) unit.current = newCartUnit(startS, cart.reverse);
+
+  /**
+   * 실은 것 — **화면에 그리려고만** 들고 있는 사본이다.
+   *  임자는 `unit.current.carried` 다. 짐 모형을 쌓으려면 리렌더가 필요해서
+   *  바뀔 때만 여기로 옮겨 적는다.
+   */
   const [carriedKinds, setCarriedKinds] = useState([]);
+  const carried = carriedKinds.length;
   const specOf = usePayloadSpecs();
 
   // 대수가 바뀌면 출발 지점을 다시 나눠 갖는다
-  useEffect(() => { sRef.current = startS; }, [startS]);
+  useEffect(() => { unit.current.s = startS; }, [startS]);
   /* 첫 프레임 전에도 남들이 내 자리를 볼 수 있어야 한다 — 안 그러면 대수가
      바뀐 직후 한 프레임 동안 서로가 안 보여 겹친 채로 출발한다 */
   useEffect(() => {
-    if (fleet) fleet.current[index] = { s: sRef.current, dir: dirRef.current };
+    if (fleet) fleet.current[index] = { s: unit.current.s, dir: unit.current.dir };
   }, [fleet, index, startS]);
   /* 방향을 뒤집으면 곧바로 반영한다 — 다음 바퀴를 기다리지 않는다.
      (고리는 제자리에서 돌아서고, 끝이 있는 경로는 startS 가 반대쪽 끝으로
       바뀌므로 위의 효과가 자리도 함께 옮긴다) */
-  useEffect(() => { dirRef.current = cart.reverse ? -1 : 1; }, [cart.reverse]);
+  useEffect(() => { unit.current.dir = cart.reverse ? -1 : 1; }, [cart.reverse]);
 
   /* 본체와 적재물을 분리한다 — 적재물은 실은 개수만큼 복제해 쌓는다.
      clone() 은 지오메트리·머티리얼을 공유하므로 여러 대·여러 단이어도 가볍다. */
@@ -177,218 +170,41 @@ function CartUnit({
     const g = groupRef.current;
     if (!g || !path) return;
 
+    /**
+     * 굴리는 일은 **core/sim.js 가 한다.**
+     * -----------------------------------------------------------------------
+     *  예전에는 이 자리에 140줄이 있었다 — 간격 지키기, 정차역에서 싣고 내리기,
+     *  문으로 나가면 출하. 전부 화면 안에 있어서 **화면이 있어야만 돌았다.**
+     *
+     *  규칙을 옮겨 적은 것이 아니라 **상태를 담는 그릇을 바꾼 것**이다. 여기
+     *  useRef·useState 에 흩어져 있던 일곱 조각이 unit 객체 하나가 됐고, 그래서
+     *  화면도 헤드리스도 같은 함수를 부른다.
+     */
     if (running) {
-      /* 방금 주고받은 역에서 충분히 멀어졌으면 그 기억을 푼다.
-         안 그러면 짐이 남은 채 한 바퀴를 돌 때 그 역이 통째로 걸러져,
-         자리가 났는데도 서지 않고 지나간다(cart.js 의 forgetStation). */
-      lastKeyRef.current = forgetStation(
-        lastKeyRef.current, lastSRef.current, sRef.current, path.length, cart.closed,
-      );
-      if (!lastKeyRef.current) lastSRef.current = null;
+      runCart(unit.current, {
+        path, stations, cart, capacity, topUp, oneWay,
+        /* 앞차의 자리는 최대 한 프레임 묵은 값이다(형제들이 차례로 돈다).
+           한 프레임은 길어야 0.1 시뮬초라 간격 여유 안에서 흡수된다. */
+        fleet: fleet?.current,
+        gap, floor, gates, shipOutside,
+      }, dt);
 
-      /**
-       * 앞차와의 간격 — **속도를 깎아서** 지킨다.
-       * ---------------------------------------------------------------------
-       *  움직이고 나서 위치를 되밀면 안 된다. 정차역 판정은 "이번 프레임에
-       *  s0 → s1 사이를 지났는가" 로 하는데, 지나간 뒤 되밀면 밟지도 않은 역을
-       *  들른 것으로 세게 된다. 갈 수 있는 거리를 이번 프레임 시간으로 나눠
-       *  **속도 상한**으로 바꿔 주면, 그 뒤 계산은 전부 그대로 맞는다.
-       *
-       *  앞차의 자리는 최대 한 프레임 묵은 값이다(형제들이 차례로 돈다). 한
-       *  프레임은 길어야 0.1 시뮬초라 간격 여유 안에서 흡수된다.
-       */
-      const me = { s: sRef.current, dir: dirRef.current };
-      const speed = cart.speed ?? 1.4;
-      let capped = speed;
-      if (fleet && gap > 0) {
-        const room = followDistance(me, fleet.current, { length: path.length, closed: cart.closed, gap });
-        if (room !== Infinity && dt > 1e-6) capped = Math.min(speed, room / dt);
-      }
-      /**
-       * 앞차 때문에 **못 간 몫**을 시간으로 환산해 남긴다.
-       * ---------------------------------------------------------------------
-       *  완전히 선 것만 세면 "느려졌지만 가긴 갔다" 가 통째로 빠진다. 속도가
-       *  절반으로 깎였으면 그 프레임의 절반은 못 간 것이다 — 잃은 거리를 원래
-       *  속도로 나누면 그대로 잃은 시간이 된다.
-       *
-       *  정차(dwell)는 안 센다. 역에 서서 주고받은 시간은 **일을 한** 시간이고
-       *  여기서 세는 것은 **아무것도 못 한** 시간이다(metrics 의 accumulateCart).
-       */
-      if (speed > 0 && pauseRef.current <= 0) {
-        accumulateCart(cart.uid, dt, dt * (1 - capped / speed));
-      }
-
-      const next = stepCart(
-        { s: sRef.current, dir: dirRef.current, pause: pauseRef.current, lastKey: lastKeyRef.current },
-        {
-          length: path.length,
-          closed: cart.closed,
-          oneWay,
-          speed: capped,
-          dwell: cart.dwell ?? 1.2,
-        },
-        stations,
-        dt,
-      );
-      if (next.recycled) {
-        /* 새 차가 나온 것이므로 이전 차의 짐과 기억은 남지 않는다 */
-        if (carried > 0) setCarried(0);
-        setCarriedKinds([]);
-        sourceRef.current = null;
-        lastKeyRef.current = null;
-        lastSRef.current = null;
-      }
-      sRef.current = next.s;
-      dirRef.current = next.dir;
-      pauseRef.current = next.pause;
       /* 옮긴 자리를 형제들에게 알린다 — 이 값 하나로 서로 간격을 잰다 */
-      if (fleet) fleet.current[index] = { s: next.s, dir: next.dir };
+      if (fleet) fleet.current[index] = { s: unit.current.s, dir: unit.current.dir };
 
-      /* 수량 계산은 여기서 한다 — 선반이 몇 개나 받아 줄지는 재고에 달렸고,
-         "실제로 주고받았을 때만" 그 역을 들른 것으로 기록해야 하기 때문이다. */
-      if (next.arrived) {
-        const a = next.arrived;
-        let acted = false;
-
-        if (a.kind === 'shelf-in') {
-          /* 내리기.
-             실어 온 곳으로 도로 가져다 놓지 않는다 — 1번 선반에서 실은 짐을
-             1번 선반에 내리면 아무 일도 안 한 셈이고, 왕복 경로에서는 그게
-             무한히 반복된다. 어디서 실었는지 기억해 두고 그 선반은 건너뛴다. */
-          if (carried > 0 && sourceRef.current !== a.uid) {
-            /* 줄을 나눈 선반이면 **그 지정을 지켜** 내린다 — 1번 줄이 제작품 1
-               자리라면 다른 것은 거기 못 들어간다. 규칙은 shelf.js 에 있고 역이
-               싸서 넘겨 준다(binOf). 지정이 없으면 예전처럼 순서대로 쌓인다. */
-            const r = a.binOf
-              ? addByGroup(a.uid, carriedKinds, a.binOf)
-              : { moved: addLots(a.uid, carriedKinds, a.capacity), left: null };
-            const moved = r.moved;
-            if (moved > 0) {
-              /* 못 넣은 것을 **목록으로** 받는 이유는 addLotsShared 와 같다 —
-                 앞에서부터 잘라 내면 안 들어간 종류가 사라진다 */
-              const rest = r.left ?? carriedKinds.slice(moved);
-              const left = rest.length;
-              setCarried(left);
-              setCarriedKinds(rest);
-              if (left === 0) sourceRef.current = null;
-              acted = true;
-            }
-          }
-        } else if (a.kind === 'shelf-out') {
-          /**
-           * 싣기.
-           * -------------------------------------------------------------------
-           *  카트는 **비어 있을 때만** 싣는다. 한 곳에서 받아 다른 곳에 옮기는
-           *  것이 카트의 일이라, 가는 길에 이것저것 주워 담으면 어디에 무엇을
-           *  내려놓아야 하는지가 흐려진다.
-           *
-           *  트럭은 반대다. 하는 일이 "밖으로 내보내기" 하나뿐이라 목적지가
-           *  갈리지 않는다. 첫 역에서 다 못 채웠는데 그대로 나가면 반쯤 빈 차가
-           *  왕복하게 되므로, **자리가 남는 동안 다음 역에서 마저 채운다.**
-           */
-          const room = loadRoom(carried, capacity, topUp, cart.loadCount ?? a.dispatch ?? 0);
-          if (room > 0) {
-            /* 무엇을 가져올지 정해 두었으면 **그 종류만** 골라 온다.
-               선반에는 여러 종류가 섞여 쌓이므로, 정해 두지 않으면 위에 있던
-               것이 잡히는 대로 실린다 — 필요한 것만 나르려면 골라야 한다. */
-            const got = takeLots(a.uid, room, pickSet(cart));
-            if (got.length > 0) {
-              setCarried(carried + got.length);
-              setCarriedKinds([...carriedKinds, ...got]);
-              sourceRef.current = a.uid;
-              acted = true;
-            }
-          }
-        } else if (a.kind === 'load') {
-          /* 설비에서 싣는 것도 마찬가지다 — "이 종류만 나른다" 고 정해 둔
-             카트는 다른 것을 만드는 설비 앞을 그냥 지나간다. */
-          let take = Math.min(a.count, loadRoom(carried, capacity, topUp, a.count));
-          /**
-           * **만들어 놓은 것만 실어 간다.**
-           * -------------------------------------------------------------------
-           *  예전에는 여기서 재료를 내고 그 자리에서 만들었다 — "가지러 온 만큼
-           *  만든다". 공정 시간이 없던 시절에는 그게 유일한 방법이었지만, 그래서
-           *  카트만 드나드는 설비는 **시간이 0** 이었다. 카트가 30개를 요구하면
-           *  30개가 그 순간 튀어나왔다.
-           *
-           *  이제 만드는 것은 SimClock 이 공정 시간대로 하고, 카트는 벨트와 똑같이
-           *  출력 자리에 쌓인 것만 가져간다(EditorScene 의 onSpawn 과 같은 규칙).
-           */
-          take = Math.min(take, getMade(a.uid));
-          /* 고른 종류들 중 하나여야 싣는다. 아무것도 안 골랐으면 가리지 않는다.
-             (옛 이름으로 적힌 도면도 pickSet 이 지금 이름으로 바꿔 준다) */
-          const want = pickSet(cart);
-          if (take > 0 && (!want.size || want.has(a.payloadKind))) {
-            const got = takeMade(a.uid, take);
-            if (got > 0) {
-              setCarried(carried + got);
-              setCarriedKinds([...carriedKinds, ...Array.from({ length: got }, () => a.payloadKind)]);
-              sourceRef.current = a.uid;
-              acted = true;
-            }
-          }
-        } else if (a.kind === 'unload') {
-          /**
-           * 설비 유입부에 내려놓기.
-           * ---------------------------------------------------------------------
-           *  레시피가 있는 설비에는 **실제로 쌓인다** — 그것이 그 설비의 재료다.
-           *  다만 **쓰는 종류만** 받는다. 안 쓰는 것을 받아 두면 그 자리는 영영
-           *  안 빠지고, 정작 필요한 재료가 들어올 자리가 없어져 라인이 조용히
-           *  선다(무엇이 잘못됐는지 화면에 아무 단서도 안 남는다).
-           *
-           *  레시피가 없는 설비에서는 예전 그대로 **사라진다.** 안 먹는 설비에
-           *  쌓아 둘 이유가 없고, 이미 그린 도면이 갑자기 다르게 굴러도 안 된다.
-           */
-          if (carried > 0 && a.recipe) {
-            /* 자리는 **종류마다** 정해져 있다 — 안 쓰는 종류는 몫이 0 이라
-               저절로 걸러지고, 쓰는 종류도 제 몫이 차면 더 못 넣는다.
-               못 넣은 것은 그대로 싣고 다음 자리로 간다(bom.js 의 slotShares). */
-            const slots = slotShares(a.recipe, a.capacity);
-            const { moved, left } = addLotsShared(a.uid, carriedKinds, (k) => slots[k] ?? 0);
-            if (moved > 0) {
-              setCarried(left.length);
-              setCarriedKinds(left);
-              if (!left.length) sourceRef.current = null;
-              acted = true;
-            }
-          } else if (carried > 0) {
-            setCarried(0); setCarriedKinds([]); sourceRef.current = null; acted = true;
-          }
-        }
-
-        if (acted) {
-          lastKeyRef.current = a.key ?? a.uid;
-          lastSRef.current = sRef.current;
-        } else {
-          pauseRef.current = 0;         // 아무 일도 없었으면 서 있을 이유도 없다
-        }
-      }
+      /* 실은 것이 바뀌었을 때만 리렌더 — 짐 모형을 다시 쌓아야 하기 때문이다.
+         매 프레임 setState 를 걸면 같은 씬의 다른 것들까지 함께 다시 그린다. */
+      const held = unit.current.carried;
+      if (held.length !== carriedKinds.length) setCarriedKinds(held);
     }
 
-    const f = path.at(sRef.current);
-    const d = dirRef.current;
-    const tx = f.tan[0] * d;
-    const tz = f.tan[1] * d;
-    g.position.set(f.pos[0], f.pos[1] + (cart.y ?? 0), f.pos[2]);
-
-    /* 트럭이 개구부를 지나 건물 밖으로 나가면 싣고 있던 것은 출하된 것이다.
-       ---------------------------------------------------------------------
-       출하 지점을 따로 배선하지 않는다 — "문으로 나갔다" 는 사실 자체가 출하다.
-       다만 **문으로** 나가야 한다. 벽을 뚫고 나간 자리에서는 아무 일도 일어나지
-       않아, 도면이 틀렸다는 것이 짐을 실은 채 도는 트럭으로 드러난다. */
-    const outside = floor && !pointInMP(floor, [f.pos[0], f.pos[2]]);
-    if (running && shipOutside && carried > 0 && outside && inGate(gates, [f.pos[0], f.pos[2]])) {
-      /* 무엇이 나갔는지까지 넘긴다 — 총량만 세면 라인이 한쪽으로 치우쳐도 모른다 */
-      addShipped(carriedKinds);
-      setCarried(0);
-      setCarriedKinds([]);
-      sourceRef.current = null;
-      lastKeyRef.current = null;      // 밖에 다녀왔으니 다시 실을 수 있다
-      lastSRef.current = null;
-    }
-    /* 모델의 진행축을 이동 방향에 맞춘다.
-       tx·tz 에 이미 진행 방향(d)이 곱해져 있으므로, 거꾸로 달리면 모델도 저절로
-       그쪽을 본다 — 방향과 모델이 따로 놀 수 없다. */
+    const fr = path.at(unit.current.s);
+    const d = unit.current.dir;
+    const tx = fr.tan[0] * d;
+    const tz = fr.tan[1] * d;
+    g.position.set(fr.pos[0], fr.pos[1] + (cart.y ?? 0), fr.pos[2]);
+    /* 모델의 진행축을 이동 방향에 맞춘다. tx·tz 에 이미 진행 방향(d)이 곱해져
+       있으므로, 거꾸로 달리면 모델도 저절로 그쪽을 본다. */
     g.rotation.y = axis === 'z' ? Math.atan2(tx, tz) : Math.atan2(-tz, tx);
   });
 

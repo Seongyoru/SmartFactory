@@ -92,6 +92,7 @@ import {
 } from '../core/simStore.js';
 import { cycleOf, outputCapFor, runMachine, spacingFor, varOf } from '../core/process.js';
 import { tick, useElapsed } from '../core/clock.js';
+import { runMachines } from '../core/sim.js';
 import { accumulate } from '../core/metrics.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
 import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
@@ -127,64 +128,9 @@ function SimClock({ running, halted, jammed, starved, unmanned, equips, machines
   useFrame((_, real) => {
     const dt = tick(real, running);
     if (!(dt > 0)) return;
-
-    /* 고장을 굴린다 — 이번 프레임에 고장으로 서 있는 설비가 돌아온다 */
-    const nowDown = stepFaults(dt, equips);
-
-    /**
-     * 설비를 굴린다 — **여기가 이 도구의 처리량을 정하는 자리다.**
-     * -----------------------------------------------------------------------
-     *  예전에는 벨트가 "한 덩어리 올라탈게" 하면 설비가 그 자리에서 만들어 냈다.
-     *  그래서 설비의 속도가 벨트 간격의 함수였다. 이제는 반대다 — 설비가 제
-     *  공정 시간대로 만들어 출력 자리에 놓고, 벨트와 카트는 **거기 있는 것만**
-     *  가져간다.
-     *
-     *  고장·무인이면 아예 안 돈다. 재료가 없으면 `pay` 가 실패해 그 자리에서
-     *  멈추고(굶음), 출력 자리가 차 있으면 시작조차 안 한다(막힘).
-     */
-    for (const m of machines) {
-      if (nowDown.has(m.uid) || unmanned?.has(m.uid)) continue;
-      const room = m.cap - getMade(m.uid);
-      if (room <= 0) continue;
-      const n = runMachine(m.uid, dt, {
-        cycleSec: m.cycleSec,
-        cycleVar: m.cycleVar,
-        room,
-        pay: m.need ? () => takeEach(m.uid, m.need) : null,
-      });
-      if (n > 0) addMade(m.uid, n);
-    }
-
-    /**
-     * 서 있는 이유는 **한 프레임에 하나만** 센다.
-     * -----------------------------------------------------------------------
-     *  한 설비가 동시에 여러 목록에 들어갈 수 있다. 고장 난 설비는 벨트를 세워야
-     *  하니 halted 에도 있고, 사람이 없는 설비가 마침 재료도 없을 수 있다. 그대로
-     *  다 적분하면 같은 시간을 두 번 빼서 지표가 함께 깎이고, 이유를 나눠 세는
-     *  뜻이 사라진다.
-     *
-     *  순서는 **더 근본적인 것이 앞**이다.
-     *
-     *    고장 → 무인 → 막힘 → 굶음
-     *
-     *  고장 중에는 사람이 있어도 못 돈다. 사람이 없으면 재료가 와도 못 돈다.
-     *  보낼 곳이 없으면 재료가 와도 못 돈다. 굶음은 앞의 셋 중 어느 것도 아닐
-     *  때만 굶음이다.
-     *
-     *  고장·무인은 **애초에 못 돈** 시간이라 가동률(A)에서 빠지고, 막힘·굶음은
-     *  **돌 수 있었는데 못 돈** 시간이라 성능(P)에서 빠진다(metrics 의 oeeOf).
-     */
-    const downOnly = new Set();
-    const blockedOnly = new Set();
-    const starvedOnly = new Set();
-    for (const uid of halted) {
-      if (nowDown.has(uid)) continue;
-      if (unmanned?.has(uid)) downOnly.add(uid);
-      else if (jammed?.has(uid)) blockedOnly.add(uid);
-      else if (starved?.has(uid)) starvedOnly.add(uid);
-      else blockedOnly.add(uid);
-    }
-    accumulate(dt, blockedOnly, shipped, starvedOnly, downOnly);
+    /* 굴리는 일은 core/sim.js 가 한다 — 화면 없이도 같은 함수가 돈다.
+       고장 판정 · 설비 공정 · 「선 이유를 하나만 세기」가 전부 거기 있다. */
+    runMachines(dt, { equips, machines, halted, jammed, starved, unmanned, shipped });
   });
   return null;
 }

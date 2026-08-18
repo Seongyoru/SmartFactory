@@ -74,7 +74,7 @@ export function pruneFaults(aliveUids) {
  *  @param equips [{ uid, mtbf, mttr }]
  *  @returns 이번 프레임에 고장으로 서 있던 설비 Set (지표가 이걸 적분한다)
  */
-export function stepFaults(dt, equips) {
+export function stepFaults(dt, equips, rand = Math.random) {
   if (!(dt > 0) || !equips?.length) return EMPTY_SET;
 
   let nextDown = null;
@@ -90,7 +90,7 @@ export function stepFaults(dt, equips) {
     if (remain <= 0) {
       const mtbf = e.mtbf ?? 0;
       if (!(mtbf > 0)) continue;                       // 고장 없는 설비
-      if (Math.random() >= 1 - Math.exp(-dt / mtbf)) continue;
+      if (rand() >= 1 - Math.exp(-dt / mtbf)) continue;
       remain = Math.max(1, e.mttr ?? FAULT_DEFAULTS.mttr);
       nextRepairs = nextRepairs ?? { ...repairs };
       nextRepairs[e.uid] = (nextRepairs[e.uid] ?? 0) + 1;
@@ -155,12 +155,12 @@ let scrappedBy = {};
  *  @param uid 만든 설비. 없으면 라인 합계에만 들어간다
  *  @returns 이번에 실제로 쓸 수 있는(양품) 개수
  */
-export function screen(count, scrapRate, uid = null) {
+export function screen(count, scrapRate, uid = null, rand = Math.random) {
   const n = Math.max(0, Math.round(count));
   if (!n) return 0;
   const rate = Math.min(1, Math.max(0, scrapRate ?? 0));
   let bad = 0;
-  for (let i = 0; i < n; i++) if (Math.random() < rate) bad++;
+  for (let i = 0; i < n; i++) if (rand() < rate) bad++;
   made += n;
   scrapped += bad;
   if (uid) {

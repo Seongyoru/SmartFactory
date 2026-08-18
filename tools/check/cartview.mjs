@@ -1,50 +1,34 @@
 /**
- * CartView 의 정차역 처리를 소스에서 떼어 돌린다.
- *  카트가 설비에 재료를 **실제로** 주는지, 안 쓰는 종류를 걸러 내는지,
- *  조립 설비에서 실을 때 재료를 내는지 — 전부 이 블록 안에서 갈린다.
+ * 카트가 역에서 주고받는 규칙 — `core/sim.js` 의 `applyStation`.
+ * ---------------------------------------------------------------------------
+ *  카트가 설비에 재료를 **실제로** 주는지, 안 쓰는 종류를 걸러 내는지, 실어 온
+ *  곳에 도로 안 내려놓는지 — 전부 그 함수 안에서 갈린다.
+ *
+ *  예전에는 이 규칙이 CartView 의 useFrame 안에 있어서, 소스를 `cut` 으로 떼어
+ *  `new Function` 에 넣고 인자 스물한 개를 손으로 맞춰 줘야 했다. 규칙을
+ *  core 로 옮기고 나니 **그냥 불러 쓰면 된다** — 검사가 짧아진 만큼 덜 깨진다.
  */
 import assert from 'node:assert/strict';
-import { SRC, cut, group, readSrc, t } from './_harness.mjs';
+import { SRC, group, t } from './_harness.mjs';
 
-group('카트 정차역 (소스에서)');
+group('카트 정차역');
 
 const bom = await import(SRC + 'core/bom.js');
 const sim = await import(SRC + 'core/simStore.js');
-const cartMod = await import(SRC + 'core/cart.js');
-const lib = await import(SRC + 'data/library.js');
-
-const src = await readSrc('scene/CartView.jsx');
-/* 끝 표시는 마지막 else 안의 주석이다 — 그 뒤로 else 와 if 를 닫아 줘야
-   블록이 온전한 코드가 된다 */
-const block = `${cut(src, 'if (next.arrived) {', '아무 일도 없었으면 서 있을 이유도 없다', '정차역 처리')}\n}\n}`;
-
-const step = new Function(
-  'next', 'carried', 'carriedKinds', 'capacity', 'topUp', 'cart',
-  'setCarried', 'setCarriedKinds', 'sourceRef', 'lastKeyRef', 'lastSRef', 'sRef', 'pauseRef',
-  'addLots', 'addLotsShared', 'takeLots', 'getMade', 'takeMade', 'loadRoom',
-  'pickSet', 'slotShares',
-  block + '\nreturn { carried, carriedKinds };',
-);
+const S = await import(SRC + 'core/sim.js');
 
 /** 한 역을 처리하고, 카트가 어떻게 됐는지 돌려준다 */
 function visit(station, { carried = 0, kinds = [], capacity = 3, topUp = false, cart = {}, source = null } = {}) {
-  const out = { carried, kinds, source, lastKey: null, pause: 1.2 };
-  const sourceRef = { current: source };
-  const lastKeyRef = { current: null };
-  const lastSRef = { current: null };
-  const sRef = { current: 42 };
-  const pauseRef = { current: 1.2 };
-  step(
-    { arrived: station }, carried, kinds, capacity, topUp, cart,
-    (v) => { out.carried = v; }, (v) => { out.kinds = v; },
-    sourceRef, lastKeyRef, lastSRef, sRef, pauseRef,
-    sim.addLots, sim.addLotsShared, sim.takeLots, sim.getMade, sim.takeMade,
-    cartMod.loadRoom, cartMod.pickSet, bom.slotShares,
-  );
-  out.source = sourceRef.current;
-  out.lastKey = lastKeyRef.current;
-  out.pause = pauseRef.current;
-  return out;
+  const u = {
+    ...S.newCartUnit(42, false),
+    /* 예전 검사는 개수와 목록을 따로 줬다. 지금은 목록 하나가 임자다 —
+       개수만 주고 목록을 안 준 판은 같은 종류로 채워 뜻을 맞춘다 */
+    carried: kinds.length ? [...kinds] : Array.from({ length: carried }, () => 'PART_R'),
+    source,
+    pause: 1.2,
+  };
+  S.applyStation(u, station, { cart, capacity, topUp });
+  return { carried: u.carried.length, kinds: u.carried, source: u.source, lastKey: u.lastKey, pause: u.pause };
 }
 
 const R = { in: [{ kind: 'PART_R', qty: 2 }, { kind: 'PART_G', qty: 1 }], out: 'ASM_C' };

@@ -25,7 +25,8 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { simStep } from '../core/clock.js';
-import { advanceBelt, beltCount, beltHas, beltOffset, makeBelt } from '../core/belt.js';
+import { beltCount, beltHas, beltOffset, makeBelt } from '../core/belt.js';
+import { runBelt } from '../core/sim.js';
 import { PAYLOAD_ITEM } from '../data/library.js';
 
 /**
@@ -89,15 +90,14 @@ export default function BeltItems({
     if (!path || !list.length) return;
     const L = path.length;
 
-    if (running && speed > 0) {
-      const arrived = advanceBelt(belt, {
-        d: speed * simStep(dt),
-        step,
-        length: L,
+    /* 굴리는 일은 core/sim.js 가 한다 — 화면 없이도 같은 함수가 돈다 */
+    if (running) {
+      const arrived = runBelt(belt, {
+        speed, step, length: L, layers,
         feeding: feedRef.current,
         spawn: spawnRef.current,
-      });
-      if (arrived > 0) arriveRef.current?.(arrived * Math.max(1, layers));
+      }, simStep(dt));
+      if (arrived > 0) arriveRef.current?.(arrived);
     }
 
     const head = beltOffset(belt, step);

@@ -14,6 +14,12 @@
  * ---------------------------------------------------------------------------
  */
 
+
+import { done } from './_harness.mjs';
+
+/* 이 파일로 돌릴 때만 「끝까지 갔는가」를 따진다 — 파일 하나만 돌릴 때는
+   중간에 멈춘 것이 정상이다 */
+process.env.CHECK_ALL = '1';
 /* 값으로 보는 것 — core/*.js 를 그대로 불러 확인한다 */
 await import('./bom.mjs');
 await import('./slots.mjs');
@@ -41,11 +47,15 @@ await import('./process.mjs');
 await import('./belt.mjs');
 await import('./halted.mjs');
 await import('./cartview.mjs');
+await import('./sim.mjs');
 
 /* 이어 붙여 돌려 보는 것 — 조각마다 통과해도 개수는 셋에 걸쳐 샌다 */
 await import('./focus.mjs');
 await import('./models.mjs');
 await import('./diagnose.mjs');
 await import('./line.mjs');
+
+/* 여기까지 왔다는 것이 「다 돌았다」는 뜻이다 — 앞에서 던지면 안 온다 */
+done();
 
 console.log('');

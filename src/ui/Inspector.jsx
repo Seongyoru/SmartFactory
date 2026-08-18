@@ -15,7 +15,8 @@ import {
   arrivedAt, arrivedOf, clearStock, dropKind, getAllStock, getShipped, setStock, shippedTotal,
   useAllStock, useLots, useShipped, useStock,
 } from '../core/simStore.js';
-import { formatElapsed, resetClock, useElapsed, useSimSpeed } from '../core/clock.js';
+import { formatElapsed, useElapsed, useSimSpeed } from '../core/clock.js';
+import { resetRun } from '../core/sim.js';
 import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
 import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
 import { deltaText, improvePlan } from '../core/improve.js';
@@ -25,7 +26,7 @@ import {
   DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
 } from '../core/orders.js';
 import {
-  CYCLE_RANGE, MIN_GAP, VAR_MAX, beltPerMinute, cycleOf, outputCapFor, perMinute, resetWork,
+  CYCLE_RANGE, MIN_GAP, VAR_MAX, beltPerMinute, cycleOf, outputCapFor, perMinute,
   spacingClamped, spacingFor, varOf,
 } from '../core/process.js';
 import {
@@ -46,7 +47,7 @@ import {
 } from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
-  getMade, getScrapped, repairsOf, resetFaults, resetQuality, useFaults,
+  getMade, getScrapped, repairsOf, useFaults,
 } from '../core/faults.js';
 import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, unitWon, won } from '../core/cost.js';
 import {
@@ -2859,7 +2860,7 @@ export function ReportButtons() {
           그래서 색도 다르다 — 옆의 둘은 꺼내는 일, 이건 지우는 일이다. */}
       <button
         type="button"
-        onClick={() => { resetClock(); resetMetrics(); resetFaults(); resetQuality(); resetWork(); }}
+        onClick={resetRun}
         className={`${OUT_H} w-[26px] shrink-0 justify-center rounded-md text-ink3 ring-1 ring-edge transition-colors hover:bg-rose-500 hover:text-white hover:ring-rose-500`}
         title="다시 재기 — 배치를 고친 뒤의 성적을 보려면 이전 기록이 섞이면 안 된다"
         aria-label="다시 재기"

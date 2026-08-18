@@ -143,12 +143,14 @@ t('고리 세 대 — 오래 돌려도 서로 통과하지 않는다', () => {
      배치 대수(3대)도 안 봤다. 그래서 규칙을 한 곳에 두고 소스와 대조한다.
 --------------------------------------------------------------------------- */
 const cartView = await readSrc('scene/CartView.jsx');
+const simSrc = await readSrc('core/sim.js');
 
-t('실을 양의 규칙이 CartView 와 같다 — 차량 값이 역의 값을 이긴다', () => {
-  /* CartView 가 실제로 부르는 식. 이게 바뀌면 stationWant 도 같이 바뀌어야 한다 */
+t('실을 양의 규칙이 **굴리는 쪽**과 같다 — 차량 값이 역의 값을 이긴다', () => {
+  /* 굴리는 코드가 실제로 부르는 식. 이게 바뀌면 stationWant 도 같이 바뀌어야 한다.
+     (예전에는 CartView 안에 있었다 — core/sim.js 로 옮겼다) */
   assert.ok(
-    cartView.includes('loadRoom(carried, capacity, topUp, cart.loadCount ?? a.dispatch ?? 0)'),
-    'CartView 의 싣기 규칙이 바뀌었다 — stationWant 를 맞춰야 한다',
+    simSrc.includes('loadRoom(n, ctx.capacity, ctx.topUp, cart.loadCount ?? a.dispatch ?? 0)'),
+    '싣기 규칙이 바뀌었다 — stationWant 를 맞춰야 한다',
   );
   const st = { kind: 'shelf-out', dispatch: 3 };
   assert.equal(C.stationWant({ loadCount: 20 }, st), 20, '차량 값이 안 이긴다');
@@ -156,7 +158,7 @@ t('실을 양의 규칙이 CartView 와 같다 — 차량 값이 역의 값을 �
 });
 t('설비 유출부는 그 설비의 덩어리 크기를 따른다', () => {
   /* 설비에서 싣는 쪽은 a.count 를 쓴다 — 차량 값이 아니다 */
-  assert.ok(cartView.includes('Math.min(a.count, loadRoom(carried, capacity, topUp, a.count))'));
+  assert.ok(simSrc.includes('Math.min(a.count, loadRoom(n, ctx.capacity, ctx.topUp, a.count))'));
   assert.equal(C.stationWant({ loadCount: 20 }, { kind: 'load', count: 4 }), 4);
 });
 t('적재량 기본값도 CartView 와 같다', () => {

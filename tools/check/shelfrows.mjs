@@ -172,6 +172,7 @@ t('줄 지정이 하나도 없으면 예전 그대로 — 전부 공용', () => 
 const sim = await import(SRC + 'core/simStore.js');
 const cartSrc = await readSrc('core/cart.js');
 const viewSrc = await readSrc('scene/CartView.jsx');
+const simSrc = await readSrc('core/sim.js');
 
 /** cart.js 가 역에 실어 보내는 것과 **같은 방식**으로 만든다 */
 const binOf = (p) => (kind) => {
@@ -230,13 +231,17 @@ t('선반 역이 binOf 를 싣고 온다', () => {
   assert.ok(cartSrc.includes('binOf: (kind) => {'), 'cart.js 가 역에 binOf 를 안 넘긴다');
   assert.ok(cartSrc.includes('rowGroupOf(p, kind)'), 'shelf.js 의 규칙을 안 쓴다');
 });
-t('CartView 는 줄 계산을 **다시 하지 않는다**', () => {
-  assert.ok(viewSrc.includes('addByGroup(a.uid, carriedKinds, a.binOf)'), '역이 준 규칙을 안 쓴다');
-  assert.equal(/rowGroupOf|rowKinds|perRow/.test(viewSrc), false,
-    'CartView 가 줄을 직접 계산한다 — 그리는 자리와 어긋날 수 있다');
+t('굴리는 쪽은 줄 계산을 **다시 하지 않는다**', () => {
+  /* 규칙은 역이 싸서 준다(binOf). 굴리는 쪽이 줄을 직접 세면 그리는 자리와
+     어긋날 수 있다. (예전에는 CartView 안에 있었다 — core/sim.js 로 옮겼다) */
+  assert.ok(simSrc.includes('addByGroup(a.uid, u.carried, a.binOf)'), '역이 준 규칙을 안 쓴다');
+  assert.equal(/rowGroupOf|rowKinds|perRow/.test(simSrc), false,
+    '굴리는 쪽이 줄을 직접 계산한다 — 그리는 자리와 어긋날 수 있다');
+  /* 화면 쪽도 마찬가지 — 그리기만 하고 줄을 다시 세면 안 된다 */
+  assert.equal(/rowGroupOf|perRow/.test(viewSrc), false, 'CartView 가 줄을 직접 계산한다');
 });
 t('줄 지정이 없던 옛 도면은 예전 길로 간다', () => {
-  assert.ok(viewSrc.includes('addLots(a.uid, carriedKinds, a.capacity)'), '옛 경로가 사라졌다');
+  assert.ok(simSrc.includes('addLots(a.uid, u.carried, a.capacity)'), '옛 경로가 사라졌다');
 });
 
 /* ---------- 줄을 늘려도 이미 그려 둔 경로가 살아 있는가 -------------------
