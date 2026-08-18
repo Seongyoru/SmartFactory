@@ -60,7 +60,15 @@ function Rich({ text }) {
      항목으로 옮겨 간다 — 탭만 계속 가리키면 「탭은 열었는데 이제 뭘?」 에서
      다시 막힌다.
 --------------------------------------------------------------------------- */
-function Spot({ selectors }) {
+/**
+ * 가리킬 곳이 **지금 화면에 있는가** — 있으면 그 자리, 없으면 null.
+ * ---------------------------------------------------------------------------
+ *  테두리를 그리려고 만든 것이지만, 「먼저 골라 주세요」 를 언제 띄울지도 이
+ *  값이 정한다. 둘은 같은 질문이기 때문이다 — 가리킬 칸이 화면에 없다는 것이
+ *  곧 아직 안 골랐다는 뜻이다. 따로 세면 **테두리는 떠 있는데 「고르세요」 도
+ *  같이 떠 있는** 꼴이 난다(실제로 그랬다).
+ */
+function useSpotBox(selectors) {
   const [box, setBox] = useState(null);
   /* 단계마다 배열을 새로 만들어 넘기므로 배열 자체를 의존성으로 삼으면 매
      렌더 타이머가 새로 걸린다. 내용이 같으면 같은 것으로 본다. */
@@ -85,6 +93,10 @@ function Spot({ selectors }) {
     return () => { clearInterval(t); window.removeEventListener('resize', measure); };
   }, [key]);
 
+  return box;
+}
+
+function Spot({ box }) {
   if (!box) return null;
   return (
     <div
@@ -202,10 +214,26 @@ function Track({ guide, facts, onBack, onClose }) {
   /* 다 끝났으면 마지막을 펴 둔다 — 아무것도 안 펴져 있으면 빈 창처럼 보인다 */
   const openIdx = current >= 0 ? current : guide.steps.length - 1;
   const step = guide.steps[openIdx] ?? null;
+  const spotBox = useSpotBox(step?.spot);
+
+  /**
+   * 「먼저 골라 주세요」 는 **아직 안 골랐을 때만** 뜬다.
+   * -------------------------------------------------------------------------
+   *  처음에는 갈래를 여는 내내 떠 있었다. 선반을 이미 골라 놓고 1단계까지 끝낸
+   *  뒤에도 「적치대나 선반을 놓고 골라 주세요」 가 노랗게 붙어 있었다 — 그러면
+   *  읽을 값이 없는 문구가 되고, 정작 필요한 순간에도 안 읽는다.
+   *
+   *  「골랐는가」 를 따로 세지 않는다. 가리킬 칸이 화면에 있으면 골랐다는 뜻이다.
+   */
+  /* 갈래마다가 아니라 **걸음마다** 다를 수 있다. 「인력·교대」가 그랬다 —
+     1단계는 설비를 골라야 칸이 나오고, 2단계는 반대로 선택을 풀어야 나온다.
+     갈래 하나에 문구를 하나만 두면 둘 중 하나는 반드시 틀린 말이 된다. */
+  const need = step?.need ?? guide.need;
+  const needShown = !!need && current >= 0 && (step?.spot?.length ?? 0) > 0 && !spotBox;
 
   return (
     <>
-      {step && <Spot selectors={step.spot} />}
+      <Spot box={spotBox} />
       <div className="pointer-events-auto absolute bottom-4 right-4 z-30 w-[320px] overflow-hidden rounded-xl border border-line bg-app shadow-2xl">
         <div className="flex items-center gap-2 border-b border-line px-3 py-2">
           <button type="button" onClick={onBack} className="rounded p-1 text-ink4 hover:bg-raiseh hover:text-ink2" title="다른 안내 고르기">
@@ -227,10 +255,10 @@ function Track({ guide, facts, onBack, onClose }) {
           />
         </div>
 
-        {/* 먼저 갖춰야 할 것이 있으면 말해 준다 — 「고르고 진행하세요」 같은 것 */}
-        {guide.need && current >= 0 && (
+        {/* 먼저 갖춰야 할 것이 있으면 말해 준다 — 아직 안 갖췄을 때만 */}
+        {needShown && (
           <p className="border-b border-line bg-amber-500/10 px-3 py-1.5 text-[10px] leading-snug text-amber-600">
-            <Rich text={guide.need} />
+            <Rich text={need} />
           </p>
         )}
 

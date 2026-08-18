@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { SRC, group, readSrc, t } from './_harness.mjs';
+import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 
 group('따라 하기');
 
@@ -325,4 +325,53 @@ t('안내가 없어진 「자동」 버튼을 부르지 않는다', () => {
   const step = G.GUIDES.flatMap((g) => g.steps).find((s) => s.id === 'roles');
   assert.ok(step, '역할 걸음이 없어졌다');
   assert.equal(/\*\*[^*]*자동[^*]*\*\*/.test(step.body), false, '없는 버튼을 굵게 부른다');
+});
+
+/* ---------- 「먼저 갖춰야 할 것」 — 안 갖췄을 때만 뜬다 ------------------- */
+
+t('「골라 주세요」 는 **가리킬 칸이 화면에 없을 때만** 뜬다', () => {
+  /* 처음에는 갈래를 여는 내내 떠 있었다. 선반을 이미 골라 놓고 1단계까지
+     끝낸 뒤에도 노란 띠가 「적치대나 선반을 놓고 골라 주세요」 라고 붙어
+     있었다 — 읽을 값이 없는 문구가 되면 정작 필요할 때도 안 읽는다. */
+  const track = cut(tut, 'function Track(', '\nfunction ', 'Track');
+  assert.ok(/const needShown =/.test(track), '띄울지 말지를 안 따진다');
+  assert.match(track, /needShown[^\n]*!spotBox/, '가리킬 칸이 있어도 띄운다');
+  assert.equal(/\{guide\.need && current >= 0 && \(/.test(track), false, '옛 조건이 남아 있다');
+});
+
+t('테두리와 「골라 주세요」 는 **한 값**을 본다 — 둘 다 뜨면 말이 안 된다', () => {
+  assert.ok(/function useSpotBox\(/.test(tut), '자리를 재는 곳이 훅으로 안 나뉘었다');
+  const track = cut(tut, 'function Track(', '\nfunction ', 'Track');
+  assert.match(track, /const spotBox = useSpotBox\(step\?\.spot\)/, '자리를 안 재고 그린다');
+  assert.match(track, /<Spot box=\{spotBox\} \/>/, '테두리가 딴 값을 본다');
+});
+
+t('갈래가 아니라 **걸음마다** 다를 수 있다', () => {
+  /* 「인력·교대」가 그랬다 — 1단계는 설비를 골라야 칸이 나오고, 2단계는
+     반대로 선택을 풀어야 나온다. 갈래 하나에 문구를 하나만 두면 둘 중
+     하나는 반드시 틀린 말이 된다. */
+  const track = cut(tut, 'function Track(', '\nfunction ', 'Track');
+  assert.match(track, /const need = step\?\.need \?\? guide\.need/, '걸음의 문구를 안 본다');
+  assert.match(track, /<Rich text=\{need\} \/>/, '걸음 문구를 안 그린다');
+});
+
+t('선택을 **서로 반대로** 요구하는 이웃 걸음에는 각자 문구가 있다', () => {
+  /* 화면에서 실제로 확인한 것: panel-crew 는 고른 게 있어야 나오고,
+     panel-shifts 는 고른 게 없어야 나온다(도면 요약 안에 있다). */
+  const byId = new Map();
+  for (const g of G.GUIDES) for (const s of g.steps) byId.set(`${g.id}/${s.id}`, { g, s });
+  for (const key of ['crew/crewNeed', 'crew/shift', 'cost/power', 'plan/report']) {
+    const hit = byId.get(key);
+    assert.ok(hit, `${key} 걸음이 없어졌다`);
+    assert.ok(hit.s.need, `${key} 는 화면에 늘 있지 않은 칸을 가리키는데 이유를 안 말한다`);
+  }
+  assert.notEqual(byId.get('crew/crewNeed').s.need, byId.get('crew/shift').s.need,
+    '반대를 요구하는 두 걸음이 같은 말을 한다');
+});
+
+t('가리킬 곳이 없는 걸음에는 「먼저 …」 를 안 붙인다', () => {
+  /* spot 이 없으면 가리킬 것도 없으니 띄울 근거가 없다 — needShown 이
+     spot 길이를 함께 보는 이유다 */
+  const track = cut(tut, 'function Track(', '\nfunction ', 'Track');
+  assert.match(track, /step\?\.spot\?\.length \?\? 0\) > 0/, 'spot 없는 걸음에도 띄운다');
 });

@@ -806,9 +806,33 @@ function reducer(state, action) {
       };
 
     /** 구역은 바닥 위에만 남는다 — 자르고 남는 게 없으면 아무 일도 하지 않는다 */
+    /**
+     * 구역 그리기 — **사각형을 이어 붙여 ㄱ 자를 만든다.**
+     * -----------------------------------------------------------------------
+     *  영역(ADD_AREA)은 겹치면 합친다. 구역은 안 그랬다 — 그래서 ㄱ 자 구역을
+     *  만들려면 펜으로 여덟 점을 찍어야 했다. 사각형 두 번이면 될 일이다.
+     *
+     *  **아무 구역이나 합치지는 않는다.** 영역은 「바닥」 하나뿐이라 겹치면
+     *  합치는 게 늘 맞지만, 구역은 이름과 색을 가진 서로 다른 것이다 —
+     *  「입고」와 「검사」가 겹쳤다고 하나로 만들어 버리면 그린 뜻이 사라진다.
+     *  그래서 **지금 고른 구역**에만 이어 붙인다. 방금 그린 구역은 선택된 채로
+     *  남으므로 사각형을 이어 그리면 자연히 합쳐지고, 딴 구역을 새로 그리려면
+     *  선택을 풀면(Esc·빈 바닥 클릭) 된다.
+     */
     case 'ADD_ZONE': {
       const mp = clipZoneToAreas(action.mp, state.areas);
       if (!mp) return { ...state, hint: '구역은 영역(바닥) 위에만 그릴 수 있습니다' };
+
+      const pickedUid = state.selected?.kind === 'zone' ? state.selected.uid : null;
+      const grow = pickedUid ? state.zones.find((z) => z.uid === pickedUid && mpOverlaps(z.mp, mp)) : null;
+      if (grow) {
+        return {
+          ...state,
+          hint: `${grow.name}에 이어 붙였습니다 — 딴 구역으로 그리려면 Esc 로 선택을 푸세요`,
+          zones: state.zones.map((z) => (z.uid === grow.uid ? { ...z, mp: unionMP(z.mp, mp) } : z)),
+        };
+      }
+
       const uid = `Z${state.seq}`;
       return {
         ...state,
