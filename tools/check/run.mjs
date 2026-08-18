@@ -31,6 +31,7 @@ await import('./improve.mjs');
 await import('./planreport.mjs');
 await import('./measure.mjs');
 await import('./zone.mjs');
+await import('./flow.mjs');
 await import('./guides.mjs');
 await import('./shelfrows.mjs');
 await import('./process.mjs');

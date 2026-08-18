@@ -11,6 +11,7 @@ group('실행 보고서');
 
 const R = await import(SRC + 'core/report.js');
 const O = await import(SRC + 'core/orders.js');
+const M = await import(SRC + 'core/metrics.js');
 
 const FULL = {
   at: '2026-08-13 14:30',
@@ -152,7 +153,7 @@ const body = `${cut(src, 'const buildReport = () => {', '      series,')}\n    }
 
 const ARGS = [
   'state', 'itemOf', 'elapsed', 'ran', 'overall', 'series',
-  'getShipped', 'getAllStock', 'normalizeOrders', 'getSpec', 'shippedTotal', 'throughput',
+  'getShipped', 'getAllStock', 'normalizeOrders', 'getSpec', 'shippedTotal', 'throughput', 'leadTimeSec',
   'isShelf', 'isStillage', 'isUtility', 'isTruck', 'PAYLOAD_ITEMS',
   'cycleOf', 'perMinute', 'oeeOf', 'uptimeOf', 'cartBlockRatio',
   'cartPath', 'cartStations', 'haulPerMinute',
@@ -177,6 +178,8 @@ const payload = () => build(
   [{ t: 0, shipped: 0 }],
   () => ({ PART_R: 40 }), () => ({ S: 12 }), O.normalizeOrders, () => null,
   (m) => Object.values(m ?? {}).reduce((s, n) => s + n, 0), () => 240,
+  /* 리틀의 법칙 — 진짜 함수를 넣는다. 흉내 내면 보고서와 화면이 갈릴 수 있다 */
+  M.leadTimeSec,
   (it) => it?.kind === 'shelf', (it) => it?.kind === 'stillage', () => false, () => false,
   { PART_R: { name: '제작품 1' } },
   () => 6, (s) => 60 / s,

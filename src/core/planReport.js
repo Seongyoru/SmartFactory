@@ -31,6 +31,7 @@
 import { REPORT_CSS, card, esc, int, num, table } from './reportHtml.js';
 import { layoutThumbSVG } from './thumb.js';
 import { rateText } from './balance.js';
+import { workText } from './flow.js';
 import { unitWon, won } from './cost.js';
 
 /** 인쇄물의 평면도 — A4 폭에 맞춘 크기 */
@@ -64,6 +65,7 @@ const PLAN_CSS = `
  *  @param d.rows     `lineBalance(...).rows` — 느린 순
  *  @param d.capacity 라인 천장 (개/분)
  *  @param d.plan     `improvePlan(...)` — 없으면 그 절을 통째로 뺀다
+ *  @param d.flow     { rows, per, total } — `flow.js` 의 값. 없으면 그 절을 뺀다
  *  @param d.nameOf   (placed) => 종류 이름. 라이브러리는 화면 층에 있으므로 받는다
  *  @returns 그대로 파일로 떨굴 수 있는 HTML 문자열
  */
@@ -151,6 +153,26 @@ export function planReportHTML(d = {}) {
         : ` 한 대로는 ${esc(rateText(d.plan.after.capacity))}까지고,`
           + ` ${esc(rateText(d.plan.ceiling))}까지 올리려면 더 놓아야 합니다.`)
       + '</p>');
+  }
+
+  /* ---- 물류 동선 ---- */
+  if (d.flow?.rows?.length) {
+    p('<h2>물류 동선</h2>');
+    p(table(
+      ['구간', '갈래', '개/시', '거리 (m)', '운반 작업량'],
+      d.flow.rows.slice(0, 12).map((r) => [
+        `${esc(r.fromName)} → ${esc(r.toName)}${r.via ? ` <small>· ${esc(r.via)}</small>` : ''}`,
+        KIND_LABEL[r.kind] ?? esc(r.kind),
+        int(r.perHour),
+        num(r.meters),
+        esc(workText(r.work)),
+      ]),
+    ));
+    p('<p class="cap">'
+      + `한 개가 지나는 거리 <b>${d.flow.per == null ? '—' : `${num(d.flow.per)} m</b>`}`
+      + ` · 총 <b>${esc(workText(d.flow.total))}</b>. `
+      + '설비를 옮겨 <b>개당 거리</b>가 줄면 그 배치가 나은 것입니다 — 총량은 라인이 '
+      + '빨라지기만 해도 커지므로 배치를 견주는 잣대가 못 됩니다.</p>');
   }
 
   /* ---- 사람 · 단가 ---- */

@@ -158,6 +158,8 @@ export function runReportHTML(d = {}) {
   p('<div class="cards">');
   p(card('처리량', d.throughput == null ? '측정 중' : `${num(d.throughput)}<small> 개/시간</small>`));
   p(card('재공(WIP)', `${int(d.wip)}<small> 개</small>`));
+  /* 셋은 리틀의 법칙으로 묶여 있다 — 둘만 적으면 읽는 사람이 나눠야 한다 */
+  p(card('리드타임', d.leadSec == null ? '측정 중' : hms(d.leadSec), '재공 ÷ 처리량'));
   if (d.oee) {
     p(card('OEE', pc(d.oee.oee), 'A × P × Q', rate(d.oee.oee)));
     p(card('가동률 A', pc(d.oee.availability), '고장·무인', rate(d.oee.availability)));

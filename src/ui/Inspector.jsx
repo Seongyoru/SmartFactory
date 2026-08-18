@@ -36,7 +36,7 @@ import {
 } from '../core/crew.js';
 import {
   LOSS_FLOOR, bottleneck, cartBlockRatio, getBlocked, getCartBlocked, getCartRan, getRan, getSeries,
-  getStarved, getUnmanned, lossSplit, oeeOf, oeeOverall, throughput, uptimeOf,
+  getStarved, getUnmanned, leadTimeSec, lossSplit, oeeOf, oeeOverall, throughput, uptimeOf,
   resetMetrics, useMetrics,
 } from '../core/metrics.js';
 import {
@@ -103,6 +103,7 @@ import { focusOn } from '../core/focusStore.js';
 import { downloadCSV, downloadHTML, layoutSnapshot, stamp } from '../core/persistence.js';
 import { layoutInfo } from '../core/layoutInfo.js';
 import { zoneInfo } from '../core/zoneInfo.js';
+import { flowMatrix, heaviest, metersPerUnit, totalWork, workText } from '../core/flow.js';
 import { planReportHTML } from '../core/planReport.js';
 import { useCostInput } from './useCost.js';
 import { seriesCSV } from '../core/scenarios.js';
@@ -2760,12 +2761,17 @@ export function ReportButtons() {
       })
       : null;
 
+    const perHour = throughput(shippedTotal(shipped));
+    const wip = Object.values(stock).reduce((s, n) => s + n, 0);
+
     return {
       at: new Date().toLocaleString('ko-KR'),
       elapsedSec: elapsed,
       ranSec: ran,
-      throughput: throughput(shippedTotal(shipped)),
-      wip: Object.values(stock).reduce((s, n) => s + n, 0),
+      throughput: perHour,
+      wip,
+      /* 셋째 값 — 여기서 나눠 둬야 HTML 과 CSV 가 같은 숫자를 말한다 */
+      leadSec: leadTimeSec(wip, perHour),
       oee: overall,
       diagnosis: chain ? chainText(chain.steps) : null,
       culprit: chain?.culprit?.name ?? null,
@@ -3347,6 +3353,15 @@ function PlanReportButton() {
           crewNeed: totalCrewNeed(state.placed, workable),
           rates: state.rates,
         }),
+        /* 화면의 동선 칸과 **같은 계산** — 종이와 화면이 다른 말을 하면 안 된다 */
+        flow: (() => {
+          const f = flowMatrix({
+            rows: bal.rows, capacity: bal.capacity,
+            placed: state.placed, links: state.links, carts: state.carts,
+            lengthOf: (l) => linkPath(l, state.placed, itemOf)?.length ?? 0,
+          }, itemOf);
+          return { rows: f, per: metersPerUnit(f, bal.capacity), total: totalWork(f) };
+        })(),
         nameOf: (p) => itemOf(p.itemId)?.name ?? '',
       });
       downloadHTML(html, `도면보고서-${stamp()}.html`);
@@ -3373,6 +3388,82 @@ function PlanReportButton() {
         쉬지 않고 돌 때의 원가. 잰 값은 아래 띠의 <b className="text-ink3">보고서</b>입니다.
       </p>
     </>
+  );
+}
+
+/**
+ * 물류 동선 — **배치를 고쳐서 줄일 수 있는 것.**
+ * ---------------------------------------------------------------------------
+ *  「얼마나 만드나」(라인 능력)와 「얼마가 드나」(원가)는 있었는데, 정작 설비를
+ *  옮겨서 달라지는 값이 없었다. 그게 이것이다 — 물건이 오가는 거리.
+ *
+ *  **개당 거리**를 크게 띄우는 이유가 있다. 총 작업량은 라인이 빨라지기만 해도
+ *  커져서, 배치를 나쁘게 고쳐 놓고도(느려져서) 숫자가 줄어 보인다. 개당 거리는
+ *  그 착시가 없다 — 배치가 좋아져야만 내려간다.
+ */
+function FlowSection() {
+  const { state, itemOf } = useEditor();
+  const version = useModelsVersion();
+  const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
+
+  const { rows, per, total } = useMemo(() => {
+    const bal = lineBalance({
+      placed: state.placed, links: state.links, carts: state.carts,
+      itemOf, specOf, beltSpeed: state.beltSpeed,
+    });
+    const f = flowMatrix({
+      rows: bal.rows, capacity: bal.capacity,
+      placed: state.placed, links: state.links, carts: state.carts,
+      /* 벨트가 **깔린 길이** — 경로는 모델 규격을 봐야 나오므로 화면 층의 일이다 */
+      lengthOf: (l) => linkPath(l, state.placed, itemOf)?.length ?? 0,
+    }, itemOf);
+    return { rows: f, per: metersPerUnit(f, bal.capacity), total: totalWork(f) };
+  }, [state.placed, state.links, state.carts, state.beltSpeed, itemOf, version]);
+
+  if (!rows.length) {
+    return (
+      <Section title="물류 동선">
+        <p className="text-[11px] leading-relaxed text-ink4">
+          벨트나 카트로 물건이 오가면 <b className="text-ink3">얼마나 멀리 나르는지</b>가 계산됩니다.
+        </p>
+      </Section>
+    );
+  }
+
+  const TONE = { belt: 'text-sky-600', cart: 'text-violet-600', truck: 'text-emerald-600' };
+  return (
+    <Section title="물류 동선">
+      <Row label="한 개가 지나는 거리">
+        <b className="text-[13px] text-ink">{per == null ? '—' : `${per.toFixed(1)} m`}</b>
+      </Row>
+      <Row label="운반 작업량">{workText(total)}</Row>
+      <p className="mb-1.5 mt-1 text-[10px] leading-snug text-ink4">
+        설비를 옮겨 <b className="text-ink3">개당 거리</b>가 줄면 그 배치가 나은 것입니다.
+        아래가 무거운 구간이니 <b className="text-ink3">이 둘부터 붙여</b> 보세요.
+      </p>
+
+      <ul className="max-h-[132px] space-y-0.5 overflow-y-auto">
+        {heaviest(rows, 8).map((r, i) => (
+          <li key={`${r.uid}-${i}`} className="text-[10.5px]">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className={`min-w-0 truncate ${TONE[r.kind] ?? 'text-ink3'}`}>
+                {r.fromName} → {r.toName}
+              </span>
+              <span className="shrink-0 tabular-nums text-ink2">{workText(r.work)}</span>
+            </div>
+            <div className="text-[9.5px] tabular-nums leading-snug text-ink4">
+              {Math.round(r.perHour).toLocaleString()} 개/시 × {r.meters.toFixed(1)} m
+              {r.via && <span> · {r.via}</span>}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <p className="mt-1.5 text-[9.5px] leading-snug text-ink4">
+        라인이 <b className="text-ink4">천장까지 돈다고 볼 때</b>의 값입니다. 빈 차로 돌아오는
+        구간은 물건이 안 실려 있어 안 셉니다.
+      </p>
+    </Section>
   );
 }
 
@@ -3414,6 +3505,9 @@ function Summary() {
 
       {/* 돌리기 전에 계산으로 나오는 천장 — 배치를 그리는 동안 본다 */}
       <LineCapacity />
+
+      {/* 배치를 고쳐서 줄일 수 있는 것 — 능력·원가와 함께 보는 셋째 값 */}
+      <FlowSection />
 
       <CrewPanel />
 

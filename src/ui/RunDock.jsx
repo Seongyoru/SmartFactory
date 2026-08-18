@@ -43,9 +43,10 @@ import { focusOn } from '../core/focusStore.js';
 import { formatElapsed, useElapsed } from '../core/clock.js';
 import {
   LOSS_FLOOR, getBlocked, getSeries, getStarved, getUnmanned, getRan,
-  lossSplit, oeeOverall, useMetrics,
+  leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
 } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
+import { useAllStock, useShipped } from '../core/simStore.js';
 import {
   KW_RANGE, MATERIAL_MAX, MATERIAL_RANGE, POWER_RANGE, WAGE_RANGE,
   DEFAULT_RATES, normalizeRates, won,
@@ -76,9 +77,9 @@ function Col({ title, width, children }) {
 }
 
 /** 이름 : 값 한 줄 — 띠에서는 인스펙터의 Row 보다 촘촘해야 한다 */
-function Line({ label, children, big }) {
+function Line({ label, children, big, title }) {
   return (
-    <div className="flex items-baseline justify-between gap-2 py-[1px]">
+    <div className="flex items-baseline justify-between gap-2 py-[1px]" title={title}>
       <span className="shrink-0 text-[10.5px] text-ink4">{label}</span>
       <span className={`truncate text-right tabular-nums ${big ? 'text-[15px] font-semibold text-ink' : 'text-[11.5px] font-medium text-ink2'}`}>
         {children}
@@ -144,10 +145,25 @@ function Knob({ label, value, unit, onChange, min, max, step, hardMax }) {
  * ======================================================================== */
 
 /** 라인 전체 성적 — 세 기둥을 곱한 것이 OEE 다. 하나만 나빠도 전체가 무너진다 */
-function Kpis({ elapsed, overall }) {
+function Kpis({ elapsed, overall, flow }) {
   return (
     <>
       <Line label="경과 시간">{formatElapsed(elapsed)}</Line>
+      {/**
+        * 리드타임 — **셋 중 하나가 비어 있었다.**
+        * ---------------------------------------------------------------------
+        *  재공도 세고 처리량도 셌는데 정작 「한 개가 몇 분 걸려 나오나」 를 안
+        *  말하고 있었다. 셋은 리틀의 법칙으로 묶여 있어서 둘만 보여 주면 읽는
+        *  사람이 머릿속으로 나눠야 한다 — 그건 도구가 할 일이다.
+        */}
+      {flow.lead != null && (
+        <Line label="리드타임" title="재공 ÷ 처리량 (리틀의 법칙) — 한 개가 들어와 나가기까지">
+          {formatElapsed(flow.lead)}
+        </Line>
+      )}
+      {flow.wip > 0 && flow.lead == null && (
+        <Line label="리드타임"><span className="text-ink4">측정 중</span></Line>
+      )}
       {overall ? (
         <>
           <Line label="OEE (라인)" big><span className={tone(overall.oee)}>{pct(overall.oee)}</span></Line>
@@ -521,12 +537,19 @@ export default function RunDock() {
   useFaults();
   const elapsed = useElapsed();
   const cost = useCostInput();
+  const stock = useAllStock();
+  const shipped = useShipped();
   const open = state.showRunDock !== false;
   const tab = state.runTab === 'cost' ? 'cost' : 'run';
 
   const overall = oeeOverall(state.placed.map((p) => p.uid));
   const series = getSeries();
   const rows = lossRows(state.placed);
+
+  /* 리드타임 — 재공과 처리량은 이미 세고 있다. 셋째는 나눗셈 하나다(리틀의 법칙).
+     재공은 원가가 이미 모은 값을 쓰지 않는다 — 저기는 「돈」을 모으는 자리다. */
+  const wip = Object.values(stock).reduce((s, n) => s + n, 0);
+  const flow = { wip, lead: leadTimeSec(wip, throughput(shipped)) };
 
   /**
    * 목록의 설비를 누르면 그리로 간다 — 왼쪽 위 알람과 **같은 몸짓**이다.
@@ -607,7 +630,7 @@ export default function RunDock() {
       {open && tab === 'run' && (
         <div className="flex min-h-0 flex-1 divide-x divide-line overflow-x-auto">
           <Col title="지표" width={190}>
-            <Kpis elapsed={elapsed} overall={overall} />
+            <Kpis elapsed={elapsed} overall={overall} flow={flow} />
           </Col>
           <Col title="생산 추이">
             <ProductionChart series={series} />

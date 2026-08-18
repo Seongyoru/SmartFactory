@@ -58,6 +58,7 @@ export function runReportCSV(d = {}) {
   rows.push(['실제로 돈 시간', hms(d.ranSec)]);
   rows.push(['처리량(개/시간)', d.throughput == null ? '측정 중' : fx(d.throughput)]);
   rows.push(['재공(개)', int(d.wip)]);
+  rows.push(['리드타임(초)', d.leadSec == null ? '' : Math.round(d.leadSec)]);
   if (d.oee) {
     rows.push(['가동률 A(%)', pct(d.oee.availability)]);
     rows.push(['성능 P(%)', pct(d.oee.performance)]);
