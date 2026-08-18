@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect } from 'react';
-import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2, Truck } from 'lucide-react';
+import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2, Ruler, Truck } from 'lucide-react';
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { getSpec, loadModel, modelOptions } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
@@ -225,7 +225,26 @@ function ModeBanner() {
                   ? `${activeItem?.name ?? ''} — 시작점을 클릭하세요 (높이 ${activeItem?.height ?? 1}m)`
                   : `${activeItem?.name ?? ''} — 출발 포트를 클릭하세요`,
             }
-          : { Icon: Eraser, color: 'text-red-500 ring-red-500/40', text: '지울 대상을 클릭하세요' };
+          : tool === TOOL.MEASURE
+            ? {
+                Icon: Ruler,
+                color: 'text-sky-600 ring-sky-500/40',
+                text: !state.measure?.a
+                  ? '잴 곳의 첫 점을 클릭하세요'
+                  : !state.measure.b
+                    ? '둘째 점을 클릭하세요 · 스냅을 켜 두면 눈금에 떨어집니다'
+                    : '다시 누르면 새로 잽니다 · Esc 로 지웁니다',
+              }
+            /**
+             * **마지막은 지우개다** — 「그 밖에 전부」가 아니다.
+             * -----------------------------------------------------------------
+             *  원래 이 자리가 조건 없는 마지막 가지여서, 새로 넣은 도구가 전부
+             *  「지울 대상을 클릭하세요」 를 물려받았다. 자를 켜 놓고 재는 중에
+             *  빨간 띠로 지우라고 하는 화면이 실제로 나왔다.
+             */
+            : tool === TOOL.ERASE
+              ? { Icon: Eraser, color: 'text-red-500 ring-red-500/40', text: '지울 대상을 클릭하세요' }
+              : { Icon: MousePointer2, color: 'text-ink3 ring-line', text: '도구가 켜져 있습니다' };
 
   return (
     <div className="pointer-events-none absolute left-1/2 top-3 z-10 flex -translate-x-1/2 flex-col items-center gap-1.5">
@@ -239,8 +258,12 @@ function ModeBanner() {
         <info.Icon size={13} />
         {info.text}
         {view !== VIEW.TOP && <span className="text-ink4">· 탑뷰에서만 배치할 수 있습니다</span>}
+        {/* 「Esc」 라고 적혀 있으면 Esc 키와 **같은 일**을 해야 한다 — 자를 대 놓은
+            상태에서 키는 잰 것부터 지우는데 버튼은 도구를 꺼 버리면 안 맞는다 */}
         <button
-          onClick={() => dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT, itemId: null })}
+          onClick={() => (state.measure
+            ? dispatch({ type: 'MEASURE_CLEAR' })
+            : dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT, itemId: null }))}
           className="ml-1 rounded-full bg-kbd px-2 py-0.5 text-[10px] text-ink2 hover:bg-raiseh"
         >
           Esc

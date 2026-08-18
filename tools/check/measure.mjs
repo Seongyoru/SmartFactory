@@ -137,3 +137,34 @@ t('Esc 는 잰 것부터 지운다 — 도구까지 바꾸면 자를 다시 집�
   assert.ok(iMeasure > 0, 'Esc 가 자를 안 지운다');
   assert.ok(iMeasure < iTool, '도구 바꾸기가 먼저라 자를 못 지운다');
 });
+
+/* ---------- 캔버스 위 안내 띠 ---------------------------------------------- */
+
+const banner = cut(app, 'function ModeBanner()', '\nfunction ', '안내 띠');
+
+t('자를 켜면 **자 이야기**를 한다 — 지우개 문구가 나오면 안 된다', () => {
+  /* 실제로 났던 일: 자를 켜고 재는 중에 빨간 띠로 「지울 대상을 클릭하세요」
+     가 떠 있었다. 마지막 가지가 조건 없는 else 라 새 도구가 전부 그것을
+     물려받았기 때문이다. */
+  assert.match(banner, /tool === TOOL\.MEASURE/, '안내 띠가 자를 모른다');
+  const arm = banner.slice(banner.indexOf('tool === TOOL.MEASURE'));
+  assert.ok(arm.includes('Ruler'), '자 아이콘이 아니다');
+  assert.ok(/첫 점|둘째 점/.test(arm), '무엇을 누르라는 말이 없다');
+});
+
+t('마지막 가지는 **지우개다** — 「그 밖에 전부」가 아니다', () => {
+  /* 조건 없는 else 로 두면 다음에 넣는 도구가 또 지우개 문구를 물려받는다.
+     이 검사는 그 사고를 한 번 더 겪지 않기 위한 것이다. */
+  assert.match(banner, /tool === TOOL\.ERASE\s*\n?\s*\? \{ Icon: Eraser/,
+    '지우개 문구에 조건이 없다 — 새 도구가 그대로 물려받는다');
+  const tail = banner.slice(banner.indexOf('지울 대상을 클릭하세요'));
+  assert.ok(/MousePointer2|도구가 켜져 있습니다/.test(tail), '모르는 도구의 자리가 없다');
+});
+
+t('「Esc」 라고 적힌 버튼은 Esc 키와 **같은 일**을 한다', () => {
+  /* 잰 것이 있으면 키는 그것부터 지운다. 버튼이 도구를 꺼 버리면 같은 이름을
+     달고 다른 일을 하는 셈이다. */
+  const esc = banner.slice(banner.indexOf('<button'), banner.indexOf('</button>'));
+  assert.match(esc, /state\.measure\s*\n?\s*\? dispatch\(\{ type: 'MEASURE_CLEAR' \}\)/,
+    'Esc 버튼이 잰 것을 안 지운다');
+});

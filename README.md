@@ -11,7 +11,7 @@
 ```bash
 npm install
 npm run dev      # http://localhost:5174
-npm test         # 634건, 의존성 없이 3초
+npm test         # 637건, 의존성 없이 3초
 ```
 
 ---
@@ -553,7 +553,7 @@ src/
   theme.js          3D 씬 색·조명 (UI 색은 index.css 의 CSS 변수)
 
 api/share.js        공유 서버 (Vercel 함수 + Blob)
-tools/check/        npm test — 검사 파일 27개, 634건, 의존성 없음
+tools/check/        npm test — 검사 파일 27개, 637건, 의존성 없음
 public/layouts/     저장소에 담아 둔 예제 도면 (index.json + *.json)
 docs/HANDOFF.md     **가장 최신 기록** — 무엇을 왜 그렇게 정했는지
 ```

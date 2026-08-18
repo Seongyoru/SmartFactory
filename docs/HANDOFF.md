@@ -2,7 +2,7 @@
 
 작업 위치: `C:\Users\bsy\Desktop\Claude\EGIS_Smart_Factory`
 실행: `npm run dev` (포트 5174, `.claude/launch.json` 의 `egis-smart-factory`)
-검사: `npm test` — 634건, 의존성 없이 3초. **손대기 전에 한 번 돌리고 시작할 것**
+검사: `npm test` — 637건, 의존성 없이 3초. **손대기 전에 한 번 돌리고 시작할 것**
 배포: Vercel (`egis-smart-factory-test.vercel.app`) · 공유 저장소는 Vercel Blob(icn1·Public)
 
 ---
@@ -1879,7 +1879,7 @@ screenX = cx + worldX * zoom,  screenY = cy + worldZ * zoom
 4. `npx vite build` 는 **문법만** 본다. 정의되지 않은 식별자는 안 잡힌다
 5. 콘솔은 마커를 찍고 그 뒤만 본다 — `console.error('=== MARKER ==='); location.reload();`
 
-### `npm test` — 634건 (이제 저장소 안에 있다)
+### `npm test` — 637건 (이제 저장소 안에 있다)
 
 예전에는 검증 스크립트가 임시 폴더에 있어서 세션이 끝나면 사라졌다. 지금은
 `tools/check/` 에 들어 있고 **의존성 없이 `node` 로만 돈다**(3초쯤).
@@ -1896,7 +1896,7 @@ tools/check/
   metrics 12 · metrics-crew 13 · belt 20 · halted 23 · cartview 19 · line 18
   orders 22 · report 28 · cost 54 · shelfrows 40 · diagnose 17 · focus 11
   models 8 · share 56 · balance 13 · improve 25 · guides 34
-  planreport 16 · measure 18 · zone 16                                = 634건
+  planreport 16 · measure 21 · zone 16                                = 637건
 ```
 
 - **`guides.mjs` 는 성격이 다르다** — 값이 아니라 **안내가 부르는 이름이 화면에
