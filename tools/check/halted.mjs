@@ -1,27 +1,20 @@
 /**
- * EditorScene 의 「서 있는 것들」 판정을 소스에서 떼어 돌린다.
- *  이 블록이 라인 전체의 정지·전파를 정한다. 잘못되면 화면은 멀쩡해 보이는데
+ * core/halt.js — 「누가 서 있는가」.
+ *  이것이 라인 전체의 정지·전파를 정한다. 잘못되면 화면은 멀쩡해 보이는데
  *  라인만 안 돈다(또는 교착) — 값으로 확인해야 하는 자리다.
  */
 import assert from 'node:assert/strict';
 import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 
-group('정지 판정 (소스에서)');
+group('정지 판정');
 
 const bom = await import(SRC + 'core/bom.js');
 const lib = await import(SRC + 'data/library.js');
 
+const H = await import(SRC + 'core/halt.js');
+const SS = await import(SRC + 'core/simStore.js');
+/* 배선 두 건은 여전히 화면 소스를 본다 — 판정을 만들어 놓고 안 이어 주는 실수는 값으로 안 잡힌다 */
 const src = await readSrc('scene/EditorScene.jsx');
-/* useMemo 콜백의 **몸통만** 떼어 낸다 — 여는 중괄호 다음부터 return 까지 */
-const OPEN = 'const halted = useMemo(() => {';
-const RET = 'return { links, dry, equips, jammed, starved, unmanned };';
-const body = cut(src, OPEN, RET, 'halted 판정').slice(OPEN.length);
-
-const ARGS = [
-  'downMap', 'beltFlows', 'machines', 'placed', 'itemOf', 'getStock', 'getLots', 'getMade',
-  'isShelf', 'isStillage', 'recipeOf', 'isSource', 'buildableCount', 'countKinds', 'crew',
-];
-const halted = new Function(...ARGS, body);
 
 const NOCREW = { manned: new Set(), unmanned: new Set() };
 
@@ -61,14 +54,19 @@ const beltFlows = [
 /* SimClock 이 훑는 목록 — 여기서는 출력 자리(cap)만 쓴다 */
 const machines = [A, B, C].map((p) => ({ uid: p.uid, cap: p.outputCount }));
 
-const call = ({ stock = {}, lots = {}, down = {}, made = {}, crew = NOCREW } = {}) =>
-  halted(
-    down, beltFlows, machines, placed, itemOf,
-    (uid) => stock[uid] ?? (lots[uid]?.length ?? 0),
-    (uid) => lots[uid] ?? [],
-    (uid) => made[uid] ?? 0,
-    isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, crew,
-  );
+/**
+ * **진짜 스토어에 담고 부른다.**
+ *  예전에는 소스를 떼어 `new Function` 에 넣고 재고 읽는 함수를 흉내 냈다.
+ *  규칙이 `core/halt.js` 로 나온 지금은 그냥 부르면 되고, 흉내를 안 내니
+ *  **실제로 쓰이는 그 경로**를 확인하게 된다.
+ */
+const call = ({ stock = {}, lots = {}, down = {}, made = {}, crew = NOCREW } = {}) => {
+  SS.clearStock();
+  for (const [uid, kinds] of Object.entries(lots)) SS.addLots(uid, kinds, Infinity);
+  for (const [uid, n] of Object.entries(stock)) if (!lots[uid]) SS.setStock(uid, n);
+  for (const [uid, n] of Object.entries(made)) SS.addMade(uid, n);
+  return H.haltState({ beltFlows, machines, placed, itemOf, downMap: down, crew });
+};
 
 const fill = (kind, k) => Array.from({ length: k }, () => kind);
 
@@ -187,10 +185,11 @@ t('레시피 없는 설비는 종점이 아니다 — 자재가 사라지고 벨
   const D = { uid: 'D', itemId: 'M', outputCount: 3 };
   const p2 = [A, D];
   const bf = [{ link: { uid: 'X', to: { uid: 'D' } }, owner: A, sink: null }];
-  const h = halted(
-    {}, bf, [{ uid: 'A', cap: 3 }, { uid: 'D', cap: 3 }], p2, itemOf, () => 0, () => [], () => 0,
-    isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, NOCREW,
-  );
+  SS.clearStock();
+  const h = H.haltState({
+    beltFlows: bf, machines: [{ uid: 'A', cap: 3 }, { uid: 'D', cap: 3 }],
+    placed: p2, itemOf, downMap: {}, crew: NOCREW,
+  });
   assert.equal(h.links.size, 0);
   assert.equal(h.equips.size, 0);
 });
@@ -203,11 +202,14 @@ t('설비가 고리로 이어져도 전파가 끝난다', () => {
     { link: { uid: 'a', to: { uid: 'Q' } }, owner: P, sink: { uid: 'Q', cap: 1 } },
     { link: { uid: 'b', to: { uid: 'P' } }, owner: Q, sink: { uid: 'P', cap: 1 } },
   ];
-  const h = halted(
-    {}, bf, [{ uid: 'P', cap: 1 }, { uid: 'Q', cap: 1 }], [P, Q], itemOf,
-    () => 5, () => ['PART_R'], () => 0,
-    isShelf, isStillage, bom.recipeOf, bom.isSource, bom.buildableCount, bom.countKinds, NOCREW,
-  );
+  SS.clearStock();
+  /* 둘 다 재료를 갖고 있고 둘 다 자리가 찼다 — 고리로 물린 판 */
+  SS.addLots('P', ['PART_R'], Infinity);
+  SS.addLots('Q', ['PART_R'], Infinity);
+  const h = H.haltState({
+    beltFlows: bf, machines: [{ uid: 'P', cap: 1 }, { uid: 'Q', cap: 1 }],
+    placed: [P, Q], itemOf, downMap: {}, crew: NOCREW,
+  });
   assert.equal(h.links.size, 2);            // 끝났다 (여기 오면 무한 루프가 아니다)
 });
 

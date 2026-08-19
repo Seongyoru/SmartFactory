@@ -31,6 +31,7 @@
  */
 
 import { resetRun, runMachines } from './sim.js';
+import { haltState } from './halt.js';
 import { getRan } from './metrics.js';
 
 /** 한 판을 이만큼씩 끊어 굴린다 (시뮬 초) — 화면의 한 프레임과 같은 크기 */
@@ -125,6 +126,42 @@ export function differs(a, b) {
 /* ==========================================================================
  * 여러 판 돌리기
  * ======================================================================== */
+
+/**
+ * 도면 한 벌 → **틱마다 다시 답하는** world.
+ * ---------------------------------------------------------------------------
+ *  「누가 서 있는가」는 도면이 아니라 **지금 재고**에 달려 있어서 매 틱 달라진다.
+ *  적치대가 차면 그 앞이 서고, 카트가 비워 주면 다시 돈다. 그래서 world 를
+ *  객체가 아니라 **함수로** 준다.
+ *
+ *  이것을 안 쓰면 반복 실행이 **막힘·굶음이 없는 라인**만 돌리게 된다 — 정작
+ *  보고 싶은 것이 빠진 반복 실행이다.
+ *
+ *  @param d.beltFlows · d.machines · d.placed · d.itemOf · d.crew  도면에서 나온다
+ *  @param d.equips   고장 판정에 넣을 설비들
+ *  @param d.downMap  () => 지금 고장 난 설비. `faults.getDown` 을 그대로 준다
+ */
+export function lineWorld(d = {}) {
+  return () => {
+    const h = haltState({
+      beltFlows: d.beltFlows,
+      machines: d.machines,
+      placed: d.placed,
+      itemOf: d.itemOf,
+      downMap: d.downMap ? d.downMap() : {},
+      crew: d.crew,
+    });
+    return {
+      machines: d.machines,
+      equips: d.equips ?? [],
+      halted: h.equips,
+      jammed: h.jammed,
+      starved: h.starved,
+      unmanned: h.unmanned,
+      shipped: d.shipped ? d.shipped() : 0,
+    };
+  };
+}
 
 /**
  * 한 판을 끝까지 굴리고, 볼 값을 뽑아 돌려준다.

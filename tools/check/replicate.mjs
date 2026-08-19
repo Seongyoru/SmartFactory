@@ -170,3 +170,89 @@ t('읽는 문구가 「평균 ± 반폭」이다', () => {
   const txt = R.ciText(s, 1);
   assert.match(txt, /^110\.0 ± \d+\.\d$/, txt);
 });
+
+/* ---------- 막힘·굶음이 도는 라인을 통째로 --------------------------------- */
+
+const MET = await import(SRC + 'core/metrics.js');
+const FLT = await import(SRC + 'core/faults.js');
+
+/* A(제작 4초/개) ──벨트──▶ S(적치대 12칸). 비워 주는 것이 없으니 곧 막힌다 */
+const ITEMS = { M: { id: 'M' }, ST: { id: 'ST', kind: 'stillage' } };
+const itemOf = (id) => ITEMS[id] ?? null;
+const MA = { uid: 'A', itemId: 'M', outputCount: 3, recipe: { in: [], out: 'PART_R' } };
+const ST = { uid: 'S', itemId: 'ST' };
+const FLOWS = [{ link: { uid: 'L1', to: { uid: 'S' } }, owner: MA, sink: { uid: 'S', cap: 12 } }];
+const MACH = [{ uid: 'A', cycleSec: 4, cycleVar: 0.2, cap: 3, need: null }];
+
+/**
+ * 벨트가 하는 일을 **흉내 낸다** — 설비 출력을 적치대로 옮긴다.
+ * ---------------------------------------------------------------------------
+ *  이게 없으면 설비가 제 출력 자리(3개)에서 막혀 버려 적치대는 손도 안 댄다.
+ *  그러면 「적치대가 차서 막혔다」(halt 의 ① 규칙)를 확인할 수가 없다 —
+ *  실제로 여기서 한 번 헛짚었다.
+ *
+ *  옮기는 시간(벨트 길이)은 안 센다. 여기서 보려는 것은 **자리가 차면 서는가**
+ *  이지 벨트 속도가 아니다.
+ */
+const drain = (sinkUid, cap) => {
+  const n = SS.getMade('A');
+  if (n > 0) SS.addLots(sinkUid, Array.from({ length: SS.takeMade('A', n) }, () => 'PART_R'), cap);
+};
+
+const lineOf = (over = {}) => {
+  const flows = over.beltFlows ?? FLOWS;
+  const cap = flows[0]?.sink?.cap ?? Infinity;
+  const w = R.lineWorld({
+    beltFlows: flows, machines: MACH, placed: [MA, ST], itemOf,
+    equips: [], downMap: () => FLT.getDown(), crew: { unmanned: new Set() },
+    ...over,
+  });
+  return (tSec) => { if (flows.length) drain('S', cap); return w(tSec); };
+};
+
+t('**막힘이 실제로 쌓인다** — halt 가 화면에 묶여 있으면 못 하는 일이다', () => {
+  /* 이 검사가 도는 것이 곧 「막힘·굶음이 도는 라인을 화면 없이 돌린다」는 증거다.
+     halt 가 EditorScene 안에 있던 동안에는 반복 실행이 **안 서는 라인**만
+     돌릴 수 있었다 — 정작 보고 싶은 것이 빠진 반복 실행이었다. */
+  const blocked = R.runOnce({
+    seconds: 600, world: lineOf(), rand: R.seeded(7),
+    pick: () => MET.getBlocked().A ?? 0,
+  });
+  assert.ok(blocked > 60, `막힌 시간이 ${blocked}초 — 적치대가 찼는데 안 쌓인다`);
+  assert.ok(blocked < 600, '내내 막혔다고 한다 — 처음엔 돌았어야 한다');
+});
+
+t('자리가 넉넉하면 안 막힌다 — 막힘이 아무 때나 서지 않는다', () => {
+  const roomy = [{ link: { uid: 'L1', to: { uid: 'S' } }, owner: MA, sink: { uid: 'S', cap: 99999 } }];
+  const blocked = R.runOnce({
+    seconds: 600, world: lineOf({ beltFlows: roomy }), rand: R.seeded(7),
+    pick: () => MET.getBlocked().A ?? 0,
+  });
+  assert.equal(Math.round(blocked), 0, '안 막혀야 하는데 막혔다고 한다');
+});
+
+t('world 를 **함수로** 준다 — 재고가 틱마다 달라지니까', () => {
+  /* 객체로 주면 첫 틱의 재고로 굳는다. 그러면 적치대가 차도 영영 안 막힌다 */
+  assert.equal(typeof lineOf(), 'function', 'lineWorld 가 함수를 안 돌려준다');
+  assert.match(src, /typeof d\.world === 'function' \? d\.world\(/, 'runOnce 가 함수를 안 받는다');
+});
+
+t('굶음도 잡힌다 — 재료를 안 주면 조립 설비가 굶는다', () => {
+  const C = {
+    uid: 'C', itemId: 'M', outputCount: 3,
+    recipe: { in: [{ kind: 'PART_R', qty: 2 }], out: 'ASM' },
+  };
+  const starved = R.runOnce({
+    seconds: 120,
+    world: lineOf({ beltFlows: [], machines: [{ uid: 'C', cycleSec: 4, cap: 3, need: { PART_R: 2 } }], placed: [C] }),
+    rand: R.seeded(7),
+    pick: () => MET.getStarved().C ?? 0,
+  });
+  assert.ok(starved > 100, `굶은 시간이 ${starved}초 — 재료가 없는데 안 쌓인다`);
+});
+
+t('halt 를 직접 다시 적지 않는다 — core/halt.js 를 부른다', () => {
+  assert.match(src, /import \{ haltState \} from '\.\/halt\.js'/);
+  for (const rule of ['buildableCount', 'getLots(', 'jammed.add'])
+    assert.equal(src.includes(rule), false, `replicate 가 ${rule} 를 다시 들고 있다`);
+});
