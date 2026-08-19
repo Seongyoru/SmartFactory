@@ -48,6 +48,7 @@ await import('./belt.mjs');
 await import('./halted.mjs');
 await import('./cartview.mjs');
 await import('./sim.mjs');
+await import('./replicate.mjs');
 
 /* 이어 붙여 돌려 보는 것 — 조각마다 통과해도 개수는 셋에 걸쳐 샌다 */
 await import('./focus.mjs');
