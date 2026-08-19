@@ -22,14 +22,23 @@
 import React, { useState } from 'react';
 import { Check, Download, GitCompare, Play, Trash2, X } from 'lucide-react';
 import { useEditor } from '../core/store.jsx';
-import { useShipped } from '../core/simStore.js';
-import { getRan, useMetrics } from '../core/metrics.js';
+import { getShipped, shippedTotal, useShipped } from '../core/simStore.js';
+import { getRan, throughput, useMetrics } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
 import { SHORT_RUN, bestOf, captureRun, scenarioCSV } from '../core/scenarios.js';
 import { won } from '../core/cost.js';
 import { useCostInput } from './useCost.js';
+import { useLineWorld } from './useLineWorld.js';
+import { ciText, differs, replicate } from '../core/replicate.js';
+import { resetRun } from '../core/sim.js';
 import { formatElapsed } from '../core/clock.js';
 import { downloadCSV, downloadJSON, stamp } from '../core/persistence.js';
+
+/** 여러 판으로 담을 때의 크기 — 화면에서 고르게 하지 않는다.
+    견주는 자리에서는 **판 수가 같아야** 공정하고, 매번 다르게 담으면
+    나중에 왜 구간이 다른지 알 수 없다. */
+const REPS = 10;
+const REP_MIN = 30;
 import { Btn } from './common.jsx';
 
 const pct = (v) => (typeof v === 'number' ? `${(v * 100).toFixed(0)}%` : '—');
@@ -52,6 +61,15 @@ export default function Scenarios() {
   useFaults();
   const [name, setName] = useState('');
   const cost = useCostInput();
+  /**
+   * **훅은 얼리 리턴보다 위에.**
+   *  아래(`if (!state.showScenarios) return null`) 뒤에 두었다가 창을 여는
+   *  순간 「Rendered more hooks than during the previous render」 로 화면이
+   *  통째로 죽었다 — 닫혀 있을 때는 훅 일곱, 열면 아홉이 되기 때문이다.
+   *  값 검사로는 절대 안 잡히는 종류라, 이 주석이 곧 그 검사다.
+   */
+  const { world, ready } = useLineWorld();
+  const [busy, setBusy] = useState(false);
 
   if (!state.showScenarios) return null;
 
@@ -62,6 +80,26 @@ export default function Scenarios() {
   /* 지금까지 돌린 성적 — 아직 안 돌렸으면 null */
   /* 원가는 화면이 이미 낸 값 그대로 굳힌다 — 여기서 다시 계산하지 않는다 */
   const current = () => captureRun(state.placed, shipped, cost);
+
+  /**
+   * **여러 판으로 담기** — 한 번 돌린 값끼리 견주면 뒤집힌다.
+   * -------------------------------------------------------------------------
+   *  화면 없이 N 판을 굴려 평균과 흔들림까지 굳힌다. 그래야 아래 표가
+   *  「이 차이는 진짜다 / 아직 모른다」 를 말할 수 있다.
+   *
+   *  돌리고 나면 화면의 이번 실행은 비워진다(스토어가 한 벌이다). 담은 값은
+   *  이미 굳었으므로 표에는 그대로 남는다.
+   */
+  const captureReps = () => {
+    const r = replicate({
+      reps: REPS, seconds: REP_MIN * 60, seed: 1, world,
+      pick: () => throughput(shippedTotal(getShipped())) ?? 0,
+    });
+    /* 굳힌 뒤에 비운다 — 순서가 바뀌면 담은 값이 0 이 된다 */
+    const run = captureRun(state.placed, getShipped(), cost, r);
+    resetRun();
+    return { ...run, throughput: r.mean, ran: REP_MIN * 60 * r.n };
+  };
 
   const best = {
     throughput: bestOf(rows, 'throughput'),
@@ -103,6 +141,21 @@ export default function Scenarios() {
             onClick={() => { dispatch({ type: 'SCENARIO_ADD', name, run: current() }); setName(''); }}
           >
             지금 배치 저장
+          </Btn>
+          <Btn
+            disabled={!ready || busy}
+            title={ready ? `${REPS}판 × ${REP_MIN}분을 화면 없이 돌려 평균과 구간까지 담습니다`
+              : '설비를 놓아야 돌릴 수 있습니다'}
+            onClick={() => {
+              setBusy(true);
+              setTimeout(() => {
+                try { dispatch({ type: 'SCENARIO_ADD', name, run: captureReps() }); setName(''); }
+                catch (e) { console.error('[배치 비교] 여러 판 담기 실패', e); }
+                finally { setBusy(false); }
+              }, 30);
+            }}
+          >
+            {busy ? '돌리는 중…' : `여러 판(${REPS})으로 저장`}
           </Btn>
         </div>
 
@@ -150,7 +203,14 @@ export default function Scenarios() {
                           )}
                         </div>
                       </td>
-                      <Cell value={r?.throughput} best={best.throughput}>{num(r?.throughput)}</Cell>
+                      {/* 여러 판으로 담았으면 **흔들림까지** 보여 준다 —
+                          숫자 하나만 있으면 「420 이 410 보다 낫다」 를 말하게 된다 */}
+                      <Cell value={r?.throughput} best={best.throughput}>
+                        {num(r?.throughput)}
+                        {r?.reps?.n > 1 && (
+                          <span className="text-[9.5px] font-normal text-ink4"> ± {r.reps.half.toFixed(0)}</span>
+                        )}
+                      </Cell>
                       <Cell value={r?.oee} best={best.oee}>{pct(r?.oee)}</Cell>
                       <Cell value={r?.availability} best={best.availability}>{pct(r?.availability)}</Cell>
                       <Cell value={r?.performance} best={best.performance}>{pct(r?.performance)}</Cell>
@@ -200,6 +260,54 @@ export default function Scenarios() {
               </tbody>
             </table>
           )}
+
+          {/**
+            * **정말 다른가.**
+            * -------------------------------------------------------------------
+            *  표는 지금까지 숫자만 늘어놓고 어느 쪽이 나은지는 눈에 맡겼다.
+            *  그런데 「410 vs 420」 은 다시 돌리면 뒤집힐 수 있는 차이다.
+            *
+            *  여러 판으로 담은 배치가 둘 이상이면 **가장 좋은 둘**을 견줘 말해
+            *  준다. 한 판으로 담은 것은 흔들림을 모르므로 여기 안 들어간다.
+            */}
+          {(() => {
+            const many = rows.filter((s) => s.run?.reps?.n > 1)
+              .sort((a, b) => b.run.reps.mean - a.run.reps.mean);
+            if (many.length < 2) return null;
+            const [x, y] = many;
+            /* 둘 다 0 이면 「차이를 모른다」가 아니라 **잴 것이 없다**.
+               처리량은 밖으로 나간 것을 세므로 출하 경로가 없으면 늘 0 이다 —
+               그걸 「아직 다르다고 못 합니다」 라고 하면 판 수를 늘리면 갈릴
+               것처럼 읽힌다. 늘려도 0 이다. */
+            if (!(x.run.reps.mean > 0) && !(y.run.reps.mean > 0)) {
+              return (
+                <div className="border-t border-line bg-amber-500/10 px-4 py-2 text-[10.5px] leading-relaxed text-amber-700">
+                  두 배치 다 <b>밖으로 나간 것이 없습니다</b> — 처리량으로는 못 견줍니다.
+                  트럭과 개구부를 놓아 출하 경로를 만드세요.
+                </div>
+              );
+            }
+            const d = differs(x.run.reps, y.run.reps);
+            if (!d) return null;
+            return (
+              <div className={`border-t border-line px-4 py-2 text-[10.5px] leading-relaxed ${
+                d.sure ? 'bg-emerald-500/10 text-emerald-700' : 'bg-amber-500/10 text-amber-700'}`}>
+                {d.sure ? (
+                  <>
+                    <b>{x.name}</b> 가 <b>{y.name}</b> 보다 낫습니다 —
+                    차이 <b>{d.gap.toFixed(0)}</b> 개/시 (± {d.half.toFixed(0)}). 구간이 0 을 안 품습니다.
+                  </>
+                ) : (
+                  <>
+                    <b>{x.name}</b> 와 <b>{y.name}</b> 는 <b>아직 다르다고 못 합니다</b> —
+                    차이 {d.gap.toFixed(0)} 개/시가 흔들림(± {d.half.toFixed(0)}) 안에 있습니다.
+                    판 수를 늘리면 갈릴 수 있습니다.
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
         </div>
 
         <div className="flex items-center gap-2 border-t border-line px-4 py-2.5">

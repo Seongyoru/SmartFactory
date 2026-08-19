@@ -11,7 +11,7 @@
 ```bash
 npm install
 npm run dev      # http://localhost:5174
-npm test         # 707건, 의존성 없이 3초
+npm test         # 713건, 의존성 없이 3초
 ```
 
 ---
@@ -391,7 +391,10 @@ npm test         # 707건, 의존성 없이 3초
 축척 막대도 함께 들어갑니다.
 
 - **CSV** — 표 계산기로 가져가는 판. 실행 보고서와 같은 값에서 나옵니다
-- **시나리오** — 배치를 여러 개 담아 두고 나란히 견줍니다 (`core/scenarios.js`)
+- **시나리오** — 배치를 여러 개 담아 두고 나란히 견줍니다 (`core/scenarios.js`).
+  **여러 판으로 저장**하면 처리량에 `± 구간`이 붙고, 아래에 판정이 뜹니다 —
+  「A가 B보다 낫습니다 (구간이 0을 안 품습니다)」 또는 「아직 다르다고 못 합니다」.
+  한 판으로 담은 배치는 흔들림을 모르므로 판정에 안 들어갑니다.
 
 둘 다 **스스로 서는 HTML** 한 장입니다 — 스크립트도 없고 바깥에서 받아 오는 것도
 없어서, 파일만 건네도 그대로 열리고 <kbd>Ctrl</kbd>+<kbd>P</kbd> 로 PDF 가 됩니다.
@@ -604,7 +607,7 @@ src/
   theme.js          3D 씬 색·조명 (UI 색은 index.css 의 CSS 변수)
 
 api/share.js        공유 서버 (Vercel 함수 + Blob)
-tools/check/        npm test — 검사 파일 32개, 707건, 의존성 없음
+tools/check/        npm test — 검사 파일 32개, 713건, 의존성 없음
 public/layouts/     저장소에 담아 둔 예제 도면 (index.json + *.json)
 docs/HANDOFF.md     **가장 최신 기록** — 무엇을 왜 그렇게 정했는지
 ```

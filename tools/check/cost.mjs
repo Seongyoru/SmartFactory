@@ -271,7 +271,7 @@ t('보고서는 원가를 **받아 적기만** 한다 — 다시 곱하지 않�
   assert.ok(inspector.includes('cost,'), '보고서에 원가를 안 넘긴다');
 });
 t('비교표도 밖에서 받는다 — scenarios.js 는 계산하지 않는다', () => {
-  assert.ok(/captureRun\(placed, shipped, cost = null\)/.test(scenarios), '원가를 안 받는다');
+  assert.ok(/captureRun\(placed, shipped, cost = null, reps = null\)/.test(scenarios), '원가를 안 받는다');
   assert.equal(/costOf|normalizeRates/.test(code(scenarios)), false, 'scenarios.js 가 원가를 계산한다');
   assert.ok(/captureRun\(state\.placed, shipped, cost\)/.test(scenView), '화면이 원가를 안 넘긴다');
 });

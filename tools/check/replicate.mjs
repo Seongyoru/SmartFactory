@@ -301,3 +301,47 @@ t('나간 것이 없으면 **0 ± 0 이라고 안 한다** — 고장 난 것처
   const zero = fn.slice(fn.indexOf('밖으로 나간 것이 없습니다'));
   assert.equal(zero.includes('± 가 큰 것은'), false, '0 인 판에서도 ± 이야기를 한다');
 });
+
+/* ---------- 배치 비교에 판정을 붙였다 --------------------------------------- */
+
+const scenSrc = await readSrc('ui/Scenarios.jsx');
+const scenCore = await readSrc('core/scenarios.js');
+
+t('여러 판으로 담으면 **흔들림까지** 굳는다 — 숫자 하나면 판정을 못 한다', () => {
+  assert.match(scenCore, /captureRun\(placed, shipped, cost = null, reps = null\)/);
+  assert.match(scenCore, /reps: reps \? \{ n: reps\.n/, '통계를 안 굳힌다');
+  /* 한 판으로 담은 옛 기록은 이 값이 없다 — 그때는 판정을 안 한다 */
+  assert.ok(scenCore.includes('reps ? {') && scenCore.includes(': null'), '옛 기록에서 터진다');
+});
+
+t('표가 **정말 다른지**를 말한다 — 눈으로 견주게 두지 않는다', () => {
+  assert.match(scenSrc, /import \{ ciText, differs, replicate \} from '\.\.\/core\/replicate\.js'/);
+  assert.ok(scenSrc.includes('differs(x.run.reps, y.run.reps)'), '판정을 안 부른다');
+  assert.ok(scenSrc.includes('아직 다르다고 못 합니다'), '못 가른다는 말이 없다');
+  assert.ok(scenSrc.includes('구간이 0 을 안 품습니다'), '갈렸다는 근거가 없다');
+});
+
+t('한 판으로 담은 것은 **판정에 안 들어간다** — 흔들림을 모른다', () => {
+  assert.match(scenSrc, /rows\.filter\(\(s\) => s\.run\?\.reps\?\.n > 1\)/, '한 판짜리까지 견준다');
+  assert.ok(scenSrc.includes('many.length < 2'), '한 벌만 있어도 판정한다');
+});
+
+t('둘 다 0 이면 **「잴 것이 없다」** 지 「차이를 모른다」가 아니다', () => {
+  /* 판 수를 늘리면 갈릴 것처럼 읽히는데, 출하 경로가 없으면 늘려도 0 이다 */
+  assert.match(scenSrc, /!\(x\.run\.reps\.mean > 0\) && !\(y\.run\.reps\.mean > 0\)/, '0 을 안 가른다');
+  assert.ok(scenSrc.includes('밖으로 나간 것이 없습니다'), '0 인 이유를 안 말한다');
+});
+
+t('판 수는 화면에서 못 고른다 — 견주려면 **같은 크기**여야 한다', () => {
+  assert.match(scenSrc, /^const REPS = \d+;$/m, '판 수가 상수가 아니다');
+  assert.match(scenSrc, /^const REP_MIN = \d+;$/m, '한 판 길이가 상수가 아니다');
+});
+
+t('훅이 **얼리 리턴보다 위**에 있다 — 창을 여는 순간 죽는다', () => {
+  /* 실제로 겪었다: 「Rendered more hooks than during the previous render」.
+     닫혀 있을 때 일곱, 열면 아홉이 된다. 값 검사로는 안 잡히는 종류다. */
+  const head = scenSrc.slice(scenSrc.indexOf('export default function Scenarios()'));
+  const guard = head.indexOf('if (!state.showScenarios) return null;');
+  const hook = head.indexOf('useLineWorld()');
+  assert.ok(hook > 0 && hook < guard, '훅이 얼리 리턴 뒤에 있다 — 창을 열면 화면이 죽는다');
+});

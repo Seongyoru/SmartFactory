@@ -41,7 +41,7 @@ export const SHORT_RUN = 120;
  *  @param placed 지금 도면의 설비들 (병목 이름과 라인 OEE 를 뽑는 데 쓴다)
  *  @param shipped 종류별 출하 { OBJ: n, … }
  */
-export function captureRun(placed, shipped, cost = null) {
+export function captureRun(placed, shipped, cost = null, reps = null) {
   const ran = getRan();
   if (ran <= 0) return null;
 
@@ -58,6 +58,16 @@ export function captureRun(placed, shipped, cost = null) {
     shipped: producedInRun(total),
     byKind: { ...shipped },
     throughput: throughput(total) ?? 0,
+    /**
+     * 여러 판을 돌려 담았으면 그 **평균과 흔들림**도 굳힌다.
+     * -----------------------------------------------------------------------
+     *  한 번 돌린 값끼리 견주면 「A 410, B 420 이니 B가 낫다」 를 말하게 되는데,
+     *  다시 돌리면 뒤집힐 수 있다. n 과 se 가 있어야 **정말 다른지**를 따진다
+     *  (replicate 의 differs).
+     *
+     *  한 판으로 담은 옛 기록은 이 값이 없다 — 그때는 판정을 안 한다.
+     */
+    reps: reps ? { n: reps.n, mean: reps.mean, sd: reps.sd, se: reps.se, half: reps.half } : null,
     wip: Object.values(getAllStock()).reduce((s, n) => s + n, 0),
     scrapped: getScrapped(),
     quality: quality(),
