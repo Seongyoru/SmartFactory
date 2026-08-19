@@ -178,7 +178,14 @@ t('되돌릴 목록이 화면에 손으로 적혀 있지 않다', () => {
   for (const src of [toolbar, inspector]) {
     assert.match(src, /import \{ resetRun \} from '\.\.\/core\/sim\.js'/, '한 곳에서 안 가져온다');
     for (const one of ['resetClock', 'resetWork', 'resetFaults', 'resetQuality']) {
-      assert.equal(new RegExp(`\b${one}\b`).test(src), false, `${one} 를 아직 손으로 부른다`);
+      /**
+       * **정규식을 안 쓴다.**
+       *  템플릿 리터럴 안에서는 역슬래시-b 가 단어 경계가 아니라 **백스페이스
+       *  문자**(코드 8)로 바뀐다. 그래서 이 검사는 무엇을 넣든 **늘 통과**하고
+       *  있었다 — 되돌려 보고 0건 실패로 확인했다.
+       *  낱말이 그대로 있는지만 보면 되는 자리라 includes 로 충분하다.
+       */
+      assert.equal(src.includes(one), false, `${one} 를 아직 손으로 부른다`);
     }
   }
 });
