@@ -37,7 +37,7 @@
  */
 
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Repeat, RotateCcw } from 'lucide-react';
 import { useEditor } from '../core/store.jsx';
 import { focusOn } from '../core/focusStore.js';
 import { formatElapsed, useElapsed } from '../core/clock.js';
@@ -46,13 +46,16 @@ import {
   leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
 } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
-import { useAllStock, useShipped } from '../core/simStore.js';
+import { getShipped, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
 import {
   KW_RANGE, MATERIAL_MAX, MATERIAL_RANGE, POWER_RANGE, WAGE_RANGE,
   DEFAULT_RATES, normalizeRates, won,
 } from '../core/cost.js';
-import { ReportButtons } from './Inspector.jsx';
+import { OUT_BTN, ReportButtons } from './Inspector.jsx';
 import { useCostInput } from './useCost.js';
+import { useLineWorld } from './useLineWorld.js';
+import { ciText, replicate } from '../core/replicate.js';
+import { resetRun } from '../core/sim.js';
 import { MAX_H, MIN_H, dockHeight } from './dockLayout.js';
 
 export { MAX_H, MIN_H, dockHeight };
@@ -137,6 +140,116 @@ function Knob({ label, value, unit, onChange, min, max, step, hardMax }) {
         className="h-3 w-full accent-sky-500"
       />
     </div>
+  );
+}
+
+/* ==========================================================================
+ * 여러 번 돌려 보기
+ * ======================================================================== */
+
+/**
+ * **한 번 돌린 값은 사실 아무 말도 안 한다.**
+ * ---------------------------------------------------------------------------
+ *  고장과 공정 편차가 든 모델에서는 다시 돌리면 다른 값이 나온다. 그런데 이
+ *  화면은 지금까지 한 번 돌린 숫자 하나를 「이 배치의 처리량」이라고 말해 왔다.
+ *
+ *  여기서는 **화면 없이** 여러 판을 굴려 평균과 신뢰구간을 낸다. 시뮬 틱이
+ *  core 로 나와 있어서(core/sim.js) 30분짜리 한 판이 몇 ms 다.
+ *
+ *  ── 지금 실행을 건드린다, 그래서 비운다 ──────────────────────────────────
+ *  스토어가 모듈 전역이라 반복 실행이 **화면의 실행을 덮어쓴다.** 끝나면
+ *  `resetRun()` 으로 비우고, 그 사실을 화면이 말해 준다 — 값이 반쯤 섞인 채
+ *  남는 것보다 낫고, 말없이 비우면 「내 기록이 왜 사라졌지」가 된다.
+ */
+function Replicate() {
+  const { world, ready } = useLineWorld();
+  const [reps, setReps] = useState(10);
+  const [mins, setMins] = useState(30);
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState(null);
+
+  const go = () => {
+    setBusy(true);
+    /* 한 틱 쉬어 「돌리는 중」이 실제로 그려지게 한다 — 안 그러면 멈춘 듯 보인다 */
+    setTimeout(() => {
+      try {
+        const t0 = performance.now();
+        const r = replicate({
+          reps, seconds: mins * 60, seed: 1, world,
+          pick: () => throughput(shippedTotal(getShipped())) ?? 0,
+        });
+        setOut({ ...r, ms: performance.now() - t0 });
+      } catch (e) {
+        console.error('[반복 실행] 실패', e);
+        setOut(null);
+      } finally {
+        resetRun();
+        setBusy(false);
+      }
+    }, 30);
+  };
+
+  if (!ready) {
+    return <p className="text-[10.5px] leading-relaxed text-ink4">설비를 놓으면 여러 번 돌려 볼 수 있습니다.</p>;
+  }
+
+  return (
+    <>
+      <div className="flex items-end gap-1.5">
+        <label className="flex-1">
+          <span className="block text-[10px] text-ink4">판 수</span>
+          <input
+            type="number" min={2} max={50} value={reps}
+            onChange={(e) => setReps(Math.max(2, Math.min(50, Number(e.target.value) || 2)))}
+            className="w-full rounded bg-raise px-1 py-px text-right text-[11px] tabular-nums text-ink2 ring-1 ring-edge focus:ring-sky-500"
+          />
+        </label>
+        <label className="flex-1">
+          <span className="block text-[10px] text-ink4">한 판 (분)</span>
+          <input
+            type="number" min={1} max={480} value={mins}
+            onChange={(e) => setMins(Math.max(1, Math.min(480, Number(e.target.value) || 1)))}
+            className="w-full rounded bg-raise px-1 py-px text-right text-[11px] tabular-nums text-ink2 ring-1 ring-edge focus:ring-sky-500"
+          />
+        </label>
+      </div>
+      <button type="button" onClick={go} disabled={busy} className={`${OUT_BTN} mt-1.5 w-full justify-center disabled:opacity-50`}>
+        <Repeat size={13} /> {busy ? '돌리는 중…' : '여러 번 돌려 보기'}
+      </button>
+
+      {out && (
+        <div className="mt-1.5 border-t border-line pt-1.5">
+          {/**
+            * **0 을 「0 ± 0」 이라고 하면 안 된다.**
+            *  처리량은 **밖으로 나간 것**을 센다(app 의 다른 곳과 같은 정의다).
+            *  트럭과 개구부가 없는 도면은 나가는 것이 없어 늘 0 이 나오는데,
+            *  그걸 「0 ± 0 개/시」 라고 찍으면 기능이 고장 난 것처럼 보인다.
+            *  0 인 이유를 말해 주는 편이 낫다 — 정의를 하나 더 만드는 것보다.
+            */}
+          {out.mean > 0 ? (
+            <>
+              <Line label="처리량" big>{ciText(out, 0)}<span className="text-[10px] text-ink4"> 개/시</span></Line>
+              <p className="mt-0.5 text-[9.5px] leading-snug text-ink4">
+                {out.n}판 · 95% 구간 <b className="text-ink3">{out.lo.toFixed(0)} ~ {out.hi.toFixed(0)}</b>
+                {' · '}{Math.round(out.ms)}ms
+              </p>
+          <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+            <b className="text-ink3">± 가 큰 것은 배치가 나쁜 게 아니라</b> 그만큼 흔들린다는 뜻입니다.
+            판 수를 늘리면 구간이 좁아집니다.
+          </p>
+            </>
+          ) : (
+            <p className="text-[10px] leading-relaxed text-ink4">
+              {out.n}판을 돌렸지만 <b className="text-ink3">밖으로 나간 것이 없습니다</b>({Math.round(out.ms)}ms).
+              처리량은 트럭이 개구부로 실어 낸 것을 셉니다 — 출하 경로를 놓아야 잡힙니다.
+            </p>
+          )}
+          <p className="mt-1 text-[9.5px] leading-snug text-amber-600">
+            화면의 이번 실행은 <b>비워졌습니다</b> — 여러 판이 같은 자리를 쓰기 때문입니다.
+          </p>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -529,7 +642,7 @@ function Rates({ rates, set, untouched }) {
 export const DOCK_RUN = 'dock-run';
 export const DOCK_COST = 'dock-cost';
 
-const TABS = [['run', '실행'], ['cost', '원가']];
+const TABS = [['run', '실행'], ['cost', '원가'], ['reps', '여러 판']];
 
 export default function RunDock() {
   const { state, dispatch } = useEditor();
@@ -540,7 +653,8 @@ export default function RunDock() {
   const stock = useAllStock();
   const shipped = useShipped();
   const open = state.showRunDock !== false;
-  const tab = state.runTab === 'cost' ? 'cost' : 'run';
+  /* 모르는 값이 저장돼 있어도 실행 탭으로 떨어진다 — 빈 띠보다 낫다 */
+  const tab = TABS.some(([id]) => id === state.runTab) ? state.runTab : 'run';
 
   const overall = oeeOverall(state.placed.map((p) => p.uid));
   const series = getSeries();
@@ -678,6 +792,28 @@ export default function RunDock() {
               </Col>
             </>
           )}
+        </div>
+      )}
+
+      {open && tab === 'reps' && (
+        <div className="flex min-h-0 flex-1 divide-x divide-line overflow-x-auto">
+          <Col title="여러 번 돌려 보기" width={220}>
+            <Replicate />
+          </Col>
+          <Col title="왜 여러 번인가">
+            <p className="text-[10.5px] leading-relaxed text-ink3">
+              고장과 공정 편차가 들어 있으면 <b className="text-ink2">같은 배치도 돌릴 때마다 다른 값</b>이
+              나옵니다. 한 번 돌린 숫자 하나로 배치를 견주면 다시 돌렸을 때 뒤집힐 수 있습니다.
+            </p>
+            <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink4">
+              여러 판을 돌려 <b className="text-ink3">평균 ± 구간</b>을 내면 「이만큼은 확실하다」를
+              말할 수 있습니다. 화면 없이 도는 계산이라 30분짜리 한 판이 몇 ms 입니다.
+            </p>
+            <p className="mt-1.5 text-[9.5px] leading-snug text-ink4">
+              판마다 <b className="text-ink4">처음부터</b> 시작합니다. 씨앗은 고정이라 같은 도면을
+              다시 돌리면 같은 결과가 나옵니다.
+            </p>
+          </Col>
         </div>
       )}
     </div>

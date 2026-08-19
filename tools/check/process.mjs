@@ -157,6 +157,7 @@ const inspector = await readSrc('ui/Inspector.jsx');
 const persistence = await readSrc('core/persistence.js');
 const store = await readSrc('core/store.jsx');
 const scene = await readSrc('scene/EditorScene.jsx');
+const lineup = await readSrc('core/lineup.js');
 
 t('인스펙터가 개/분 을 손으로 계산하지 않는다', () => {
   /* 60 을 곱하거나 나눠서 분당 수를 만드는 식이 남아 있으면 안 된다 */
@@ -326,8 +327,9 @@ t('출력 자리는 한 덩어리 + 한 개', () => {
   assert.equal(P.outputCapFor(8), 9);
   assert.equal(P.outputCapFor(0), 2);            // 말이 안 되는 값도 한 덩어리 + 1
 });
-t('EditorScene 이 그 값을 쓴다 — 손으로 적어 두면 또 어긋난다', () => {
-  assert.ok(scene.includes('cap: outputCapFor('), 'outputCapFor 를 안 쓴다');
+t('설비 목록을 만드는 쪽이 그 값을 쓴다 — 손으로 적어 두면 또 어긋난다', () => {
+  /* 예전에는 EditorScene 의 useMemo 안에 있었다 — core/lineup.js 로 옮겼다 */
+  assert.ok(lineup.includes('cap: outputCapFor('), 'outputCapFor 를 안 쓴다');
 });
 
 t('한 칸만 더 주면 되고, 더 줘도 나아지지 않는다', () => {

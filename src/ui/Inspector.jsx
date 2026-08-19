@@ -2667,8 +2667,8 @@ function MultiPanel({ items }) {
  *  평소에는 테두리만, 손이 닿으면 **채워지고 글자·아이콘이 하얘진다** — 눌리는
  *  것임을 색이 먼저 말해 준다.
  */
-const OUT_H = 'flex h-[26px] items-center';
-const OUT_BTN = `${OUT_H} shrink-0 gap-1.5 whitespace-nowrap rounded-md px-2.5`
+export const OUT_H = 'flex h-[26px] items-center';
+export const OUT_BTN = `${OUT_H} shrink-0 gap-1.5 whitespace-nowrap rounded-md px-2.5`
   + ' text-[11px] font-medium leading-none text-sky-600 ring-1 ring-sky-500/40'
   + ' transition-colors hover:bg-sky-500 hover:text-white hover:ring-sky-500';
 

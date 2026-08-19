@@ -5,7 +5,7 @@
  *  산수가 맞는지 본다 — 특히 **있는 차이를 없다고 하지 않는지.**
  */
 import assert from 'node:assert/strict';
-import { SRC, group, readSrc, t } from './_harness.mjs';
+import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 
 group('반복 실행');
 
@@ -255,4 +255,49 @@ t('halt 를 직접 다시 적지 않는다 — core/halt.js 를 부른다', () =
   assert.match(src, /import \{ haltState \} from '\.\/halt\.js'/);
   for (const rule of ['buildableCount', 'getLots(', 'jammed.add'])
     assert.equal(src.includes(rule), false, `replicate 가 ${rule} 를 다시 들고 있다`);
+});
+
+/* ---------- 화면 배선 ------------------------------------------------------ */
+
+const dock = await readSrc('ui/RunDock.jsx');
+const hook = await readSrc('ui/useLineWorld.js');
+
+t('반복 실행은 **세 번째 탭**이다 — 실행 탭에 다섯 칸을 늘어놓지 않는다', () => {
+  /* 이 파일이 탭을 만든 이유가 「폭이 모자라 글자가 잘렸다」였다. 새 칸을
+     실행 탭에 밀어 넣으면 그 문제를 되풀이한다. */
+  assert.match(dock, /\['reps', '여러 판'\]/, '세 번째 탭이 없다');
+  assert.match(dock, /tab === 'reps' && \(/, '탭으로 안 갈린다');
+  const runCols = dock.slice(dock.indexOf("tab === 'run' && ("), dock.indexOf("tab === 'cost' && ("));
+  assert.equal((runCols.match(/<Col title=/g) ?? []).length, 4, '실행 탭이 네 칸을 넘었다');
+});
+
+t('도면을 **한 곳에서** 모은다 — 두 벌이면 화면과 다른 라인을 돌리게 된다', () => {
+  assert.match(dock, /import \{ useLineWorld \} from '\.\/useLineWorld\.js'/);
+  const fn = cut(dock, 'function Replicate()', '\n/*', '반복 실행 칸');
+  assert.ok(fn.includes('useLineWorld()'), '도면을 자기 나름대로 모은다');
+  for (const own of ['beltFlowsOf(', 'machinesOf(', 'haltState('])
+    assert.equal(fn.includes(own), false, `화면이 ${own} 를 다시 부른다`);
+});
+
+t('훅은 화면 층의 값만 고른다 — 계산은 core 가 한다', () => {
+  for (const call of ['beltFlowsOf(', 'machinesOf(', 'lineWorld(', 'linkPath('])
+    assert.ok(hook.includes(call), `${call} 를 안 쓴다`);
+  /* 규칙을 여기서 다시 적으면 안 된다 */
+  for (const rule of ['jammed', 'buildableCount', 'slotShares'])
+    assert.equal(hook.includes(rule), false, `훅이 ${rule} 를 다시 들고 있다`);
+});
+
+t('돌린 뒤 **화면 실행을 비우고 그 사실을 말한다**', () => {
+  const fn = cut(dock, 'function Replicate()', '\n/*', '반복 실행 칸');
+  assert.ok(fn.includes('resetRun();'), '섞인 값을 남긴다');
+  assert.ok(fn.includes('비워졌습니다'), '말없이 비우면 「내 기록이 왜 사라졌지」가 된다');
+});
+
+t('나간 것이 없으면 **0 ± 0 이라고 안 한다** — 고장 난 것처럼 보인다', () => {
+  const fn = cut(dock, 'function Replicate()', '\n/*', '반복 실행 칸');
+  assert.match(fn, /out\.mean > 0 \? \(/, '0 을 그대로 찍는다');
+  assert.ok(fn.includes('밖으로 나간 것이 없습니다'), '0 인 이유를 안 말한다');
+  /* 「± 가 크다」는 값이 있을 때만 할 말이다 */
+  const zero = fn.slice(fn.indexOf('밖으로 나간 것이 없습니다'));
+  assert.equal(zero.includes('± 가 큰 것은'), false, '0 인 판에서도 ± 이야기를 한다');
 });
