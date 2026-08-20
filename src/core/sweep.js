@@ -16,6 +16,12 @@
  *  곡선이 들쭉날쭉해져서 「4대에서 꺾인다」가 운인지 실력인지 알 수 없다.
  *  씨앗을 고정하면 값 사이의 차이만 남는다 — `replicate` 가 이미 그렇게 한다.
  *
+ *  **완전히 같은 조건이 되지는 않는다.** 값이 달라지면 라인이 다르게 돌아서
+ *  난수를 먹는 자리도 어긋난다(버퍼가 크면 덜 막히고, 덜 막히면 다음 난수를
+ *  다른 시점에 쓴다). 그래서 짝짓기가 상쇄해 주는 것은 **운의 일부**이고,
+ *  차이가 작으면 여전히 「모른다」가 나온다 — 적치대 40 → 80(+4.2%)이 그랬다.
+ *  더 확실히 하려면 판을 늘리는 수밖에 없다.
+ *
  *  **② 「더 늘어도 안 는다」를 구간으로 말한다.** 표만 내면 사람이 눈으로
  *  0.3 개/시 차이를 「늘었다」고 읽는다. 이웃한 두 값이 **정말 다른지**를
  *  `differs`(Welch)로 물어서, 안 다르면 **거기가 무릎**이다.
@@ -26,12 +32,23 @@
  * ---------------------------------------------------------------------------
  */
 
-import { differs, replicate } from './replicate.js';
+import { differs, pairedDiffers, replicate } from './replicate.js';
 
 /** 한 값마다 몇 판을 돌리나 — 곡선의 **모양**을 보는 자리라 판을 적게 둔다 */
 export const SWEEP_REPS = 6;
 /** 손잡이 하나에 몇 값까지 — 이보다 많으면 표를 읽는 대신 훑게 된다 */
 export const MAX_VALUES = 8;
+
+/**
+ * 이만큼도 안 늘면 **안 는 것으로 본다** (2%).
+ * ---------------------------------------------------------------------------
+ *  짝지어 견주면(같은 난수) 판정이 아주 예민해진다 — 좋은 일이지만 **너무**
+ *  예민하다. 실제로 카트 2대 1276 · 4대 1281 에서 0.4% 차이를 「늘었다」고 잡아
+ *  **트럭을 두 대 더 사라**고 했다. 통계적으로 다른 것과 **할 만한 것**은 다르다.
+ *
+ *  `optimize.js` 의 `GAIN_TIE`, `improve.js` 의 `UNIT_TIE` 와 같은 생각이다.
+ */
+export const SWEEP_TIE = 0.02;
 
 /**
  * 돌릴 수 있는 손잡이들.
@@ -143,7 +160,8 @@ export function sweep(d = {}) {
       reps, seconds: d.seconds ?? 1800, seed: d.seed ?? 1,
       world: built.world, flow: built.flow, pick: d.pick,
     });
-    rows.push({ v, mean: r.mean, sd: r.sd, se: r.se, half: r.half, n: r.n });
+    /* 판별 값을 그대로 들고 간다 — **짝지어 견주려면** 판마다의 값이 있어야 한다 */
+    rows.push({ v, mean: r.mean, sd: r.sd, se: r.se, half: r.half, n: r.n, runs: r.runs });
   }
 
   if (!rows.length) return { ok: false, why: 'no-run', knob, rows: [] };
@@ -176,9 +194,17 @@ export function kneeOf(rows) {
   for (let i = 0; i < rows.length - 1; i++) {
     let flat = true;
     for (let j = i + 1; j < rows.length; j++) {
-      const d = differs(rows[j], rows[i]);
+      /**
+       * **짝지어 견준다.** 값마다 같은 난수를 먹였으므로 판끼리 짝이 맞고,
+       * 짝을 지어 빼면 「그날 운」이 상쇄된다. 남남으로 보면(Welch) ± 가
+       * 넓어 못 가른다 — 실제로 적치대 691 → 821 을 「안 늘었다」고 했다.
+       */
+      const paired = rows[j].runs && rows[i].runs;
+      const d = paired ? pairedDiffers(rows[i], rows[j]) : differs(rows[j], rows[i]);
       /* 뒤쪽이 **의미 있게 더 크면** 아직 무릎이 아니다 */
-      if (d.sure && rows[j].mean > rows[i].mean) { flat = false; break; }
+      /* 통계적으로 다른 것만으로는 모자란다 — **할 만큼** 늘어야 한다 */
+      const worth = rows[j].mean > rows[i].mean * (1 + SWEEP_TIE);
+      if (d.sure && worth) { flat = false; break; }
     }
     if (flat) return { v: rows[i].v, mean: rows[i].mean };
   }

@@ -169,13 +169,40 @@ t('값이 너무 많으면 자른다 — 표를 읽는 대신 훑게 된다', ()
 const src = await readSrc('core/sweep.js');
 
 t('판정은 **Welch 를 다시 안 짠다** — 배치 비교와 같은 잣대여야 한다', () => {
-  assert.ok(src.includes("import { differs, replicate } from './replicate.js';"), '남의 것을 안 쓴다');
+  assert.ok(src.includes("import { differs, pairedDiffers, replicate } from './replicate.js';"), '남의 것을 안 쓴다');
   assert.equal(/Math\.sqrt\(.*se.*\*\*\s*2/.test(src), false, '판정을 여기서 다시 짰다');
 });
 
 t('씨앗을 값마다 **같게** 준다 (common random numbers)', () => {
   assert.ok(src.includes('seed: d.seed ?? 1'), '값마다 다른 씨앗을 준다');
   assert.ok(src.includes('common random numbers'), '왜 그런지가 안 적혀 있다');
+});
+
+t('**짝지어 견준다** — 같은 난수를 먹였으니 판끼리 짝이 맞는다', () => {
+  /* 남남으로 보면(Welch) ± 가 넓어 못 가른다. 실제로 적치대 691 → 821 을
+     「안 늘었다」고 해서 화면이 **「10개면 충분합니다」**라고 거짓말을 했다. */
+  assert.ok(src.includes('pairedDiffers(rows[i], rows[j])'), '짝을 안 짓는다');
+  assert.ok(src.includes('runs: r.runs'), '판별 값을 안 들고 간다 — 짝을 지을 수가 없다');
+
+  const mk = (b) => [b - 40, b - 20, b, b + 20, b + 40, b + 10];
+  const withRuns = (v, mean, half) => ({ v, mean, half, se: half / 2.5, n: 6, sd: half, runs: mk(mean) });
+  const rows = [withRuns(10, 691, 135), withRuns(40, 788, 68), withRuns(80, 821, 62), withRuns(160, 821, 62)];
+  assert.equal(S.kneeOf(rows).v, 80, '짝을 지어도 오르는 곡선을 평평하다고 한다');
+});
+
+t('**통계적으로 다른 것과 할 만한 것은 다르다**', () => {
+  /* 짝을 지으면 판정이 아주 예민해진다 — 좋은 일이지만 너무 예민하다.
+     카트 2대 1276 · 4대 1281 에서 0.4% 를 「늘었다」고 잡아 **트럭을 두 대
+     더 사라**고 했다. 2% 문턱을 둔다. */
+  const mk = (b) => [b - 40, b - 20, b, b + 20, b + 40, b + 10];
+  const r = (v, mean, half) => ({ v, mean, half, se: half / 2.5, n: 6, sd: half, runs: mk(mean) });
+  const rows = [r(1, 788, 68), r(2, 1276, 310), r(4, 1281, 311), r(8, 1281, 315)];
+  assert.equal(S.kneeOf(rows).v, 2, '0.4% 차이로 두 대를 더 사라고 한다');
+  assert.ok(S.SWEEP_TIE > 0 && S.SWEEP_TIE < 0.1, `문턱이 이상하다 (${S.SWEEP_TIE})`);
+
+  /* 문턱을 넘으면 제대로 잡는다 */
+  const big = [r(1, 100, 5), r(2, 130, 5)];
+  assert.equal(S.kneeOf(big), null, '30% 나 늘었는데 평평하다고 한다');
 });
 
 t('손잡이 설명이 **무엇을 알게 되나**로 적혀 있다', () => {
