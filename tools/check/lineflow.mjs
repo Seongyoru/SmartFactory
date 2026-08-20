@@ -69,19 +69,16 @@ const flowOf = () => R.lineFlow({
   beltFlows, cartPaths, floor, gates, isTruck: (c) => LIB.isTruck(itemOf(c.itemId)),
 });
 /**
- * 한 판. **이번 판에 늘어난 만큼**을 센다.
- *  `resetRun` 은 출하 누계를 안 비운다 — 화면의 출하 누계 HUD 가 그 값이라,
- *  판을 돌릴 때마다 0 으로 만들면 사람이 보던 숫자가 사라진다. 대신 지표 쪽이
- *  `shippedStart` 로 **이번 실행에 늘어난 만큼만** 센다(metrics 의 throughput).
- *  여기서도 같은 잣대를 쓴다 — 안 그러면 판이 거듭될수록 값이 는다.
+ * 한 판. **판마다 0 에서 시작한다.**
+ *  예전에는 `resetRun` 이 출하 누계를 안 비워서, 여기서 앞 판의 값을 빼 뒀다.
+ *  **오더가 라인을 이끌게 되면서 달라졌다**(dispatch.js) — 오더의 진척을 누계로
+ *  세므로, 안 지우면 두 번째 판부터 오더가 이미 다 찬 것으로 보인다.
+ *  이제 `resetRun` 이 누계까지 지우므로 뺄 것이 없다.
  */
-const run = (withFlow, seconds = 600) => {
-  const before = St.shippedTotal(St.getShipped());
-  return R.runOnce({
-    seconds, world: worldOf(), flow: withFlow ? flowOf() : null, rand: R.seeded(7),
-    pick: () => ({ shipped: St.shippedTotal(St.getShipped()) - before, stock: St.getStock('S1') }),
-  });
-};
+const run = (withFlow, seconds = 600) => R.runOnce({
+  seconds, world: worldOf(), flow: withFlow ? flowOf() : null, rand: R.seeded(7),
+  pick: () => ({ shipped: St.shippedTotal(St.getShipped()), stock: St.getStock('S1') }),
+});
 
 const dockSrc = await readSrc('ui/RunDock.jsx');
 const scenSrc = await readSrc('ui/Scenarios.jsx');
@@ -117,13 +114,12 @@ t('판마다 처음부터 — 벨트와 카트도 되돌린다', () => {
      거듭될수록 처리량이 는다 — 「여러 판」의 뜻이 통째로 사라진다. */
   const flow = flowOf();
   const w = worldOf();
-  const one = () => {
-    const before = St.shippedTotal(St.getShipped());
-    return R.runOnce({
-      seconds: 120, world: w, flow, rand: R.seeded(7),
-      pick: () => St.shippedTotal(St.getShipped()) - before,
-    });
-  };
+  /* `resetRun` 이 **출하 누계까지** 0 으로 돌린다 — 판마다 빼 둘 것이 없다.
+     (오더가 라인을 이끌게 되면서 누계가 남으면 안 되게 됐다: dispatch.js) */
+  const one = () => R.runOnce({
+    seconds: 120, world: w, flow, rand: R.seeded(7),
+    pick: () => St.shippedTotal(St.getShipped()),
+  });
   const x = one();
   const y = one();
   assert.ok(x > 0, `첫 판에서 아무것도 안 나갔다`);
@@ -131,15 +127,9 @@ t('판마다 처음부터 — 벨트와 카트도 되돌린다', () => {
 });
 
 t('반복 실행이 실제로 값을 낸다 — 「0 ± 0」 이 아니라', () => {
-  let before = 0;
   const r = R.replicate({
     reps: 3, seconds: 120, seed: 1, world: worldOf(), flow: flowOf(),
-    pick: () => {
-      const now = St.shippedTotal(St.getShipped());
-      const got = now - before;
-      before = now;
-      return got;
-    },
+    pick: () => St.shippedTotal(St.getShipped()),
   });
   assert.equal(r.n, 3);
   assert.ok(r.mean > 0, `여러 판을 돌려도 0 이 나온다`);

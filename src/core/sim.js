@@ -42,7 +42,7 @@ import { addRework, resetFaults, resetQuality, screen, screenAgain, stepFaults }
 import { accumulate, accumulateCart, plannedStop, resetMetrics } from './metrics.js';
 import {
   addByGroup, addLots, addLotsShared, addShipped, addMade, clearStock,
-  getLots, getMade, takeEach, takeLots, takeMade,
+  getLots, getMade, resetArrived, resetShipped, takeEach, takeLots, takeMade,
 } from './simStore.js';
 import { inGate, pointInMP } from './area.js';
 import { resetClock } from './clock.js';
@@ -66,6 +66,18 @@ export function resetRun() {
   resetQuality();
   resetWork();
   clearStock();
+  /**
+   * **출하와 도착 누계도 지운다.**
+   * -------------------------------------------------------------------------
+   *  `clearStock` 은 지금 쌓인 것만 비운다. 누계는 따로 살아남았는데, 지표는
+   *  기준점을 따로 잡아 두고 있어서(`shippedStart`) 아무 탈이 없었다.
+   *
+   *  **오더가 라인을 이끌게 되면서 달라졌다**(dispatch.js). 오더의 진척을
+   *  누계로 세므로, 안 지우면 **두 번째 판부터는 오더가 이미 다 찬 것으로**
+   *  보인다 — 디스패칭이 아무 일도 안 하고, 반복 실행의 판마다 답이 달라진다.
+   */
+  resetShipped();
+  resetArrived();
 }
 
 /* ==========================================================================
