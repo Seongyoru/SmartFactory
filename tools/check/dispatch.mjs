@@ -203,3 +203,24 @@ t('있지도 않은 선택지를 두지 않는다', () => {
   assert.deepEqual(Object.values(D.RULE), ['order', 'due', 'behind']);
   assert.equal(/SPT|짧은 것 먼저/.test(inspSrc), false, '고를 수 없는 규칙을 화면에 뒀다');
 });
+
+/* ---------- 되돌리기가 안 물어 다시 쓴 것 --------------------------------- */
+const Rep = await import(SRC + 'core/replicate.js');
+const Sim = await import(SRC + 'core/sim.js');
+t('**남은 납기가 시간에 따라 준다** — 시계를 안 넘기면 영영 안 급해진다', () => {
+  /* 배선을 글자로만 보면 `elapsed` 대신 0 을 넣어도 안 걸린다. 세계를 두 시점에
+     불러 값이 실제로 달라지는지를 본다. */
+  /* **앞 검사가 출하해 둔 것을 지운다.** 검사는 한 프로세스에서 다 도므로
+     재고가 남아 있으면 이 오더가 이미 다 찬 것으로 보인다 — 실제로 그렇게
+     「오더를 못 읽는다」는 거짓 실패를 봤다. */
+  Sim.resetRun();
+  const world = Rep.lineWorld({
+    beltFlows: [], machines: [], placed: [], itemOf: () => null,
+    orders: [{ uid: 'O', kind: 'PART_R', qty: 100, dueMin: 10, at: 'ship' }],
+  });
+  const early = world(0).orderInfo('PART_R');
+  const late = world(300).orderInfo('PART_R');
+  assert.ok(early && late, '오더를 못 읽는다');
+  assert.equal(early.due, 600);
+  assert.equal(late.due, 300, '시간이 흘렀는데 납기가 그대로다 — 시계를 안 넘긴다');
+});
