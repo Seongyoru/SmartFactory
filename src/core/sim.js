@@ -35,7 +35,7 @@
 
 import { followDistance, forgetStation, loadRoom, pickSet, stepCart } from './cart.js';
 import { advanceBelt, beltOffset } from './belt.js';
-import { runMachine, resetWork, setupTook } from './process.js';
+import { runMachine, resetWork, setupTook, slotOf } from './process.js';
 import { slotShares } from './bom.js';
 import { resetFaults, resetQuality, stepFaults } from './faults.js';
 import { accumulate, accumulateCart, resetMetrics } from './metrics.js';
@@ -99,6 +99,13 @@ export function runMachines(dt, d = {}) {
    */
   for (const m of d.machines ?? []) {
     if (nowDown.has(m.uid) || d.unmanned?.has(m.uid)) continue;
+    /**
+     * **지금 만들고 있는 품종**을 고른다. 재료도 그 품종 것을 내고, 만든 것도
+     *  그 종류로 쌓인다 — 안 그러면 제작품 2를 만들면서 제작품 1의 재료를
+     *  먹거나, 만든 것이 엉뚱한 종류로 벨트에 실린다.
+     */
+    const many = m.kinds ?? [];
+    const now = many.length ? many[slotOf(m.uid) % many.length] : null;
     const room = m.cap - getMade(m.uid);
     if (room <= 0) continue;
     const n = runMachine(m.uid, dt, {
@@ -106,13 +113,17 @@ export function runMachines(dt, d = {}) {
       cycleVar: m.cycleVar,
       shape: m.shape,
       /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
+      /* 품종이 몇 가지인가 — 로트를 채우면 다음 품종으로 넘어간다 */
+      kinds: many.length,
       lot: m.lot,
       setupSec: m.setupSec,
       room,
-      pay: m.need ? () => takeEach(m.uid, m.need) : null,
+      /* `kinds` 가 없는 설비 객체(옛 꼴)는 `need` 를 그대로 쓴다 — 검사가
+         이걸 잡았다. 새 자리를 만들었다고 옛 자리가 죽으면 안 된다. */
+      pay: (now?.need ?? m.need) ? () => takeEach(m.uid, now?.need ?? m.need) : null,
       rand,
     });
-    if (n > 0) addMade(m.uid, n);
+    if (n > 0) addMade(m.uid, n, now?.out);
     /* **전환에 쓴 시간은 서는 이유 중 하나다.** 고장·무인과 같은 자리에 두는
        이유는 푸는 방법이 달라서다 — 로트를 키우거나 빠르게 바꾼다(SMED). */
     if (setupTook(m.uid) > 0) setupNow.add(m.uid);
@@ -155,17 +166,32 @@ export function runMachines(dt, d = {}) {
  *  @param belt  `belt.js` 가 다루는 그 상태 (제자리에서 고쳐진다)
  *  @returns 이번 틱에 **끝에 닿은 개수** — 부르는 쪽이 다음 설비에 넣는다
  */
+/**
+ * 벨트 한 줄을 한 틱 굴린다.
+ *  @returns { n, byKind } — 닿은 **개수**와 종류별 개수.
+ *           품종 전환이 생기면서 「몇 개」만으로는 모자라게 됐다 — 같은 벨트
+ *           위에 두 종류가 앞뒤로 흐른다.
+ */
 export function runBelt(belt, ctx = {}, dt = 0) {
   const speed = ctx.speed ?? 0;
-  if (!(speed > 0) || !(dt > 0)) return 0;
-  const arrived = advanceBelt(belt, {
+  if (!(speed > 0) || !(dt > 0)) return { n: 0, byKind: null };
+  advanceBelt(belt, {
     d: speed * dt,
     step: ctx.step,
     length: ctx.length,
     feeding: ctx.feeding,
     spawn: ctx.spawn,
+    kind: ctx.kind,
   });
-  return arrived > 0 ? arrived * Math.max(1, ctx.layers ?? 1) : 0;
+  const byKind = belt.out;
+  if (!byKind) return { n: 0, byKind: null };
+  /* **층수를 다시 곱하지 않는다.** 칸이 든 개수(`counts`)가 이미 그 덩어리의
+     개수다 — 예전에는 칸이 「덩어리 하나」였고 층수를 곱해 개수를 냈다.
+     그대로 두었더니 개수가 제곱으로 부풀었다. */
+  let n = 0;
+  const out = {};
+  for (const k of Object.keys(byKind)) { out[k] = byKind[k]; n += out[k]; }
+  return { n, byKind: out };
 }
 
 export { beltOffset };

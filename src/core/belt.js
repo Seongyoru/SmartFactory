@@ -53,7 +53,28 @@ export function beltCount(length, step) {
  *  fill  칸마다 "진짜 물건인가" — 번호를 칸 수로 나눈 나머지가 곧 자리
  */
 export function makeBelt(count) {
-  return { trav: 0, born: -1, gone: -1, fill: new Uint8Array(Math.max(0, count)) };
+  const n = Math.max(0, count);
+  return {
+    trav: 0,
+    born: -1,
+    gone: -1,
+    fill: new Uint8Array(n),
+    /**
+     * 칸마다 **무엇이 실려 있는가** (종류 이름. 빈칸이면 null).
+     * -------------------------------------------------------------------------
+     *  예전에는 벨트 한 줄에 한 종류만 흘렀다 — 설비가 한 가지만 만들었으니
+     *  줄 전체에 이름표 하나면 됐다(`beltFlows` 의 `outKind`).
+     *
+     *  **품종 전환이 생기면서 달라졌다.** 같은 벨트 위에 제작품 1과 2가 앞뒤로
+     *  실려 흐른다. 줄에 이름표 하나만 붙이면 **도착한 것이 엉뚱한 종류로**
+     *  적치대에 쌓인다 — 벨트가 길수록 더 어긋난다(실린 시각과 닿는 시각의 차).
+     */
+    kinds: new Array(n).fill(null),
+    /** 칸마다 **몇 개** 실려 있는가 — 품종이 바뀌는 자리의 짧은 덩어리 때문 */
+    counts: new Uint8Array(n),
+    /** 이번 프레임에 끝에 닿은 것들 — `{ [종류]: 개수 }` */
+    out: null,
+  };
 }
 
 /**
@@ -67,7 +88,7 @@ export function makeBelt(count) {
  *                 (재료를 내는 자리다. 없으면 달라는 대로 다 만든다 = 공급원)
  * @returns 이번 프레임에 끝에 닿은 **덩어리 수**
  */
-export function advanceBelt(st, { d, step, length, feeding = true, spawn = null }) {
+export function advanceBelt(st, { d, step, length, feeding = true, spawn = null, kind = null }) {
   const n = st.fill.length;
   if (!n || !(d > 0) || !(step > 0)) return 0;
   const t = st.trav + d;
@@ -82,11 +103,20 @@ export function advanceBelt(st, { d, step, length, feeding = true, spawn = null 
    *  몫의 차로 세므로 한 프레임에 여럿이 지나가도(빠른 벨트·높은 배속) 안 빠뜨린다.
    */
   let arrived = 0;
+  let out = null;
   const gone = Math.floor((t - length) / step);
   if (gone > st.gone) {
     for (let k = Math.max(st.gone + 1, gone - n + 1); k <= gone; k++) {
       const c = wrap(k, n);
-      if (st.fill[c]) { st.fill[c] = 0; arrived++; }
+      if (st.fill[c]) {
+        st.fill[c] = 0;
+        arrived++;
+        /* **무엇이 닿았는지**까지 센다 — 도착해서 쌓이는 종류가 이 값이다 */
+        const kind = st.kinds[c] ?? null;
+        if (kind) { out = out ?? {}; out[kind] = (out[kind] ?? 0) + (st.counts[c] || 1); }
+        st.kinds[c] = null;
+        st.counts[c] = 0;
+      }
     }
     st.gone = gone;
   }
@@ -105,8 +135,32 @@ export function advanceBelt(st, { d, step, length, feeding = true, spawn = null 
   if (want > 0) {
     const make = Math.min(want, n);
     let paid = 0;
-    if (feeding) paid = spawn ? Math.max(0, Math.min(make, spawn(make) ?? 0)) : make;
-    for (let i = 1; i <= make; i++) st.fill[wrap(born - make + i, n)] = i <= paid ? 1 : 0;
+    /**
+     * `spawn` 은 **몇 덩어리를 실었고 그것이 무엇인지**를 돌려준다.
+     *  숫자만 돌려주던 옛 꼴도 받는다 — 그때는 줄의 이름표(`kind`)를 쓴다.
+     */
+    let bornKind = kind;
+    let bornCount = 0;
+    if (feeding) {
+      if (spawn) {
+        const got = spawn(make);
+        if (got && typeof got === 'object') {
+          paid = Math.max(0, Math.min(make, got.made ?? 0));
+          bornKind = got.kind ?? kind;
+          bornCount = Math.max(0, Math.round(got.count ?? 0));
+        } else {
+          paid = Math.max(0, Math.min(make, got ?? 0));
+        }
+      } else {
+        paid = make;
+      }
+    }
+    for (let i = 1; i <= make; i++) {
+      const c = wrap(born - make + i, n);
+      st.fill[c] = i <= paid ? 1 : 0;
+      st.kinds[c] = i <= paid ? bornKind : null;
+      st.counts[c] = i <= paid ? Math.min(255, bornCount) : 0;
+    }
     st.born = born;
   }
 
@@ -121,6 +175,7 @@ export function advanceBelt(st, { d, step, length, feeding = true, spawn = null 
     st.gone -= back;
   }
 
+  st.out = out;
   return arrived;
 }
 
@@ -132,4 +187,11 @@ export function beltHas(st, k) {
   const n = st.fill.length;
   if (!n || st.born < 0) return false;
   return st.fill[wrap(st.born - k, n)] === 1;
+}
+
+/** 칸 k 에 실린 종류 (빈칸이면 null) — 화면이 색을 칠할 때 본다 */
+export function beltKind(st, k) {
+  const n = st.fill.length;
+  if (!n || st.born < 0) return null;
+  return st.kinds[wrap(st.born - k, n)] ?? null;
 }

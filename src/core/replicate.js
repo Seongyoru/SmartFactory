@@ -32,7 +32,7 @@
 
 import { newCartUnit, resetRun, runBelt, runCart, runMachines } from './sim.js';
 import { beltCount, makeBelt } from './belt.js';
-import { addLotsShared, addStock, getMade, takeMade } from './simStore.js';
+import { addLotsShared, addStock, takeBundles } from './simStore.js';
 import { screen } from './faults.js';
 import { haltState } from './halt.js';
 import { getRan } from './metrics.js';
@@ -232,27 +232,30 @@ export function lineFlow(d = {}) {
     for (const b of belts) {
       if (halted.links?.has?.(b.link.uid)) continue;      // 보낼 곳이 없으면 선다
       const per = Math.max(1, Math.round(b.owner.outputCount ?? 3));
-      const arrived = runBelt(b.state, {
+      const got = runBelt(b.state, {
         speed: b.speed,
         step: b.step,
         length: b.path?.length ?? 0,
         layers: b.layers,
         feeding: !halted.dry?.has?.(b.link.uid),
-        /* 만들어 놓은 것만 **덩어리 단위로** 싣는다 — 화면의 onSpawn 그대로다 */
-        spawn: (n) => {
-          const bundles = Math.min(n, Math.floor(getMade(b.owner.uid) / per));
-          if (bundles > 0) takeMade(b.owner.uid, bundles * per);
-          return bundles;
-        },
+        /* 만들어 놓은 것만 **덩어리 단위로** 싣는다 — 화면의 onSpawn 그대로다.
+           품종이 바뀌는 자리에서는 짧은 덩어리가 나온다(takeBundles). */
+        spawn: (n) => takeBundles(b.owner.uid, per, n),
+        /* 옛 도면(품종 하나)에서는 줄의 이름표를 쓴다 */
+        kind: b.outKind,
       }, dt);
-      if (arrived > 0 && b.sink) {
-        /* 불량은 쌓지 않고 버린다. **만든 설비의** 문제로 센다 */
-        const good = screen(arrived, b.owner.scrapRate ?? 0, b.owner.uid);
-        if (good <= 0) continue;
-        if (b.sink.slots) {
-          addLotsShared(b.sink.uid, Array.from({ length: good }, () => b.outKind), (k) => b.sink.slots[k] ?? 0);
-        } else {
-          addStock(b.sink.uid, good, b.sink.cap, b.outKind);
+      if (got.n > 0 && b.sink) {
+        /* **종류마다 따로 쌓는다.** 같은 벨트 위에 두 품종이 앞뒤로 흐르므로
+           줄에 이름표 하나만 붙이면 엉뚱한 종류로 쌓인다. */
+        for (const kind of Object.keys(got.byKind)) {
+          /* 불량은 쌓지 않고 버린다. **만든 설비의** 문제로 센다 */
+          const good = screen(got.byKind[kind], b.owner.scrapRate ?? 0, b.owner.uid);
+          if (good <= 0) continue;
+          if (b.sink.slots) {
+            addLotsShared(b.sink.uid, Array.from({ length: good }, () => kind), (k) => b.sink.slots[k] ?? 0);
+          } else {
+            addStock(b.sink.uid, good, b.sink.cap, kind);
+          }
         }
       }
     }

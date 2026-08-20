@@ -92,12 +92,15 @@ export default function BeltItems({
 
     /* 굴리는 일은 core/sim.js 가 한다 — 화면 없이도 같은 함수가 돈다 */
     if (running) {
-      const arrived = runBelt(belt, {
+      const got = runBelt(belt, {
         speed, step, length: L, layers,
         feeding: feedRef.current,
         spawn: spawnRef.current,
+        /* 옛 도면(품종 하나)에서는 줄의 이름표를 쓴다 */
+        kind: payload?.id ?? null,
       }, simStep(dt));
-      if (arrived > 0) arriveRef.current?.(arrived);
+      /* **종류별로** 넘긴다 — 같은 벨트 위에 두 품종이 앞뒤로 흐른다 */
+      if (got.n > 0) arriveRef.current?.(got.byKind);
     }
 
     const head = beltOffset(belt, step);

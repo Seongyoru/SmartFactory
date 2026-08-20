@@ -157,6 +157,7 @@ t('화면은 **이번 판에 늘어난 만큼**을 본다 — 누계가 아니�
 
 /* ---------- 규칙이 두 벌이 되지 않게 ------------------------------------ */
 const repSrc = await readSrc('core/replicate.js');
+const storeSrc = await readSrc('core/simStore.js');
 const sceneSrc = await readSrc('scene/EditorScene.jsx');
 
 t('굴리는 것은 **sim.js 가 한다** — 여기는 그릇만 만든다', () => {
@@ -166,17 +167,20 @@ t('굴리는 것은 **sim.js 가 한다** — 여기는 그릇만 만든다', ()
     '옮기는 규칙을 여기서 다시 적었다 — 화면과 두 벌이 된다');
 });
 
-t('덩어리를 싣는 규칙이 화면과 같다', () => {
-  /* 화면(onSpawn)과 여기가 다르면 같은 도면이 다른 처리량을 낸다 */
-  for (const src of [repSrc, sceneSrc]) {
-    assert.ok(/Math\.floor\(getMade\(/.test(src), '만들어 놓은 것만 덩어리 단위로 싣는 규칙이 없다');
-  }
-  assert.ok(repSrc.includes('takeMade(b.owner.uid, bundles * per)'), '실은 만큼 안 뺀다');
+t('덩어리를 싣는 규칙이 화면과 같다 — **한 곳에** 있다', () => {
+  /* 화면(onSpawn)과 헤드리스가 다르면 같은 도면이 다른 처리량을 낸다.
+     규칙 자체는 `simStore.takeBundles` 한 곳에 있고 둘 다 그것을 부른다. */
+  for (const src of [repSrc, sceneSrc]) assert.ok(src.includes('takeBundles('), '덩어리 규칙을 안 쓴다');
+  assert.ok(storeSrc.includes('export function takeBundles'), '규칙이 한 곳에 없다');
+  /* 자투리를 안 보내면 라인이 통째로 선다 — 실제로 18개에서 멈췄다 */
+  assert.ok(storeSrc.includes('const closed = run.n < getMade(uid);'), '자투리가 영영 안 빠진다');
 });
 
 t('불량은 도착할 때 거른다 — 적치대에 쌓지 않는다', () => {
-  assert.ok(repSrc.includes("screen(arrived, b.owner.scrapRate ?? 0, b.owner.uid)"),
-    '불량을 안 거르거나, 만든 설비를 안 넘긴다');
+  for (const src of [repSrc, sceneSrc]) {
+    assert.ok(src.includes("scrapRate ?? 0, b.owner.uid)") || src.includes("scrapRate ?? 0, owner.uid)"),
+      '불량을 안 거르거나, 만든 설비를 안 넘긴다');
+  }
 });
 
 t('벨트는 화면과 **같은 값**으로 선다', () => {

@@ -88,7 +88,7 @@ import { shelfBBox, shelfCapacity } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import {
   addLotsShared, addMade, addStock, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
-  useAllStock, useShipped,
+  useAllStock, useShipped, takeBundles,
 } from '../core/simStore.js';
 import { cycleOf, outputCapFor, runMachine, shapeOf as varShapeOf, spacingFor, varOf } from '../core/process.js';
 import { tick, useElapsed } from '../core/clock.js';
@@ -2282,27 +2282,29 @@ function SceneContent() {
            */
           onSpawn={(n) => {
             /* **덩어리 단위로만** 가져간다. 남은 개수를 그냥 집으면 한 덩어리가
-               못 되는 나머지가 재고에서 빠진 채 어디에도 안 실린다 — 조용히
-               사라지는 재고는 처리량이 왜 안 맞는지 단서를 안 남긴다. */
+               못 되는 나머지가 재고에서 빠진 채 어디에도 안 실린다.
+               품종이 바뀌는 자리에서는 **짧은 덩어리**가 나온다 — 안 그러면
+               자투리가 영영 안 빠져 라인이 통째로 선다(`takeBundles`). */
             const per = Math.max(1, Math.round(owner.outputCount ?? 3));
-            const bundles = Math.min(n, Math.floor(getMade(owner.uid) / per));
-            if (bundles > 0) takeMade(owner.uid, bundles * per);
-            return bundles;
+            return takeBundles(owner.uid, per, n);
           }}
-          /* 종점에 닿은 한 덩어리가 곧 재고 한 묶음이 된다 */
-          onArrive={sink ? (n) => {
-            /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
-               적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다. */
-            /* 누가 만들었는지도 같이 넘긴다 — 불량은 **만든 설비의** 문제다.
-               안 넘기면 그 설비의 OEE 품질 항이 라인 합계를 보게 된다. */
-            const good = screen(n, owner.scrapRate ?? 0, owner.uid);
-            if (good <= 0) return;
-            /* 재료를 먹는 설비는 **그 종류 몫**까지만 받는다. 안 쓰는 종류면
-               몫이 0 이라 한 개도 안 들어간다(위 sink 주석 참고). */
-            if (sink.slots) {
-              addLotsShared(sink.uid, Array.from({ length: good }, () => outKind), (k) => sink.slots[k] ?? 0);
-            } else {
-              addStock(sink.uid, good, sink.cap, outKind);
+          /* 종점에 닿은 것이 곧 재고가 된다 — **종류마다 따로** */
+          onArrive={sink ? (byKind) => {
+            /* 같은 벨트 위에 두 품종이 앞뒤로 흐른다. 줄에 이름표 하나만
+               붙이면 도착한 것이 엉뚱한 종류로 쌓인다. */
+            for (const kind of Object.keys(byKind ?? {})) {
+              /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
+                 적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다.
+                 누가 만들었는지도 넘긴다 — 불량은 **만든 설비의** 문제다. */
+              const good = screen(byKind[kind], owner.scrapRate ?? 0, owner.uid);
+              if (good <= 0) continue;
+              /* 재료를 먹는 설비는 **그 종류 몫**까지만 받는다. 안 쓰는 종류면
+                 몫이 0 이라 한 개도 안 들어간다(위 sink 주석 참고). */
+              if (sink.slots) {
+                addLotsShared(sink.uid, Array.from({ length: good }, () => kind), (k) => sink.slots[k] ?? 0);
+              } else {
+                addStock(sink.uid, good, sink.cap, kind);
+              }
             }
           } : null}
         />

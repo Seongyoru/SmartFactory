@@ -388,6 +388,41 @@ export function takeMade(uid, n) {
   return take;
 }
 
+/**
+ * 벨트가 **한 덩어리씩** 집어 간다 — 같은 종류로만.
+ * ---------------------------------------------------------------------------
+ *  덩어리 하나에 두 종류를 섞으면 화면에 섞여 쌓인 것이 그려지고, 도착해서
+ *  나누는 규칙도 두 벌이 된다. 그래서 앞머리에서 **같은 종류가 이어지는
+ *  만큼**만 집는다.
+ *
+ *  ── **자투리는 짧은 덩어리로 보낸다** ─────────────────────────────────
+ *  품종이 바뀌면 앞머리에 옛 종류가 몇 개 남는다. 「덩어리는 꽉 차야 한다」로
+ *  두면 그 자투리가 영영 안 빠져 **라인이 통째로 선다** — 실제로 20개씩
+ *  번갈아 만드는 설비가 18개에서 멈췄다. 뒤에 다른 종류가 서 있다는 것은
+ *  그 줄이 더 안 자란다는 뜻이므로, 짧아도 실어 보내는 것이 맞다.
+ *  뒤가 비어 있으면(아직 만드는 중) 기다린다.
+ *
+ *  @returns { made, kind, count } — `made` 덩어리 각각에 `count` 개.
+ *           **한 번에 돌려주는 덩어리는 개수가 모두 같다**(짧은 것은 하나만).
+ */
+export function takeBundles(uid, per, want = 1) {
+  const size = Math.max(1, Math.round(per));
+  const run = madeRun(uid);
+  if (!run.n) return { made: 0, kind: null, count: 0 };
+
+  const full = Math.floor(run.n / size);
+  if (full > 0) {
+    const made = Math.min(Math.max(1, Math.round(want)), full);
+    takeMade(uid, made * size);
+    return { made, kind: run.kind, count: size };
+  }
+  /* 꽉 찬 덩어리가 없다 — 뒤에 다른 종류가 서 있을 때만 짧게 보낸다 */
+  const closed = run.n < getMade(uid);
+  if (!closed) return { made: 0, kind: null, count: 0 };
+  takeMade(uid, run.n);
+  return { made: 1, kind: run.kind, count: run.n };
+}
+
 export function clearMade(uid = null) {
   if (uid == null) {
     if (!Object.keys(made).length) return;
