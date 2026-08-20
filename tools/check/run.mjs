@@ -45,6 +45,7 @@ await import('./cartline.mjs');
 await import('./lineflow.mjs');
 await import('./process.mjs');
 await import('./setup.mjs');
+await import('./multi.mjs');
 await import('./random.mjs');
 await import('./sweep.mjs');
 

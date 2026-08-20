@@ -29,7 +29,8 @@
  * ---------------------------------------------------------------------------
  */
 
-import { buildableCount, countKinds, isSource, recipeOf } from './bom.js';
+import { buildableCount, countKinds, isSource, recipeAt } from './bom.js';
+import { slotOf } from './process.js';
 import { getLots, getMade, getStock } from './simStore.js';
 import { isShelf, isStillage } from '../data/library.js';
 
@@ -112,7 +113,12 @@ export function haltState(d = {}) {
   for (const p of placed) {
     const item = itemOf(p.itemId);
     if (isShelf(item) || isStillage(item)) continue;
-    const recipe = recipeOf(p);
+    /**
+     * **지금 만들고 있는 품종**의 재료를 본다.
+     *  첫 레시피만 보면, 제작품 2를 만드는 중에 제작품 1의 재료가 없다고
+     *  「굶었다」고 찍는다 — 멀쩡히 도는 라인이 붉게 선다.
+     */
+    const recipe = recipeAt(p, slotOf(p.uid));
     if (isSource(recipe)) continue;
     if (buildableCount(countKinds(getLots(p.uid)), recipe) >= 1) continue;
     equips.add(p.uid);

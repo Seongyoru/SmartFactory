@@ -27,6 +27,7 @@
 
 import { flowEdges, isSource, outputKindOf, recipeOf } from './bom.js';
 import { beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, setupOf, spacingFor } from './process.js';
+import { recipesOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
 
@@ -87,7 +88,14 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     const lot = lotOf(p, item);
     const setupSec = setupOf(p, item);
     const eff = effectiveCycle(cyc, lot, setupSec);
-    const own = perMinute(eff);
+    /**
+     * **품종이 여럿이면 한 품종의 몫은 그만큼 준다.**
+     *  20개씩 두 품종을 번갈아 만드는 설비는 제작품 1을 「6초에 하나」가 아니라
+     *  **12초에 하나** 낸다 — 절반의 시간은 다른 것을 만든다. 안 나누면 천장이
+     *  두 배로 부풀고, 돌려 본 결과가 절반으로 나온다.
+     */
+    const many = Math.max(1, recipesOf(p).length);
+    const own = perMinute(eff) / many;
     const m = mult.get(p.uid) ?? 1;
     rows.push({
       kind: 'equip',
@@ -96,7 +104,11 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own,
       mult: m,
       capacity: own / m,
-      why: eff > cyc ? `공정 ${cyc}초 + 전환 ${setupSec}초/${lot}개 = ${eff.toFixed(1)}초/개` : `공정 ${cyc}초/개`,
+      why: many > 1
+        ? `공정 ${cyc}초 · 품종 ${many}가지를 번갈아 = 한 품종에 ${(eff * many).toFixed(1)}초/개`
+        : eff > cyc
+          ? `공정 ${cyc}초 + 전환 ${setupSec}초/${lot}개 = ${eff.toFixed(1)}초/개`
+          : `공정 ${cyc}초/개`,
     });
   }
 
