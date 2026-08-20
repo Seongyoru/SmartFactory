@@ -241,7 +241,9 @@ export function lineFlow(d = {}) {
         feeding: !halted.dry?.has?.(b.link.uid),
         /* 만들어 놓은 것만 **덩어리 단위로** 싣는다 — 화면의 onSpawn 그대로다.
            품종이 바뀌는 자리에서는 짧은 덩어리가 나온다(takeBundles). */
-        spawn: (n) => takeBundles(b.owner.uid, per, n),
+        /* 갈래가 잡힌 벨트는 **제 종류만** 집어 간다 (link.js 의 beltKinds).
+           못 싣는 종류는 건너뛴다 — 안 그러면 두 벨트가 함께 선다 */
+        spawn: (n) => takeBundles(b.owner.uid, per, n, b.kinds),
         /* 옛 도면(품종 하나)에서는 줄의 이름표를 쓴다 */
         kind: b.outKind,
       }, dt);

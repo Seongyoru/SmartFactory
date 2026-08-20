@@ -405,22 +405,59 @@ export function takeMade(uid, n) {
  *  @returns { made, kind, count } — `made` 덩어리 각각에 `count` 개.
  *           **한 번에 돌려주는 덩어리는 개수가 모두 같다**(짧은 것은 하나만).
  */
-export function takeBundles(uid, per, want = 1) {
+export function takeBundles(uid, per, want = 1, allow = null) {
   const size = Math.max(1, Math.round(per));
-  const run = madeRun(uid);
+  const run = runFor(uid, allow);
   if (!run.n) return { made: 0, kind: null, count: 0 };
 
   const full = Math.floor(run.n / size);
   if (full > 0) {
     const made = Math.min(Math.max(1, Math.round(want)), full);
-    takeMade(uid, made * size);
+    takeRun(uid, run.at, made * size);
     return { made, kind: run.kind, count: size };
   }
   /* 꽉 찬 덩어리가 없다 — 뒤에 다른 종류가 서 있을 때만 짧게 보낸다 */
-  const closed = run.n < getMade(uid);
-  if (!closed) return { made: 0, kind: null, count: 0 };
-  takeMade(uid, run.n);
+  if (!run.closed) return { made: 0, kind: null, count: 0 };
+  takeRun(uid, run.at, run.n);
   return { made: 1, kind: run.kind, count: run.n };
+}
+
+/**
+ * 이 벨트가 실을 수 있는 **첫 줄**을 찾는다 — 종류 갈래(분기)가 쓴다.
+ * ---------------------------------------------------------------------------
+ *  벨트에 「보낼 종류」를 정해 두면(`link.kinds`) 그 종류만 집어 간다. 앞머리가
+ *  다른 종류라도 **건너뛰고 뒤를 본다** — 안 그러면 갈래를 나눠 놓고도 앞 종류가
+ *  안 빠져서 두 벨트가 함께 선다. 갈래의 뜻이 통째로 사라진다.
+ *
+ *  @returns { kind, at, n, closed } · at 은 그 줄이 시작하는 자리
+ *           closed 는 **그 줄이 더 안 자란다**는 뜻(뒤에 다른 것이 서 있다)
+ */
+function runFor(uid, allow) {
+  const list = made[uid] ?? EMPTY;
+  const ok = Array.isArray(allow) && allow.length ? new Set(allow) : null;
+  let at = 0;
+  while (at < list.length) {
+    const kind = list[at];
+    let n = 1;
+    while (at + n < list.length && list[at + n] === kind) n++;
+    if (!ok || ok.has(kind)) return { kind, at, n, closed: at + n < list.length };
+    at += n;
+  }
+  return { kind: null, at: 0, n: 0, closed: false };
+}
+
+/** 가운데 줄에서 앞쪽 `n` 개를 덜어 낸다 — 갈래가 나뉘면 앞머리가 아닐 수 있다 */
+function takeRun(uid, at, n) {
+  const list = made[uid] ?? EMPTY;
+  const take = Math.max(0, Math.min(n, list.length - at));
+  if (!take) return 0;
+  const rest = [...list.slice(0, at), ...list.slice(at + take)];
+  const next = { ...made };
+  if (rest.length) next[uid] = rest;
+  else delete next[uid];
+  made = next;
+  emit();
+  return take;
 }
 
 export function clearMade(uid = null) {

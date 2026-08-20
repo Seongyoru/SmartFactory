@@ -26,7 +26,7 @@ import {
 } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
-import { linkPath } from './link.js';
+import { beltKinds, linkPath } from './link.js';
 import { lineBalance } from './balance.js';
 import { lineFlow, lineWorld } from './replicate.js';
 import { cartPath, cartStations } from './cart.js';
@@ -108,7 +108,20 @@ export function beltFlowsOf(d = {}) {
              드는 시간이라, 그대로 쓰면 간격이 판 크기만큼 벌어져 벨트가 텅 빈
              채로 돈다(실측: 20개 판에서 천장의 5%만 나왔다) */
           const gap = spacingFor(unitCycleOf(owner, itemOf(owner.itemId)), layers, speed);
-          return { link, path, owner, sink, recipe, outKind, layers, speed, gap };
+          /**
+           * **이 벨트가 실어 갈 종류** — 갈래(divert). 비어 있으면 아무거나다.
+           *  설비가 만드는 것 중에서만 고른다. 안 만드는 종류를 적어 두면
+           *  그 벨트는 영영 아무것도 못 실어 조용히 죽는다.
+           */
+          const own = recipesOf(owner).map((r) => outKindOf(r, itemOf(owner.itemId)));
+          const picked = beltKinds(link).filter((k) => own.includes(k));
+          return {
+            link, path, owner, sink, recipe, outKind, layers, speed, gap,
+            /** null = 아무거나 · [종류…] = 이것만 */
+            kinds: picked.length ? picked : null,
+            /** 이 설비 산출 중 이 벨트가 맡은 몫 — 천장이 쓴다 */
+            share: picked.length ? picked.length / Math.max(1, own.length) : 1,
+          };
         })
         .filter(Boolean)
   );

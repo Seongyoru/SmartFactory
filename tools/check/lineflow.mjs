@@ -163,7 +163,7 @@ t('덩어리를 싣는 규칙이 화면과 같다 — **한 곳에** 있다', ()
   for (const src of [repSrc, sceneSrc]) assert.ok(src.includes('takeBundles('), '덩어리 규칙을 안 쓴다');
   assert.ok(storeSrc.includes('export function takeBundles'), '규칙이 한 곳에 없다');
   /* 자투리를 안 보내면 라인이 통째로 선다 — 실제로 18개에서 멈췄다 */
-  assert.ok(storeSrc.includes('const closed = run.n < getMade(uid);'), '자투리가 영영 안 빠진다');
+  assert.ok(storeSrc.includes('closed: at + n < list.length'), '자투리가 영영 안 빠진다');
 });
 
 const simSrc = await readSrc('core/sim.js');

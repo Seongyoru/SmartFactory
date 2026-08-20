@@ -30,7 +30,8 @@ import {
   batchOf, beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, reworkOf, setupOf,
   spacingFor, unitCycleOf,
 } from './process.js';
-import { recipesOf } from './bom.js';
+import { beltKinds } from './link.js';
+import { outKindOf, recipesOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
 
@@ -55,6 +56,9 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
  *      공정 600초 · 한 판에 20개 = 30.0초/개
  *      공정 2초 · 품종 2가지를 번갈아 = 한 품종에 7.0초/개
  */
+/** 이 설비가 내보내는 종류들 — 품종을 여럿 들면 여럿이다 */
+const outKindsOf = (p, item) => recipesOf(p).map((r) => outKindOf(r, item));
+
 export function whyOf({ cyc, batch = 1, many = 1, lot = 0, setupSec = 0, scrap = 0, reworkSec = 0, eff }) {
   const parts = [`공정 ${cyc}초`];
   if (batch > 1) parts.push(`한 판에 ${batch}개`);
@@ -154,10 +158,23 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     /* 한 번에 내보내는 개수 — 이름이 outputCount 다(process.bundleOf) */
     const layers = bundleOf(from);
     const v = Number(l.speed) > 0 ? Number(l.speed) : beltSpeed;
+    /**
+     * **갈래로 나뉘면 이 벨트가 지는 몫도 나뉜다.**
+     * -----------------------------------------------------------------------
+     *  두 품종을 만드는 설비에서 벨트를 둘로 갈라 하나씩 맡기면, 벨트 하나는
+     *  설비 산출의 절반만 실으면 된다. 그걸 모르면 벨트가 설비 전부를 실어야
+     *  하는 것처럼 봐서 **천장이 절반으로 낮게** 나오고, 그러면 실측이 천장을
+     *  넘는다 — 이 도구가 제일 피해야 하는 그림이다.
+     */
+    /* 이름을 `makes` 로 두면 위쪽 `makes()` 를 가려 TDZ 로 터진다 —
+       이 파일에서 두 번 밟은 함정이다 */
+    const sends = outKindsOf(from, itemOf(from.itemId));
+    const kinds = beltKinds(l).filter((k) => sends.includes(k));
+    const share = kinds.length ? kinds.length / Math.max(1, sends.length) : 1;
     /* 벨트 간격은 **개당** 시간을 본다 — 배치 설비는 한 판을 한꺼번에 내므로
        공정 시간을 그대로 쓰면 간격이 판 크기만큼 벌어진다 */
     const gap = spacingFor(unitCycleOf(from, itemOf(from.itemId)), layers, v);
-    const own = beltPerMinute(gap, v, layers);
+    const own = beltPerMinute(gap, v, layers) / share;
     const m = mult.get(from.uid) ?? 1;
     rows.push({
       kind: 'belt',

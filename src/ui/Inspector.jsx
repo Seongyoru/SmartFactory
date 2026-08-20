@@ -6,7 +6,7 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, FileText, GitCompare, RotateCcw, RotateCw, Table2, Trash2, Wand2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
-import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
+import { MAX_LAYER, beltKinds, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
   CART_MARGIN, STATION_ROLE, cartPath, cartStations, fleetFits, haulPerMinute, isLoadStation,
   idleLoads, pickSet, roleOfStation, stationStyle,
@@ -1172,6 +1172,74 @@ function EquipmentPanel({ placed }) {
   );
 }
 
+/**
+ * 갈래 — **이 벨트로 무엇을 보낼까.**
+ * ---------------------------------------------------------------------------
+ *  한 설비에서 벨트를 둘 이상 빼야 뜻이 있는 칸이다. 하나뿐이면 고를 것이 없다.
+ *  그리고 **품종을 여럿 만드는 설비**에서만 가를 수 있다 — 한 가지만 만드는
+ *  설비에서 갈래를 나누면 그냥 같은 것을 두 길로 보내는 것이다(그것도 되고,
+ *  그때는 아무것도 안 정하면 된다).
+ *
+ *  안 고르면 **아무거나**다 — 지금까지의 동작이라 이미 그린 도면이 안 바뀐다.
+ */
+function DivertSection({ link }) {
+  const { state, dispatch, itemOf } = useEditor();
+  const from = state.placed.find((x) => x.uid === link.from?.uid);
+  const item = from ? itemOf(from.itemId) : null;
+  if (!from || !item) return null;
+
+  /* 이 설비가 내보내는 종류들 — 안 만드는 것을 고르게 두면 그 벨트가 조용히 죽는다 */
+  const makes = [...new Set(recipesOf(from).map((r) => outKindOf(r, item)))];
+  /* 같은 설비에서 나가는 벨트가 여럿일 때만 가를 것이 있다 */
+  const outs = state.links.filter(
+    (l) => l.from?.uid === from.uid && !l.from?.anchor && !l.from?.link
+      && !isUtility(itemOf(l.itemId)) && itemOf(l.itemId)?.render !== 'tube',
+  );
+  if (makes.length < 2 || outs.length < 2) return null;
+
+  const picked = beltKinds(link).filter((k) => makes.includes(k));
+  const toggle = (k) => {
+    const next = picked.includes(k) ? picked.filter((x) => x !== k) : [...picked, k];
+    dispatch({ type: 'UPDATE_LINK', uid: link.uid, patch: { kinds: next } });
+  };
+
+  return (
+    <Section title="갈래">
+      <p className="mb-1.5 text-[10.5px] leading-relaxed text-ink4">
+        <b className="text-ink3">{from.name ?? from.uid}</b> 에서 벨트가 {outs.length}갈래로
+        나갑니다. 이 벨트로 보낼 종류를 고르세요 — 안 고르면 <b>아무거나</b> 싣습니다.
+      </p>
+      <div className="flex flex-wrap gap-1">
+        {makes.map((k) => (
+          <button
+            key={k}
+            onClick={() => toggle(k)}
+            className={`rounded px-1.5 py-0.5 text-[10.5px] ring-1 ${picked.includes(k)
+              ? 'bg-sky-500/15 text-sky-400 ring-sky-500/40'
+              : 'bg-raise text-ink4 ring-edge hover:text-ink2'}`}
+          >
+            {PAYLOAD_ITEMS[k]?.name ?? k}
+          </button>
+        ))}
+      </div>
+      <p className="mt-2 rounded bg-raise px-2 py-1.5 text-[10.5px] leading-relaxed text-ink4 ring-1 ring-edge">
+        {picked.length > 0 ? (
+          <>
+            이 벨트는 <b className="text-ink2">{picked.map((k) => PAYLOAD_ITEMS[k]?.name ?? k).join(' · ')}</b> 만
+            싣습니다. 못 싣는 종류가 앞머리에 있어도 <b className="text-ink2">건너뜁니다</b> —
+            안 그러면 갈래를 나눠 놓고도 두 벨트가 함께 서 버립니다.
+          </>
+        ) : (
+          <>
+            지금은 <b className="text-ink2">먼저 집는 벨트가 가져갑니다.</b> 종류를 정하면
+            그것만 이 길로 흐릅니다.
+          </>
+        )}
+      </p>
+    </Section>
+  );
+}
+
 function LinkPanel({ link }) {
   const { state, dispatch, itemOf } = useEditor();
   const version = useModelsVersion(); // 모델이 늦게 로드돼도 길이가 갱신되도록
@@ -1196,6 +1264,8 @@ function LinkPanel({ link }) {
         <Row label="라이브러리 항목">{item?.name ?? link.itemId}</Row>
         <Row label="연장 방식">{item?.render === 'tube' ? '튜브 (절차적)' : '모델 반복'}</Row>
       </Section>
+
+      <DivertSection link={link} />
 
       <Section title="경로">
         <Row label="총 길이">{path ? `${path.length.toFixed(2)} m` : '—'}</Row>

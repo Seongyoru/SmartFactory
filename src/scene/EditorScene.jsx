@@ -2274,7 +2274,7 @@ function SceneContent() {
       })}
 
       {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차면 서고, 재료가 떨어지면 마른다 */}
-      {beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap }) => (
+      {beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap, kinds }) => (
         <BeltItems
           key={`f${link.uid}`}
           path={path}
@@ -2307,7 +2307,8 @@ function SceneContent() {
                품종이 바뀌는 자리에서는 **짧은 덩어리**가 나온다 — 안 그러면
                자투리가 영영 안 빠져 라인이 통째로 선다(`takeBundles`). */
             const per = Math.max(1, Math.round(owner.outputCount ?? 3));
-            return takeBundles(owner.uid, per, n);
+            /* 갈래가 잡힌 벨트는 **제 종류만** 집어 간다 (link.js 의 beltKinds) */
+            return takeBundles(owner.uid, per, n, kinds);
           }}
           /* 종점에 닿은 것이 곧 재고가 된다 — **종류마다 따로** */
           onArrive={sink ? (byKind) => {
