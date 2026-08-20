@@ -14,6 +14,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { SRC, group, readSrc, t } from './_harness.mjs';
 
 group('흔들림의 모양');
@@ -219,4 +220,45 @@ t('모양 이름이 **무슨 일이 벌어지나**로 적혀 있다', () => {
     assert.ok(s.stat && s.why, `${s.id} 에 설명이 없다`);
     assert.notEqual(s.label, s.stat, `${s.id} 의 이름이 통계 용어다`);
   }
+});
+
+/* ==========================================================================
+ *  **재 본 값이 문서와 같은가**
+ * --------------------------------------------------------------------------
+ *  처음에는 「꼬리 없는 분포로 돌리면 버퍼를 실제보다 작게 잡게 된다」고 적었다.
+ *  재 보니 틀렸다 — **같은 ± 면 균등이 제일 크게 흔들린다.** 그래서 막힘도
+ *  균등이 제일 크다. 꼬리는 「한 개가 얼마나 늦을 수 있나」에 나타난다.
+ *
+ *  문서에 표를 적어 두었으니 **그 표가 계속 사실인지** 여기서 지킨다.
+ * ======================================================================== */
+t('**흔들림 크기는 균등 > 정규 ≈ 로그정규 > 삼각**', () => {
+  const s = (id) => sd(sample(id, 0.5, 80_000));
+  const flat = s('flat');
+  const bell = s('bell');
+  const tail = s('tail');
+  const peak = s('peak');
+  assert.ok(flat > bell, `균등이 정규보다 안 크다 (${flat.toFixed(3)} vs ${bell.toFixed(3)})`);
+  assert.ok(flat > tail, `균등이 로그정규보다 안 크다 (${flat.toFixed(3)} vs ${tail.toFixed(3)})`);
+  assert.ok(peak < bell, `삼각이 정규보다 안 작다 (${peak.toFixed(3)} vs ${bell.toFixed(3)})`);
+  assert.ok(Math.abs(bell - tail) < 0.02, `정규와 로그정규의 폭이 벌어졌다 (${bell.toFixed(3)} vs ${tail.toFixed(3)})`);
+});
+
+t('**꼬리는 「한 개가 얼마나 늦을 수 있나」에 나타난다**', () => {
+  /* 흔들림 크기는 정규와 같은데(위) 최대 배수는 로그정규가 훨씬 크다 —
+     그것이 「가끔 길게」를 따로 두는 이유다. 안전 재고·납기에서 갈린다. */
+  const top = (id) => hi(sample(id, 0.5, 200_000));
+  assert.ok(top('tail') > 2.3, `꼬리가 짧다 (${top('tail').toFixed(2)}배)`);
+  assert.ok(top('tail') > top('bell'), '로그정규가 정규보다 안 길다');
+  assert.ok(top('flat') <= 1.5 + 1e-9 && top('peak') <= 1.5 + 1e-9, '꼬리 없는 것에 꼬리가 있다');
+});
+
+t('재 본 결론이 **문서에 남아 있다** — 값이 바뀌면 같이 고쳐야 한다', () => {
+  const src = readFileSync(new URL('../../src/core/random.js', import.meta.url), 'utf8');
+  assert.ok(src.includes('막힘은 꼬리가 아니라 흔들림의 크기(sd)를 따라간다'),
+    '재 본 결론이 사라졌다');
+  assert.ok(src.includes('재 보니 틀렸다'), '틀렸던 것을 적어 둔 자리가 사라졌다');
+  /* 화면 쪽에는 **틀린 주장이 남아 있으면 안 된다**(고친 이야기가 아니라 주장이다) */
+  assert.equal(/꼬리 없는 분포로 돌리면/.test(inspSrc), false,
+    '화면에 틀린 주장이 남아 있다');
+  assert.ok(inspSrc.includes('막힘은 꼬리가 아니라 흔들림의 크기를 따라간다'), '화면이 재 본 것을 안 적었다');
 });
