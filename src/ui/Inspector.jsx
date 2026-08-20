@@ -935,7 +935,9 @@ function EquipmentPanel({ placed }) {
         </div>
       </Section>
 
-      <RecipeSection placed={placed} item={item} />
+      {/* 설비를 바꾸면 **고른 품종도 처음으로** — key 가 없으면 앞 설비에서
+          2번 품종을 보던 상태가 그대로 남아, 다른 설비의 2번이 열린다 */}
+      <RecipeSection key={placed.uid} placed={placed} item={item} />
 
       <CrewFields placed={placed} />
 
