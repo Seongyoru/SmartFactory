@@ -50,9 +50,16 @@ const links = [
   { uid: 'L1', itemId: 'CONVEYOR', from: { uid: 'P1', portId: 'PORT_OUT@Z-' }, to: { uid: 'ASM', portId: 'PORT_IN@Z+1' }, radius: 0.5, layer: 0, width: 1 },
   { uid: 'L2', itemId: 'CONVEYOR', from: { uid: 'P2', portId: 'PORT_OUT@Z-' }, to: { uid: 'ASM', portId: 'PORT_IN@Z+2' }, radius: 0.5, layer: 0, width: 1 },
 ];
+/**
+ * 검사용 인자. **예산을 넉넉히 못 박는다.**
+ *  탐색은 이제 시간으로 멈추는데(BUDGET_MS 250ms), 이 도면 하나에도 카트가
+ *  끼면 한 걸음에 수십 ms 가 든다. 기본 예산으로 두면 「몇 걸음까지 갔는가」가
+ *  **그날 컴퓨터 사정**에 달리고, 검사가 됐다 안 됐다 한다. 품질을 보는
+ *  검사는 끝까지 돌리고, **예산 자체는 가짜 시계로 따로 본다**(아래).
+ */
 const ctx = (over = {}) => ({
   placed: mk(), links, carts: [], itemOf, specOf, bboxOf, beltSpeed: 0.6,
-  floor, walls: [], pillars: [], lengthOf, ...over,
+  floor, walls: [], pillars: [], lengthOf, budgetMs: 60_000, ...over,
 });
 
 const optSrc = await readSrc('core/optimize.js');
@@ -398,9 +405,40 @@ t('티끌만큼 줄어드는 것은 안 센다 — 사람을 헛수고시킨다'
   assert.ok(optSrc.includes('per > cur * (1 - GAIN_TIE)'), '문턱을 안 쓴다');
 });
 
-t('걸음 수에 천장이 있다 — 스무 번 맞바꾸라는 말은 지시가 아니다', () => {
-  assert.ok(O.MAX_STEPS >= 3 && O.MAX_STEPS <= 12, `천장이 이상하다 (${O.MAX_STEPS})`);
-  assert.equal(O.searchLayout(ctx({ maxSteps: 1 })).steps.length, 1, '천장을 안 지킨다');
+t('**시간**으로 멈춘다 — 걸음 수가 아니라', () => {
+  /* 걸음으로 끊으면 작은 도면에서는 다 못 찾기 전에 멈추고(예전 천장 8 —
+     설비 대여섯 대만 넘으면 매번 걸렸다), 큰 도면에서는 한 걸음이 오래 걸려
+     화면이 언다. 시간으로 끊으면 도면 크기와 상관없이 반응이 일정하다. */
+  let t = 0;
+  const clock = () => t;
+  /* 한 걸음마다 100ms 씩 흐르는 시계 — 예산 250ms 면 세 걸음에서 멈춰야 한다 */
+  const r = O.searchLayout(ctx({ budgetMs: 250, now: () => { t += 100; return t; } }));
+  assert.equal(r.stoppedBy, 'time', `시간으로 안 멈췄다 (${r.stoppedBy})`);
+  assert.ok(r.steps.length >= 1 && r.steps.length <= 4, `걸음 수가 이상하다 (${r.steps.length})`);
+  assert.equal(r.capped, true);
+  void clock;
+});
+
+t('예산이 아무리 빠듯해도 **한 걸음은 둔다**', () => {
+  /* 먼저 시간을 보면 「줄일 것이 없다」로 끝나 버린다 — 손볼 곳이 있는데도 */
+  const r = O.searchLayout(ctx({ budgetMs: 1, now: () => Date.now() * 1e6 }));
+  assert.equal(r.ok, true, `예산이 빠듯하다고 아무것도 안 내놓는다 (${r.why})`);
+  assert.equal(r.steps.length, 1);
+  assert.equal(r.capped, true);
+});
+
+t('**이어서 찾으면 더 줄어든다** — 끊긴 답이 막다른 길이 아니다', () => {
+  const first = O.searchLayout(ctx({ budgetMs: 250, now: (() => { let t = 0; return () => (t += 100); })() }));
+  assert.ok(first.capped, '전제가 무너졌다 — 안 끊겼다');
+  const next = O.searchLayout(ctx({ placed: first.placed }));
+  assert.ok(next.ok && next.after < first.after, `이어 찾아도 안 줄어든다`);
+});
+
+t('안전 상한도 있다 — 예산이 남아도 무한히 안 돈다', () => {
+  assert.ok(O.MAX_STEPS >= 20, `상한이 너무 낮다 (${O.MAX_STEPS}) — 시간으로 멈추는데 걸음이 먼저 걸린다`);
+  const r = O.searchLayout(ctx({ maxSteps: 2 }));
+  assert.equal(r.steps.length, 2);
+  assert.equal(r.stoppedBy, 'steps');
 });
 
 t('「53.2 m → 41.7 m (−22%)」', () => {
@@ -427,9 +465,30 @@ t('거리도 화면과 같은 식으로 잰다', () => {
  * ======================================================================== */
 const insp = await readSrc('ui/Inspector.jsx');
 
-t('화면이 탐색을 실제로 부른다', () => {
+t('화면이 탐색을 **조각으로** 부른다 — 화면이 안 멈춘다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
   assert.ok(insp.includes("from '../core/optimize.js'"), 'optimize 를 안 부른다');
-  assert.ok(insp.includes('setPlan(searchLayout({'), '탐색을 안 돌린다');
+  assert.ok(tidy.includes('searchLayout(argsFor('), '탐색을 안 돌린다');
+  /* 조각 사이에 브라우저가 숨을 쉬어야 한다 */
+  assert.ok(tidy.includes('setTimeout(tick, 0)'), '조각으로 안 자른다 — 큰 도면에서 화면이 언다');
+  /* 앞 조각의 배치를 이어 넘겨야 이어서 찾는 것이 된다 */
+  assert.ok(tidy.includes('acc?.placed ?? state.placed'), '조각마다 처음부터 다시 찾는다');
+  /* 영원히 돌면 안 된다 */
+  assert.ok(/HARD_MS = \d+/.test(tidy), '전체 상한이 없다');
+});
+
+t('조각 결과를 **이어 붙인다** — 처음 값은 첫 조각 것', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes('before: acc.before'), '이어 붙이며 처음 값을 덮어쓴다 — 줄어든 폭이 작아 보인다');
+  assert.ok(tidy.includes('gain: acc.before - part.after'), '줄어든 폭을 조각 것만 센다');
+  assert.ok(tidy.includes('steps: [...acc.steps, ...part.steps]'), '앞 걸음을 잃는다');
+});
+
+t('끊겼으면 **이어서 더 찾기**를 내놓는다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes('이어서 더 찾기'), '더 찾을 길이 없다');
+  assert.ok(tidy.includes('onClick={() => go(plan)}'), '이어서가 아니라 처음부터 다시 찾는다');
+  assert.ok(tidy.includes('아직 더 줄어드는 중입니다'), '왜 멈췄는지 안 말한다');
 });
 
 t('**도면을 마음대로 안 바꾼다** — 적용은 사람이 누른다', () => {
@@ -535,15 +594,12 @@ t('아무것도 못 찾았을 때는 끊은 것이 아니다', () => {
   }
 });
 
-t('화면이 천장을 말한다 · 찾는 동안 말이 있다', () => {
+t('찾는 동안 말이 있다 — 큰 도면은 여러 조각이 걸린다', () => {
   const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
-  assert.ok(tidy.includes('{plan.capped && ('), '천장에 걸린 것을 안 알린다');
-  assert.ok(tidy.includes('여기까지만 찾았습니다'), '문구가 없다');
-  assert.ok(tidy.includes('옮기고 나서 다시 눌러'), '무엇을 하라는지 안 말한다');
-  /* 큰 도면에서 반 초 넘게 멈춘다 — 아무 말이 없으면 눌린 줄도 모른다 */
   assert.ok(tidy.includes("busy ? '찾는 중…'"), '찾는 동안 아무 말이 없다');
   assert.ok(tidy.includes('setBusy(true)') && tidy.includes('setBusy(false)'), '상태를 안 되돌린다');
-  assert.ok(/setTimeout\(\(\) => \{/.test(tidy), '한 틱을 안 쉬어 「찾는 중」이 안 그려진다');
+  /* 조각마다 중간 결과를 그린다 — 기다리는 동안 값이 줄어드는 것이 보인다 */
+  assert.ok(tidy.includes('setPlan(acc);'), '조각 결과를 안 보여 준다 — 다 끝날 때까지 빈 화면이다');
 });
 
 /* ==========================================================================

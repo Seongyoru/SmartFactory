@@ -3434,6 +3434,9 @@ function PlanReportButton() {
  *  커져서, 배치를 나쁘게 고쳐 놓고도(느려져서) 숫자가 줄어 보인다. 개당 거리는
  *  그 착시가 없다 — 배치가 좋아져야만 내려간다.
  */
+/** 걸음 목록을 몇 줄까지 펼칠 것인가 — 나머지는 「… 외 N걸음」 */
+const SHOW_STEPS = 6;
+
 /**
  * **배치 손보기** — 도구가 옮겨 보고 값을 잰다.
  * ---------------------------------------------------------------------------
@@ -3460,37 +3463,76 @@ function Tidy({ per }) {
   if (keyAt !== key) { setKeyAt(key); setPlan(null); }
 
   /**
-   * 큰 도면에서는 반 초 넘게 걸린다(설비 스물한 대에 0.6초). 그동안 화면이
-   * 통째로 멈추는데 아무 말이 없으면 **눌린 줄도 모른다.** 여러 판 탭이
-   * 쓰는 것과 같은 수를 쓴다 — 한 틱 쉬어 「찾는 중…」이 실제로 그려지게 한다.
+   * **잘라서 돌린다.**
+   * -------------------------------------------------------------------------
+   *  예전에는 한 덩어리였다. 설비 스물한 대에 0.6초 동안 화면이 통째로 멈췄고,
+   *  그러고도 걸음 천장(8)에서 **아직 줄어드는 중인데** 끊겼다.
+   *
+   *  이제 `searchLayout` 이 **시간 예산**으로 멈추고 `placed` 를 돌려준다.
+   *  그것을 다음 조각의 입력으로 넘기며 `setTimeout(0)` 사이에 두면 —
+   *
+   *    · 화면이 안 멈춘다 (조각마다 브라우저가 숨을 쉰다)
+   *    · 중간 결과가 바로 보인다 (조각마다 setPlan)
+   *    · 도면이 커져도 **첫 답이 나오는 시간이 같다**
+   *
+   *  전체 상한도 둔다. 언덕이 아주 길면 영원히 도는데, 그때는 사람이 한 번
+   *  적용하고 다시 누르는 편이 낫다 — 중간에 본 값이 이미 쓸 만하기 때문이다.
    */
-  const go = () => {
+  const HARD_MS = 4000;
+
+  const argsFor = (placed) => {
+    const specOf = specReader();
+    return {
+      placed, links: state.links, carts: state.carts,
+      itemOf, specOf, beltSpeed: state.beltSpeed,
+      /* 놓을 수 있는가는 **화면과 같은 판정**이다 — 규칙이 갈리면 못 놓는
+         자리를 답으로 낸다 */
+      bboxOf: (p) => {
+        const it = itemOf(p.itemId);
+        return isShelf(it) ? shelfBBox(p, specOf(it)) : specOf(it)?.bbox ?? null;
+      },
+      floor: floorOf(state.areas), walls: state.walls, pillars: state.pillars,
+      /* 통로 — 카트가 다니는 길 위에는 안 놓는다. 구역 — 사용자가 그어 둔 선을
+         넘지 않는다. 격자 — 옮긴 자리가 손으로 놓은 것과 같은 눈금에 앉는다. */
+      zones: state.zones, grid: state.gridSize,
+      lengthOf: (l, list) => linkPath(l, list, itemOf)?.length ?? 0,
+    };
+  };
+
+  /** 조각 결과를 이어 붙인다 — 처음(before)은 첫 조각 것, 끝(after)은 마지막 것 */
+  const join = (acc, part) => (!acc ? part : {
+    ...part,
+    before: acc.before,
+    gain: acc.before - part.after,
+    steps: [...acc.steps, ...part.steps],
+    tried: acc.tried + part.tried,
+    ms: acc.ms + part.ms,
+  });
+
+  /** `from` 이 있으면 거기서 **이어서** 찾는다 (「더 찾기」) */
+  const go = (from = null) => {
     setBusy(true);
-    setTimeout(() => {
+    let acc = from;
+    const started = Date.now();
+    const tick = () => {
       try {
-        const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
-        setPlan(searchLayout({
-          placed: state.placed, links: state.links, carts: state.carts,
-          itemOf, specOf, beltSpeed: state.beltSpeed,
-          /* 놓을 수 있는가는 **화면과 같은 판정**이다 — 규칙이 갈리면 못 놓는
-             자리를 답으로 낸다 */
-          bboxOf: (p) => {
-            const it = itemOf(p.itemId);
-            return isShelf(it) ? shelfBBox(p, specOf(it)) : specOf(it)?.bbox ?? null;
-          },
-          floor: floorOf(state.areas), walls: state.walls, pillars: state.pillars,
-          /* 통로 — 카트가 다니는 길 위에는 안 놓는다. 구역 — 사용자가 그어 둔 선을
-             넘지 않는다. 격자 — 옮긴 자리가 손으로 놓은 것과 같은 눈금에 앉는다. */
-          zones: state.zones, grid: state.gridSize,
-          lengthOf: (l, list) => linkPath(l, list, itemOf)?.length ?? 0,
-        }));
+        const part = searchLayout(argsFor(acc?.placed ?? state.placed));
+        /* 이어 찾다가 더 줄일 것이 없어지면, 앞서 찾은 것은 그대로 둔다 */
+        if (!part.ok && acc) {
+          setPlan({ ...acc, capped: false, stoppedBy: 'done' });
+          setBusy(false);
+          return;
+        }
+        acc = join(acc, part);
+        setPlan(acc);
+        if (part.capped && Date.now() - started < HARD_MS) { setTimeout(tick, 0); return; }
       } catch (e) {
         console.error('[배치 손보기] 실패', e);
         setPlan(null);
-      } finally {
-        setBusy(false);
       }
-    }, 30);
+      setBusy(false);
+    };
+    setTimeout(tick, 30);
   };
 
   /**
@@ -3593,7 +3635,10 @@ function Tidy({ per }) {
             <b className="text-[11.5px] text-emerald-600">{gainText(plan.before, plan.after)}</b>
           </Row>
           <ol className="mt-1 space-y-0.5">
-            {plan.steps.map((s, k) => (
+            {/* **목록은 증거지 지시가 아니다.** 「이대로 옮기기」가 한 번에
+                적용하므로 사람이 따라 할 것이 아니다. 그래도 마흔 줄을 다
+                펼치면 아래 버튼이 화면 밖으로 밀려나 정작 누를 것이 안 보인다. */}
+            {plan.steps.slice(0, SHOW_STEPS).map((s, k) => (
               <li key={`${s.kind}-${s.a}-${k}`} className="flex items-baseline justify-between gap-2 text-[10.5px]">
                 <span className="min-w-0 truncate text-ink3">
                   <span className="text-ink4">{k + 1}.</span>{' '}
@@ -3609,6 +3654,11 @@ function Tidy({ per }) {
                 <span className="shrink-0 tabular-nums text-ink4">{s.to.toFixed(1)} m</span>
               </li>
             ))}
+            {plan.steps.length > SHOW_STEPS && (
+              <li className="text-[10px] text-ink4">
+                … 외 <b className="text-ink3">{plan.steps.length - SHOW_STEPS}걸음</b>
+              </li>
+            )}
           </ol>
           <button
             type="button" onClick={apply}
@@ -3630,10 +3680,18 @@ function Tidy({ per }) {
             *  같은 종류의 거짓말이라 여기서도 못 박는다.
             */}
           {plan.capped && (
-            <p className="mt-1 text-[9.5px] leading-snug text-amber-600">
-              <b>여기까지만 찾았습니다</b> — {plan.steps.length}번이 한 번에 보는 최대입니다.
-              아직 더 줄어드는 중이었으니, <b>옮기고 나서 다시 눌러</b> 보세요.
-            </p>
+            <div className="mt-1">
+              <p className="text-[9.5px] leading-snug text-amber-600">
+                <b>아직 더 줄어드는 중입니다</b> — {Math.round(plan.ms)}ms 동안 {plan.steps.length}걸음까지
+                찾고 {plan.stoppedBy === 'steps' ? '안전 상한에서' : '시간이 되어'} 멈췄습니다.
+              </p>
+              <button
+                type="button" onClick={() => go(plan)} disabled={busy}
+                className="mt-1 w-full rounded-md bg-raise px-2 py-1 text-[10.5px] text-ink3 ring-1 ring-edge hover:bg-raiseh hover:text-ink disabled:opacity-50"
+              >
+                {busy ? '더 찾는 중…' : '이어서 더 찾기'}
+              </button>
+            </div>
           )}
           <p className="mt-1 text-[9.5px] leading-snug text-ink4">
             <b className="text-ink4">방향도 설정도 그대로</b>입니다. 카트가 다니는 길 위에는 안 놓고,

@@ -55,11 +55,14 @@
  *  **어디로 갈지는 이미 알고 있으므로**(물류가 무거운 상대 쪽) 그 방향으로만
  *  걸어 본다 — `pullSpots` 참고.
  *
+ *  **멈추는 조건은 시간이다**(`BUDGET_MS`). 걸음 수로 끊으면 작은 도면에서는
+ *  다 못 찾기 전에 멈추고, 큰 도면에서는 한 걸음이 오래 걸려 화면이 언다.
+ *  예산을 다 쓰고도 줄어드는 중이면 `capped` 로 알린다 — 부르는 쪽이 `placed` 를
+ *  이어 넘기며 다시 부르면 **이어서 찾는다.** 조각으로 잘라 돌리므로 화면이
+ *  안 멈추고, 도면이 커져도 반응이 일정하다.
+ *
  *  이것은 최적해가 아니라 **손볼 곳**이다. 언덕을 내려가다 골짜기에 걸리면 거기서
- *  멈춘다. 그리고 걸음 수에 천장이 있어서(`MAX_STEPS`) **아직 줄어드는 중인데도
- *  끊는다** — 설비가 대여섯 대만 넘어도 매번 천장에 걸린다. 그래서 결과에
- *  `capped` 를 담아 「더 줄일 것이 없다」와 「여기서 끊었다」를 가른다.
- *  둘을 안 가르면 사람이 다 된 줄 알고 그만둔다.
+ *  멈춘다. 그 사실을 화면이 숨기지 않는다.
  * ---------------------------------------------------------------------------
  */
 
@@ -70,8 +73,32 @@ import { flowMatrix, metersPerUnit } from './flow.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
 import { isTruck } from '../data/library.js';
 
-/** 몇 번까지 손볼 것인가 — 이보다 길면 사람이 따라 하다 만다 */
-export const MAX_STEPS = 8;
+/**
+ * 한 조각을 도는 시간 (ms).
+ * ---------------------------------------------------------------------------
+ *  **멈추는 조건이 「걸음 수」에서 「시간」으로 바뀌었다.** 걸음으로 끊으면 작은
+ *  도면에서는 다 못 찾기 전에 멈추고(설비 대여섯 대만 넘어도 매번 천장에
+ *  걸렸다), 큰 도면에서는 한 걸음이 오래 걸려 화면이 통째로 언다.
+ *
+ *  시간으로 끊으면 도면 크기와 상관없이 **반응이 일정하다.** 그리고 조각으로
+ *  잘라 돌리면 화면이 안 멈춘다 — 부르는 쪽이 조각마다 `placed` 를 이어
+ *  넘기면서 다시 부르면 된다(`ui/Inspector.jsx` 의 Tidy 참고).
+ *
+ *  ── 예산은 **넘을 수 있다** ───────────────────────────────────────────────
+ *  한 걸음(= 후보를 한 바퀴 훑는 것)은 쪼갤 수 없다. 그래서 예산은 「한 걸음
+ *  두고 나서」 본다 — 안 그러면 예산이 빠듯할 때 아무것도 못 찾고 「줄일 것이
+ *  없다」로 끝난다. 설비 서른 대짜리에서는 한 걸음이 380ms 라 첫 조각이
+ *  예산을 넘는다. **예산은 상한이 아니라 「이쯤에서 끊는다」는 눈금**이다.
+ */
+export const BUDGET_MS = 250;
+
+/**
+ * 한 번에 찾는 걸음의 **안전 상한**.
+ *  이제 진짜 멈춤 조건은 시간이다. 이 값은 「예산이 남았는데 무한히 도는」
+ *  경우를 막는 그물이라 넉넉하다 — 예전(8)처럼 사람이 따라 할 목록의 길이가
+ *  아니다. 목록은 「이대로 옮기기」가 한 번에 적용하므로 증거지 지시가 아니다.
+ */
+export const MAX_STEPS = 40;
 
 /** 이만큼도 안 줄면 안 줄어든 것으로 본다 (0.1%) */
 export const GAIN_TIE = 0.001;
@@ -395,10 +422,13 @@ export function searchLayout(d = {}) {
   let placed = d.placed ?? [];
   const names = new Map(placed.map((p) => [p.uid, p.name ?? p.uid]));
   const idx = movableIdx(placed, d);
+  const budget = Math.max(1, d.budgetMs ?? BUDGET_MS);
+  const now = d.now ?? (() => Date.now());              // 검사가 시계를 갈아 끼운다
+  const t0 = now();
   const base = scoreOf(placed, d);
 
-  if (base == null) return { ok: false, why: 'no-flow', before: null, after: null, gain: 0, steps: [], placed, tried: 0, capped: false };
-  if (!idx.length) return { ok: false, why: 'too-few', before: base, after: base, gain: 0, steps: [], placed, tried: 0, capped: false };
+  if (base == null) return { ok: false, why: 'no-flow', before: null, after: null, gain: 0, steps: [], placed, tried: 0, capped: false, stoppedBy: 'done' };
+  if (!idx.length) return { ok: false, why: 'too-few', before: base, after: base, gain: 0, steps: [], placed, tried: 0, capped: false, stoppedBy: 'done' };
 
   const { routes, links } = baseRoutesOf(d);
   /* 통로와 구역은 **지금 도면**에서 한 번만 읽는다 — 후보마다 다시 읽으면 느리고,
@@ -414,6 +444,8 @@ export function searchLayout(d = {}) {
   const steps = [];
   let cur = base;
   let tried = 0;
+  /** 왜 멈췄나 — 'done' 다 줄였다 · 'time' 예산 · 'steps' 안전 상한 */
+  let stopped = '';
 
   /** 이 후보가 실제로 나은가 — 재 보고 점수를 돌려준다 (안 되면 null) */
   const weigh = (next, moved) => {
@@ -479,11 +511,15 @@ export function searchLayout(d = {}) {
       }
     }
 
-    if (!best) break;
+    if (!best) break;                                   // 더 줄일 것이 없다
     steps.push(best.step);
     placed = best.next;
     cur = best.per;
+    /* **한 걸음은 반드시 두고 나서** 예산을 본다 — 먼저 보면 예산이 빠듯할 때
+       아무것도 못 찾고 「줄일 것이 없다」로 끝난다 */
+    if (now() - t0 >= budget) { stopped = 'time'; break; }
   }
+  if (!stopped && steps.length >= (d.maxSteps ?? MAX_STEPS)) stopped = 'steps';
 
   return {
     ok: steps.length > 0,
@@ -494,9 +530,13 @@ export function searchLayout(d = {}) {
     steps,
     placed,
     tried,
-    /* 천장에 걸렸으면 아직 줄어드는 중이었다는 뜻이다 — 한 걸음도 못 찾고
-       멈춘 것과는 다른 말이라 화면이 갈라서 말해야 한다 */
-    capped: steps.length >= (d.maxSteps ?? MAX_STEPS),
+    /* **「다 줄였다」와 「여기서 끊었다」는 다른 말이다.** 끊었으면 아직
+       줄어드는 중이었다는 뜻이라, 부르는 쪽이 `placed` 를 이어 넘겨
+       다시 부르면 이어서 찾는다. 화면도 그렇게 말해야 한다. */
+    capped: stopped !== '',
+    stoppedBy: stopped || 'done',
+    /** 이 조각에 든 시간 (ms) — 화면이 「얼마나 뒤졌는지」를 말한다 */
+    ms: now() - t0,
   };
 }
 
