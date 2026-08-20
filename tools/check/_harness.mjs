@@ -37,8 +37,15 @@ export const ROOT = path.resolve(HERE, '..', '..');
 /** `import(SRC + 'core/bom.js')` 처럼 쓴다. Windows 드라이브 문자도 제대로 처리된다 */
 export const SRC = `${pathToFileURL(path.join(ROOT, 'src')).href}/`;
 
-/** 소스를 글자로 읽는다 (JSX 에서 블록을 떼어 낼 때) */
-export const readSrc = (rel) => readFile(path.join(ROOT, 'src', rel), 'utf8');
+/**
+ * 소스를 글자로 읽는다 (JSX 에서 블록을 떼어 낼 때).
+ *
+ *  **줄바꿈을 LF 로 맞춘다.** 이 저장소의 파일은 CRLF 인데, 체크아웃 설정에
+ *  따라 LF 로 오기도 한다. 줄바꿈을 박아 둔 cut() 이 그 차이로 됐다 안 됐다
+ *  했다 — **검사가 git 설정에 달리면 안 된다.**
+ */
+export const readSrc = async (rel) =>
+  (await readFile(path.join(ROOT, 'src', rel), 'utf8')).split('\r\n').join('\n');
 
 /**
  * 소스에서 한 토막을 떼어 낸다.

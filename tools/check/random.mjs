@@ -195,11 +195,13 @@ t('모양이 굴리는 쪽까지 간다', () => {
 });
 
 t('**화면과 헤드리스가 같은 값을 넘긴다**', () => {
-  /* 갈리면 눈으로 본 라인과 여러 판이 돌린 라인이 달라진다 */
-  for (const src of [lineupSrc, sceneSrc]) {
-    assert.ok(/repairVar/.test(src), '수리 편차를 안 넘긴다');
-    assert.ok(/shape:/.test(src), '모양을 안 넘긴다');
-  }
+  /* 갈리면 눈으로 본 라인과 여러 판이 돌린 라인이 달라진다.
+     `/shape:/` 로 보면 안 된다 — 이 파일에는 **구역의 shape** 도 있어서
+     고장 쪽을 통째로 지워도 통과한다(되돌리기 테스트로 확인했다). */
+  assert.ok(lineupSrc.includes('shape: m.shape'), '헤드리스가 모양을 안 넘긴다');
+  assert.ok(lineupSrc.includes('repairVar: m.at?.repairVar'), '헤드리스가 수리 편차를 안 넘긴다');
+  assert.ok(sceneSrc.includes('shape: varShapeOf(p, itemOf(p.itemId))'), '화면이 모양을 안 넘긴다');
+  assert.ok(sceneSrc.includes('repairVar: p.repairVar ?? FAULT_DEFAULTS.repairVar'), '화면이 수리 편차를 안 넘긴다');
 });
 
 t('화면이 모양을 고르게 해 준다 — 그리고 **평균은 같다**고 말한다', () => {
