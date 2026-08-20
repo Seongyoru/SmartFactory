@@ -3612,8 +3612,12 @@ function Tidy({ per }) {
 
   return (
     <div className="mt-2 border-t border-line pt-2">
+      {/* 이벤트 핸들러에 go 를 **그대로** 걸면 안 된다 — React 가 클릭 이벤트를
+          첫 인자로 넘겨 「이어서 찾기」 자리(from)에 이벤트가 들어간다. 그러면
+          앞 조각을 이어 붙이는 코드가 이벤트를 배치로 알고 **조용히 망가진다** —
+          값이 NaN 이 되고 아무것도 안 그려진다. 브라우저에 띄워 보고 알았다. */}
       <button
-        type="button" onClick={go} disabled={busy}
+        type="button" onClick={() => go()} disabled={busy}
         className="flex w-full items-center justify-center gap-1.5 rounded-md bg-raise px-2 py-1 text-[11px] text-ink2 ring-1 ring-edge hover:bg-raiseh hover:text-ink disabled:opacity-50"
       >
         <Wand2 size={12} /> {busy ? '찾는 중…' : '배치 손보기'}
