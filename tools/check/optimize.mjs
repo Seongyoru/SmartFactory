@@ -20,6 +20,7 @@ const O = await import(SRC + 'core/optimize.js');
 const A = await import(SRC + 'core/area.js');
 const Lk = await import(SRC + 'core/link.js');
 const Sh = await import(SRC + 'core/shelf.js');
+const G = await import(SRC + 'core/grid.js');
 
 await loadModels(['MACHINE_1', 'MACHINE_2', 'STILLAGE', 'CONVEYOR']);
 
@@ -65,15 +66,6 @@ t('개당 거리를 잰다 — 화면과 같은 식으로', () => {
   assert.equal(O.scoreOf(mk(), ctx({ links: [] })), null, '벨트가 없는데 점수가 나온다');
 });
 
-t('맞바꿔서 줄어드는 배치를 찾는다', () => {
-  const r = O.searchLayout(ctx());
-  assert.ok(r.ok, `줄일 것을 못 찾았다 (${r.why})`);
-  assert.ok(r.after < r.before, '더 나빠졌다');
-  /* 첫 손질은 **많이 쓰는 제작기를 가까운 자리로** 여야 한다 */
-  assert.deepEqual([r.steps[0].a, r.steps[0].b].sort(), ['P1', 'P2']);
-  assert.ok(r.gain > r.before * 0.2, `줄어든 폭이 너무 작다 (${r.gain.toFixed(1)})`);
-});
-
 t('돌려도 같은 답이 나온다 — 씨앗도 난수도 없다', () => {
   const a = O.searchLayout(ctx());
   const b = O.searchLayout(ctx());
@@ -81,18 +73,133 @@ t('돌려도 같은 답이 나온다 — 씨앗도 난수도 없다', () => {
   assert.equal(a.after, b.after);
 });
 
-t('내놓은 배치가 실제로 그 점수다 — 걸음을 따라가면 나온다', () => {
-  /* 목록만 맞고 결과 배치가 다르면, 사람이 시킨 대로 했는데 값이 안 나온다 */
+t('맞바꾸기와 당기기를 **섞어서** 줄인다', () => {
   const r = O.searchLayout(ctx());
-  assert.ok(Math.abs(O.scoreOf(r.placed, ctx()) - r.after) < 1e-9, '적용한 배치의 점수가 다르다');
+  assert.ok(r.ok, `줄일 것을 못 찾았다 (${r.why})`);
+  assert.ok(r.after < r.before, '더 나빠졌다');
+  /* 빈 자리로 옮길 수 있으면 맞바꾸기만 할 때보다 훨씬 더 줄어든다.
+     맞바꾸기만 돌리던 시절의 답이 69.9 m 였다. */
+  assert.ok(r.after < 40, `당기기가 일을 안 한다 (${r.after.toFixed(1)} m)`);
+  assert.ok(r.steps.some((s) => s.kind === 'slide'), '당기기를 한 번도 안 골랐다');
+});
 
+t('당기기 걸음은 **말로 옮길 수 있다** — 누구를 어디로 몇 미터', () => {
+  const r = O.searchLayout(ctx());
+  const slide = r.steps.find((s) => s.kind === 'slide');
+  assert.ok(slide.aName, '누구를 옮기는지 안 적었다');
+  assert.ok(slide.towardName, '어디로 당기는지 안 적었다');
+  assert.ok(slide.dist > 0, '몇 미터인지 안 적었다');
+  /* 그리드에 맞춰 돌려준다 — 그대로 놓을 수 있어야 한다 */
+  for (const v of slide.pos) assert.equal(Math.round(v / 0.25) * 0.25, v, `격자에 안 맞는다 (${v})`);
+});
+
+t('맞바꾸기 쪽이 나으면 맞바꾼다 — 당기기가 다 먹지 않는다', () => {
+  /* 자리가 꽉 차 옮길 데가 없으면 맞바꾸기밖에 없다. 그때도 답이 나와야 한다. */
+  const tight = mk().map((p) => ({ ...p, pos: [p.pos[0], p.pos[1]] }));
+  const boxed = A.rectMP([-6, -11], [6, 19]);          // 딱 세 대만 들어가는 바닥
+  const r = O.searchLayout(ctx({ placed: tight, floor: boxed }));
+  assert.ok(r.ok, '좁은 바닥에서 아무것도 못 한다');
+  assert.ok(r.after < r.before);
+});
+
+t('걸음을 따라가면 내놓은 배치가 나온다 (맞바꾸기 · 당기기 둘 다)', () => {
+  const r = O.searchLayout(ctx());
   let cur = mk();
   for (const s of r.steps) {
-    cur = O.swapped(cur, cur.findIndex((p) => p.uid === s.a), cur.findIndex((p) => p.uid === s.b));
+    if (s.kind === 'swap') {
+      cur = O.swapped(cur, cur.findIndex((p) => p.uid === s.a), cur.findIndex((p) => p.uid === s.b));
+    } else {
+      cur = cur.map((p) => (p.uid === s.a ? { ...p, pos: s.pos } : p));
+    }
   }
   assert.deepEqual(cur.map((p) => [p.uid, ...p.pos]), r.placed.map((p) => [p.uid, ...p.pos]),
-    '걸음대로 맞바꾼 결과가 내놓은 배치와 다르다');
+    '걸음대로 옮긴 결과가 내놓은 배치와 다르다');
+  assert.ok(Math.abs(O.scoreOf(r.placed, ctx()) - r.after) < 1e-9, '적용한 배치의 점수가 다르다');
 });
+
+t('옮길 것이 하나도 없으면 아무 말도 안 한다', () => {
+  assert.equal(O.searchLayout(ctx({ movable: () => false })).why, 'too-few');
+});
+
+/* ---------- 통로 --------------------------------------------------------- */
+const AISLE_CART = [{
+  uid: 'C0', name: '통로', itemId: 'CART', speed: 2, dwell: 1, closed: true,
+  points: [[-12, 4], [12, 4], [12, 12], [-12, 12]],
+}];
+
+t('경로를 점으로 펴 둔다 — 후보마다 다시 훑지 않는다', () => {
+  const pts = O.aislePoints(AISLE_CART);
+  assert.ok(pts.length > 100, `너무 성기다 (${pts.length}개)`);
+  /* 성기면 설비 한 대가 두 점 사이로 빠져나간다 */
+  let gap = 0;
+  for (let i = 1; i < pts.length; i++) {
+    gap = Math.max(gap, Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+  }
+  assert.ok(gap < 0.25, `점 사이가 벌어져 설비가 빠져나간다 (${gap.toFixed(2)} m)`);
+});
+
+t('**길 위에 물건을 놓지 않는다**', () => {
+  const pts = O.aislePoints(AISLE_CART);
+  const on = { minX: -1.4, maxX: 1.4, minZ: 2.1, maxZ: 5.9 };      // 경로(z=4) 한복판
+  const off = { minX: -1.4, maxX: 1.4, minZ: -5.9, maxZ: -2.1 };
+  assert.equal(O.blocksAisle(on, pts), true, '경로 위에 놓을 수 있다고 한다');
+  assert.equal(O.blocksAisle(off, pts), false, '경로에서 먼 자리까지 막는다');
+});
+
+t('여유(margin)는 **0 이 기본**이다 — 두면 정차역이 사라진다', () => {
+  /* 정차역은 경로가 설비 포트 1 m 안을 지나야 생기고, 포트는 바운딩 박스
+     **안쪽**에 박혀 있다. 여유를 1 m 로 두면 정상 배치가 전부 불법이 된다. */
+  assert.equal(O.AISLE_MARGIN, 0);
+  assert.ok(optSrc.includes('STATION_DIST'), '왜 0 인지가 코드에 안 적혀 있다');
+});
+
+t('탐색이 설비를 경로 위로 안 옮긴다', () => {
+  /* 조립기를 제작기 쪽으로 당기면 경로(z=4)를 밟는 자리가 나온다.
+     통로를 안 보면 거기로 간다. */
+  const d = ctx({ carts: AISLE_CART });
+  const r = O.searchLayout(d);
+  const pts = O.aislePoints(AISLE_CART);
+  for (const p of r.placed) {
+    const bbox = bboxOf(p);
+    if (!bbox) continue;
+    const f = G.footprintOf({ ...p, bboxOverride: bbox }, null);
+    assert.equal(O.blocksAisle(f, pts), false, `${p.name} 이 경로 위에 있다`);
+  }
+});
+
+/* ---------- 구역 --------------------------------------------------------- */
+t('구역을 그렸으면 그 안에 머문다', () => {
+  /* 제작기 A(-4,16)만 감싸는 구역. 이 설비는 아무리 좋아 보여도 못 나간다. */
+  const zones = [{ uid: 'Z1', name: '제작 구역', mp: A.rectMP([-10, 10], [2, 22]) }];
+  const d = ctx({ zones });
+  const home = O.zoneHome(d);
+  assert.equal(home.get('P1')?.uid, 'Z1', '구역 안에 있는 설비를 못 알아본다');
+  assert.equal(home.has('ASM'), false, '구역 밖 설비까지 묶는다');
+
+  const r = O.searchLayout(d);
+  const p1 = r.placed.find((p) => p.uid === 'P1');
+  const f = G.footprintOf({ ...p1, bboxOverride: bboxOf(p1) }, null);
+  assert.ok(f.minX >= -10 && f.maxX <= 2 && f.minZ >= 10 && f.maxZ <= 22,
+    `제작기 A 가 구역 밖으로 나갔다 (${JSON.stringify(p1.pos)})`);
+});
+
+t('구역에 걸쳐 있거나 밖에 있던 것은 안 묶는다', () => {
+  /* 원래 자유롭던 것을 묶으면, 구역 하나 그었다고 딴 데가 굳는다 */
+  const zones = [{ uid: 'Z1', name: '반쯤', mp: A.rectMP([-4, 14], [20, 22]) }];
+  assert.equal(O.zoneHome(ctx({ zones })).size, 0, '걸쳐 있는 설비를 묶었다');
+});
+
+/* ---------- 얼마나 걸리나 ------------------------------------------------ */
+t('후보를 무한정 안 뒤진다 — 화면이 멈추면 안 쓴다', () => {
+  const t0 = Date.now();
+  const r = O.searchLayout(ctx());
+  const ms = Date.now() - t0;
+  assert.ok(ms < 2000, `${ms}ms 나 걸린다`);
+  /* 빈 자리를 전부 훑으면 수만 자리다. 당기는 방향으로만 걸어 본다 */
+  assert.ok(r.tried < 3000, `후보가 너무 많다 (${r.tried})`);
+  assert.ok(O.PULL_STEPS <= 12, '너무 멀리까지 당겨 본다');
+});
+
 
 t('회전은 안 건드린다 — 「맞바꾸세요」 한 마디로 끝나야 한다', () => {
   const r = O.searchLayout(ctx());
@@ -239,10 +346,6 @@ t('줄일 것이 없으면 **없다고 한다** — 억지로 안 내놓는다',
   assert.equal(done.gain, 0);
 });
 
-t('옮길 것이 하나뿐이면 맞바꿀 상대가 없다', () => {
-  assert.equal(O.searchLayout(ctx({ movable: (p) => p.uid === 'P1' })).why, 'too-few');
-});
-
 t('티끌만큼 줄어드는 것은 안 센다 — 사람을 헛수고시킨다', () => {
   assert.ok(O.GAIN_TIE > 0 && O.GAIN_TIE < 0.05, `문턱이 이상하다 (${O.GAIN_TIE})`);
   assert.ok(optSrc.includes('per > cur * (1 - GAIN_TIE)'), '문턱을 안 쓴다');
@@ -325,4 +428,26 @@ t('**처리량은 안 바뀐다**는 것을 못 박아 말한다', () => {
   /* 안 적으면 「배치를 손봤는데 왜 처리량이 그대로냐」가 된다 */
   assert.ok(insp.includes('처리량은 안 바뀝니다.'), '기대를 안 맞춰 준다');
   assert.ok(insp.includes('최선이라는 보장은 없습니다.'), '언덕 내려가기라는 것을 안 말한다');
+});
+
+t('화면이 **통로와 구역까지** 넘긴다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes('zones: state.zones'), '구역을 안 넘긴다 — 그어 둔 선을 넘어간다');
+  assert.ok(tidy.includes('grid: state.gridSize'), '격자를 안 넘긴다 — 손으로 놓은 것과 눈금이 어긋난다');
+  /* 통로는 카트에서 나온다 — carts 를 넘기고 있으면 된다 */
+  assert.ok(tidy.includes('carts: state.carts'), '카트를 안 넘긴다 — 통로를 모른다');
+});
+
+t('걸음 목록이 **당기기도** 그린다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes("s.kind === 'swap'"), '두 수를 안 가른다');
+  assert.ok(tidy.includes('{s.towardName}'), '어디로 당기는지 안 적는다');
+  assert.ok(tidy.includes('{s.dist.toFixed(1)} m'), '몇 미터인지 안 적는다');
+});
+
+t('적용이 당기기까지 옮긴다 — 결과 배치를 통째로 쓴다', () => {
+  /* 걸음을 다시 해석하지 않는다. 탐색이 내놓은 placed 를 그대로 넣으므로
+     맞바꾸기든 당기기든 한 길로 적용된다. */
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes('plan.placed.map((p) => ({ uid: p.uid, pos: p.pos }))'), '결과 배치를 안 쓴다');
 });

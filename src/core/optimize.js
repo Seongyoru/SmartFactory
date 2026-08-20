@@ -46,7 +46,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import { footprintOf, outOfBounds, rectsOverlap } from './grid.js';
+import { footprintOf, outOfBounds, rectsOverlap, snapPoint } from './grid.js';
 import { hitsObstacle, rectInFloor } from './area.js';
 import { lineBalance } from './balance.js';
 import { flowMatrix, metersPerUnit } from './flow.js';
@@ -64,6 +64,23 @@ export const GAIN_TIE = 0.001;
  *  못 재면 null 이다(오가는 것이 없는 도면). null 은 「좋다」가 아니라
  *  「모른다」라서, 부르는 쪽이 후보에서 빼야 한다.
  */
+/**
+ * 이 배치의 **오가는 구간 표**. `scoreOf` 와 당기기가 같은 표를 본다 —
+ * 갈리면 「이쪽으로 당기면 좋다」고 해 놓고 점수는 다른 것을 재게 된다.
+ */
+export function flowRowsOf(placed, d = {}) {
+  const itemOf = d.itemOf ?? (() => null);
+  const bal = lineBalance({
+    placed, links: d.links ?? [], carts: d.carts ?? [], itemOf, specOf: d.specOf, beltSpeed: d.beltSpeed,
+  });
+  if (!(bal.capacity > 0)) return [];
+  return flowMatrix({
+    rows: bal.rows, capacity: bal.capacity, placed,
+    links: d.links ?? [], carts: d.carts ?? [],
+    lengthOf: (l) => d.lengthOf?.(l, placed) ?? 0,
+  }, itemOf);
+}
+
 export function scoreOf(placed, d = {}) {
   const itemOf = d.itemOf ?? (() => null);
   const bal = lineBalance({
@@ -112,6 +129,12 @@ export function placeOk(next, moved, d = {}) {
     if (outOfBounds(me.rect)) return false;
     if (d.floor && !rectInFloor(me.rect, d.floor)) return false;
     if (hitsObstacle(me.rect, { walls: d.walls ?? [], pillars: d.pillars ?? [] })) return false;
+    /* **길 위에 물건을 놓지 마라.** 맞바꾸기만 할 때는 없어도 됐다 —
+       자리가 서로 바뀔 뿐이었으니까. 빈 자리로 옮기기 시작하면 다르다. */
+    if (d.aisle?.length && blocksAisle(me.rect, d.aisle, d.aisleMargin)) return false;
+    /* 사용자가 「여기는 조립 구역」이라고 그어 둔 선을 넘지 않는다 */
+    const home = d.home?.get(uid);
+    if (home?.mp && !rectInFloor(me.rect, home.mp)) return false;
     for (const other of rects) {
       if (other.uid === uid || !other.rect) continue;
       if (rectsOverlap(me.rect, other.rect)) return false;
@@ -188,16 +211,165 @@ const movableIdx = (placed, d) => {
   return out;
 };
 
+/* ==========================================================================
+ *  통로 — **경로 위에 설비를 얹지 않는다**
+ * --------------------------------------------------------------------------
+ *  맞바꾸기만 할 때는 이 판정이 없어도 됐다. 자리가 서로 바뀔 뿐이라, 원래
+ *  경로가 지나던 자리에는 원래 다른 설비가 있었기 때문이다. **빈 자리로 옮기기
+ *  시작하면 다르다** — 카트가 다니던 길 한복판에 설비를 세울 수 있다.
+ *
+ *  ── 여유(clearance)를 두면 안 된다 ────────────────────────────────────────
+ *  「경로 양옆 1 m 를 비운다」 같은 규칙이 자연스러워 보이는데, 이 도구에서는
+ *  **틀린 규칙**이다. 정차역은 경로가 설비 포트 1 m 안(`STATION_DIST`)을 지나야
+ *  생기고, 포트는 설비 바운딩 박스 **안쪽**에 박혀 있다. 실제로 멀쩡히 도는
+ *  도면에서 재 보면 경로가 풋프린트 바깥 0.2 m 를 지난다 — 여유를 1 m 로 두는
+ *  순간 **정상 배치가 전부 불법**이 되고 역이 통째로 사라진다.
+ *
+ *  지켜야 하는 것은 하나다. **길 위에 물건을 놓지 마라.**
+ *  그래서 기본 여유는 0 이고, 판정은 「경로 중심선이 풋프린트 안으로 들어가는가」다.
+ * ======================================================================== */
+
+/** 통로 여유 (m). 0 = 경로 위에만 안 놓으면 된다 — 위 설명 참고 */
+export const AISLE_MARGIN = 0;
+
+/** 경로를 훑는 간격 — 설비 한 칸(0.25m 그리드)보다 촘촘해야 새지 않는다 */
+const WALK = 0.2;
+
+/**
+ * 카트 경로들을 **점으로 펴 둔다.** 후보마다 경로를 다시 훑으면 탐색이 느려진다.
+ *  @returns [[x, z], …]
+ */
+export function aislePoints(carts = []) {
+  const out = [];
+  for (const c of carts ?? []) {
+    const path = cartPath(c);
+    if (!path) continue;
+    const n = Math.max(2, Math.ceil(path.length / WALK));
+    for (let k = 0; k <= n; k++) {
+      const f = path.at((path.length * k) / n);
+      out.push([f.pos[0], f.pos[2]]);
+    }
+  }
+  return out;
+}
+
+/** 이 사각형이 통로를 막는가 */
+export function blocksAisle(rect, points = [], margin = AISLE_MARGIN) {
+  for (const [x, z] of points) {
+    if (x > rect.minX - margin && x < rect.maxX + margin
+      && z > rect.minZ - margin && z < rect.maxZ + margin) return true;
+  }
+  return false;
+}
+
+/* ==========================================================================
+ *  구역 — 사용자가 「여기는 조립 구역」이라고 그어 둔 선
+ * --------------------------------------------------------------------------
+ *  구역을 그렸다면 그것은 **도면에 적힌 뜻**이다. 조립 구역에 있던 설비가
+ *  포장 구역으로 건너가면 값이 좋아져도 그 도면은 사용자의 것이 아니다.
+ *  그래서 **지금 어느 구역 안에 온전히 들어 있는 설비는 그 구역 안에 머문다.**
+ *  구역에 걸쳐 있거나 구역 밖에 있던 것은 원래 자유롭던 것이니 안 묶는다.
+ * ======================================================================== */
+
+/** uid → 머물러야 할 구역의 mp (없으면 안 담는다) */
+export function zoneHome(d = {}) {
+  const home = new Map();
+  for (const p of d.placed ?? []) {
+    const rect = rectOf(p, d);
+    if (!rect) continue;
+    for (const z of d.zones ?? []) {
+      if (z.mp && rectInFloor(rect, z.mp)) { home.set(p.uid, z); break; }
+    }
+  }
+  return home;
+}
+
+/* ==========================================================================
+ *  당기기 — **무거운 상대 쪽으로** 옮겨 본다
+ * --------------------------------------------------------------------------
+ *  빈 자리를 전부 훑으면 60 × 60 m 바닥에 0.5 m 격자만 해도 14,400 자리다.
+ *  설비 여섯 대면 한 바퀴에 8만 번 넘게 재야 하고, 화면이 멈춘다.
+ *
+ *  **어디로 갈지는 이미 알고 있다.** 물류가 무거운 상대 쪽이다. 그래서 그
+ *  방향으로만 걸어 본다 — 무게중심까지의 직선을 몇 걸음으로 나누고, 길이 막혀
+ *  있을 때를 위해 양옆으로 조금씩 벌린 자리도 함께 본다. 설비당 스물 몇 자리면
+ *  끝나고, 나온 답은 **말로 옮길 수 있다** — 「조립기 쪽으로 3.5 m」.
+ * ======================================================================== */
+
+/** 몇 걸음까지 당겨 보나 · 한 걸음 (m) */
+export const PULL_STEPS = 8;
+export const PULL_STEP = 1.0;
+/** 길이 막혔을 때 옆으로 비켜 보는 폭 (m) */
+const SIDE = [0, 1.5, -1.5];
+
+/**
+ * 이 설비를 **어디로 당길 것인가** — 오가는 무게로 잰 상대들의 중심.
+ *  @returns { at: [x, z], name } · 당길 데가 없으면 null
+ */
+export function pullTarget(uid, rows = [], placed = []) {
+  const posOf = new Map(placed.map((p) => [p.uid, p.pos]));
+  let wx = 0;
+  let wz = 0;
+  let sum = 0;
+  let top = null;
+  for (const r of rows) {
+    const other = r.from === uid ? r.to : r.to === uid ? r.from : null;
+    if (!other) continue;
+    const at = posOf.get(other);
+    if (!at || !(r.work > 0)) continue;
+    wx += at[0] * r.work;
+    wz += at[1] * r.work;
+    sum += r.work;
+    if (!top || r.work > top.work) top = { work: r.work, name: r.from === uid ? r.toName : r.fromName };
+  }
+  if (!(sum > 0)) return null;
+  return { at: [wx / sum, wz / sum], name: top?.name ?? null };
+}
+
+/**
+ * 당겨 볼 자리들. 격자에 맞춰 돌려주므로 그대로 놓아도 된다.
+ *  @returns [{ pos, dist }]
+ */
+export function pullSpots(from, target, grid = 0.25) {
+  const dx = target[0] - from[0];
+  const dz = target[1] - from[1];
+  const len = Math.hypot(dx, dz);
+  if (!(len > 1e-6)) return [];
+  const ux = dx / len;
+  const uz = dz / len;
+  const out = [];
+  for (let k = 1; k <= PULL_STEPS; k++) {
+    const step = Math.min(k * PULL_STEP, len);
+    for (const side of SIDE) {
+      /* 옆으로 비키는 방향은 진행 방향의 직각이다 */
+      const x = from[0] + ux * step - uz * side;
+      const z = from[1] + uz * step + ux * side;
+      out.push({ pos: snapPoint([x, z], grid), dist: step });
+    }
+    if (step >= len) break;                      // 상대를 지나쳐 갈 이유는 없다
+  }
+  return out;
+}
+
 /**
  * 손볼 곳을 찾는다.
+ * ---------------------------------------------------------------------------
+ *  두 가지 수를 섞어 본다.
+ *
+ *    **맞바꾸기** 설비 둘의 자리를 바꾼다 — 「어느 자리에 무엇을 둘까」
+ *    **당기기**   빈 자리로 옮긴다 — 「무거운 상대 쪽으로 몇 미터」
+ *
+ *  한 바퀴에 둘을 다 재고 **가장 많이 줄어드는 하나**를 고른다(steepest descent).
+ *  섞는 이유가 있다 — 맞바꾸기만 하면 자리가 부족한 도면에서 아무것도 못 하고,
+ *  당기기만 하면 「A 와 B 를 통째로 바꾸면 되는」 자리를 못 본다.
  *
  *  @returns {
  *    ok       줄일 것을 찾았는가
  *    why      못 찾았으면 이유 ('no-flow' | 'too-few' | 'none')
  *    before   지금 개당 거리 · after 손본 뒤 · gain 줄어든 만큼 (m/개)
- *    steps    [{ a, b, aName, bName, from, to }] — **이 순서대로** 맞바꾼다
+ *    steps    [{ kind:'swap'|'slide', … }] — **이 순서대로** 옮긴다
  *    placed   다 적용한 배치 (그대로 상태에 넣으면 된다)
- *    tried    후보를 몇 개나 재 봤는가 (화면이 「얼마나 뒤졌는지」를 말한다)
+ *    tried    후보를 몇 개나 재 봤는가
  *  }
  */
 export function searchLayout(d = {}) {
@@ -207,17 +379,38 @@ export function searchLayout(d = {}) {
   const base = scoreOf(placed, d);
 
   if (base == null) return { ok: false, why: 'no-flow', before: null, after: null, gain: 0, steps: [], placed, tried: 0 };
-  if (idx.length < 2) return { ok: false, why: 'too-few', before: base, after: base, gain: 0, steps: [], placed, tried: 0 };
+  if (!idx.length) return { ok: false, why: 'too-few', before: base, after: base, gain: 0, steps: [], placed, tried: 0 };
 
   const { routes, links } = baseRoutesOf(d);
-  const ctx = { ...d, baseRoutes: routes, baseLinks: links };
+  /* 통로와 구역은 **지금 도면**에서 한 번만 읽는다 — 후보마다 다시 읽으면 느리고,
+     무엇보다 「사용자가 그어 둔 선」이라 후보에 따라 달라질 값이 아니다 */
+  const ctx = {
+    ...d,
+    baseRoutes: routes,
+    baseLinks: links,
+    aisle: d.aisle ?? aislePoints(d.carts),
+    home: d.home ?? zoneHome(d),
+  };
 
   const steps = [];
   let cur = base;
   let tried = 0;
 
+  /** 이 후보가 실제로 나은가 — 재 보고 점수를 돌려준다 (안 되면 null) */
+  const weigh = (next, moved) => {
+    if (!placeOk(next, moved, ctx)) return null;
+    if (!routesOk(next, ctx)) return null;
+    tried++;
+    const per = scoreOf(next, ctx);
+    if (per == null) return null;
+    /* 티끌만큼 줄어든 것은 안 줄어든 것으로 본다 — 사람을 헛수고시킨다 */
+    return per > cur * (1 - GAIN_TIE) ? null : per;
+  };
+
   for (let round = 0; round < (d.maxSteps ?? MAX_STEPS); round++) {
     let best = null;
+
+    /* ---- 맞바꾸기 ---- */
     for (let a = 0; a < idx.length; a++) {
       for (let b = a + 1; b < idx.length; b++) {
         const i = idx[a];
@@ -225,25 +418,50 @@ export function searchLayout(d = {}) {
         /* 같은 자리에 있는 것끼리는 맞바꿔도 그대로다 */
         if (placed[i].pos[0] === placed[j].pos[0] && placed[i].pos[1] === placed[j].pos[1]) continue;
         const next = swapped(placed, i, j);
-        if (!placeOk(next, [placed[i].uid, placed[j].uid], ctx)) continue;
-        if (!routesOk(next, ctx)) continue;
-        tried++;
-        const per = scoreOf(next, ctx);
-        if (per == null) continue;
-        /* 티끌만큼 줄어든 것은 안 줄어든 것으로 본다 — 사람을 헛수고시킨다 */
-        if (per > cur * (1 - GAIN_TIE)) continue;
-        if (!best || per < best.per) best = { i, j, per, next };
+        const per = weigh(next, [placed[i].uid, placed[j].uid]);
+        if (per != null && (!best || per < best.per)) {
+          best = {
+            per,
+            next,
+            step: {
+              kind: 'swap',
+              a: placed[i].uid, b: placed[j].uid,
+              aName: names.get(placed[i].uid), bName: names.get(placed[j].uid),
+              from: cur, to: per,
+            },
+          };
+        }
       }
     }
+
+    /* ---- 당기기 ---- */
+    const rows = flowRowsOf(placed, ctx);
+    for (const i of idx) {
+      const p = placed[i];
+      const pull = pullTarget(p.uid, rows, placed);
+      if (!pull) continue;
+      for (const spot of pullSpots(p.pos, pull.at, d.grid)) {
+        const next = placed.map((x, k) => (k === i ? { ...x, pos: spot.pos } : x));
+        const per = weigh(next, [p.uid]);
+        if (per != null && (!best || per < best.per)) {
+          best = {
+            per,
+            next,
+            step: {
+              kind: 'slide',
+              a: p.uid, aName: names.get(p.uid),
+              towardName: pull.name,
+              dist: spot.dist,
+              pos: spot.pos,
+              from: cur, to: per,
+            },
+          };
+        }
+      }
+    }
+
     if (!best) break;
-    steps.push({
-      a: placed[best.i].uid,
-      b: placed[best.j].uid,
-      aName: names.get(placed[best.i].uid),
-      bName: names.get(placed[best.j].uid),
-      from: cur,
-      to: best.per,
-    });
+    steps.push(best.step);
     placed = best.next;
     cur = best.per;
   }
@@ -259,6 +477,7 @@ export function searchLayout(d = {}) {
     tried,
   };
 }
+
 
 /** 「53.2 m → 41.7 m (−22%)」 — 화면과 보고서가 같은 모양으로 쓴다 */
 export function gainText(before, after) {

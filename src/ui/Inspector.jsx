@@ -3462,6 +3462,9 @@ function Tidy({ per }) {
         return isShelf(it) ? shelfBBox(p, specOf(it)) : specOf(it)?.bbox ?? null;
       },
       floor: floorOf(state.areas), walls: state.walls, pillars: state.pillars,
+      /* 통로 — 카트가 다니는 길 위에는 안 놓는다. 구역 — 사용자가 그어 둔 선을
+         넘지 않는다. 격자 — 옮긴 자리가 손으로 놓은 것과 같은 눈금에 앉는다. */
+      zones: state.zones, grid: state.gridSize,
       lengthOf: (l, list) => linkPath(l, list, itemOf)?.length ?? 0,
     }));
   };
@@ -3499,10 +3502,17 @@ function Tidy({ per }) {
           </Row>
           <ol className="mt-1 space-y-0.5">
             {plan.steps.map((s, k) => (
-              <li key={`${s.a}-${s.b}`} className="flex items-baseline justify-between gap-2 text-[10.5px]">
+              <li key={`${s.kind}-${s.a}-${k}`} className="flex items-baseline justify-between gap-2 text-[10.5px]">
                 <span className="min-w-0 truncate text-ink3">
-                  <span className="text-ink4">{k + 1}.</span> <b className="text-ink2">{s.aName}</b>
-                  {' '}↔{' '}<b className="text-ink2">{s.bName}</b>
+                  <span className="text-ink4">{k + 1}.</span>{' '}
+                  {/* 맞바꾸기는 「A ↔ B」, 당기기는 「A → B 쪽으로 3.5 m」.
+                      둘 다 **그대로 실행할 수 있는 지시**여야 한다 —
+                      좌표를 적으면 사람이 못 따라 한다(도구가 대신 눌러 주더라도,
+                      무엇을 하는 것인지 읽히지 않으면 안 누른다). */}
+                  <b className="text-ink2">{s.aName}</b>
+                  {s.kind === 'swap'
+                    ? <>{' '}↔{' '}<b className="text-ink2">{s.bName}</b></>
+                    : <>{' '}→{' '}<b className="text-ink2">{s.towardName}</b> 쪽으로 {s.dist.toFixed(1)} m</>}
                 </span>
                 <span className="shrink-0 tabular-nums text-ink4">{s.to.toFixed(1)} m</span>
               </li>
@@ -3515,7 +3525,8 @@ function Tidy({ per }) {
             이대로 옮기기 ({plan.steps.length}번)
           </button>
           <p className="mt-1 text-[9.5px] leading-snug text-ink4">
-            자리만 맞바꿉니다 — <b className="text-ink4">방향도 설정도 그대로</b>입니다.
+            <b className="text-ink4">방향도 설정도 그대로</b>입니다. 카트가 다니는 길 위에는 안 놓고,
+            구역을 그렸으면 그 안에 머뭅니다.
             마음에 안 들면 <b className="text-ink4">Ctrl+Z</b> 한 번으로 돌아갑니다.
           </p>
         </div>
