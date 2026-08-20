@@ -93,9 +93,17 @@ export function haltState(d = {}) {
   for (const f of beltFlows) {
     if (!f.sink) continue;
     if (f.sink.slots) {
-      const slots = f.sink.slots[f.outKind] ?? 0;            // 0 = 안 쓰는 종류
-      const have = countKinds(getLots(f.sink.uid))[f.outKind] ?? 0;
-      if (slots - have > 0) continue;
+      /**
+       * **이 벨트가 실어 오는 종류들**을 본다 — 하나라도 자리가 있으면 안 선다.
+       * -----------------------------------------------------------------------
+       *  `outKind` 는 출발 설비의 **첫 레시피** 산출물이다. 갈래가 생기면서
+       *  그것으로는 못 본다 — 불량품만 싣는 벨트를 「제작품 1 자리가 찼나」로
+       *  판정하면, 재작업 설비에는 불량품 자리가 얼마든 남아 있는데도 벨트가
+       *  선다. 실제로 그래서 검사 라우팅이 통째로 안 돌았다.
+       */
+      const kinds = f.kinds?.length ? f.kinds : [f.outKind];
+      const have = countKinds(getLots(f.sink.uid));
+      if (kinds.some((k) => (f.sink.slots[k] ?? 0) - (have[k] ?? 0) > 0)) continue;
     } else if (getStock(f.sink.uid) < f.sink.cap) continue;
     links.add(f.link.uid);
     equips.add(f.owner.uid);

@@ -18,11 +18,14 @@
  * ---------------------------------------------------------------------------
  */
 
-import { inputCapOf, isSource, needFor, outKindOf, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
+import {
+  inputCapOf, isSource, needFor, outKindOf, outputKindOf, recipeOf, recipesOf, sendKindsOf, slotShares,
+} from './bom.js';
 import { ruleOf } from './dispatch.js';
 import {
-  batchOf, batchWaitOf, cycleOf, lotOf, outputCapFor, reworkOf, setupOf, shapeOf, spacingFor,
-  unitCycleOf, varOf,
+  SCRAP_TO,
+  batchOf, batchWaitOf, cycleOf, lotOf, outputCapFor, reworkOf, scrapToOf, setupOf, shapeOf,
+  spacingFor, unitCycleOf, varOf,
 } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
@@ -113,7 +116,9 @@ export function beltFlowsOf(d = {}) {
            *  설비가 만드는 것 중에서만 고른다. 안 만드는 종류를 적어 두면
            *  그 벨트는 영영 아무것도 못 실어 조용히 죽는다.
            */
-          const own = recipesOf(owner).map((r) => outKindOf(r, itemOf(owner.itemId)));
+          const own = sendKindsOf(
+            owner, itemOf(owner.itemId), scrapToOf(owner, itemOf(owner.itemId)) === SCRAP_TO.OUT,
+          );
           const picked = beltKinds(link).filter((k) => own.includes(k));
           return {
             link, path, owner, sink, recipe, outKind, layers, speed, gap,
@@ -160,9 +165,10 @@ export function machinesOf(d = {}) {
             /* 배치 공정 — 한 판에 몇 개를 굽나. 1 이면 예전 그대로다 */
             batch: batchOf(p, item),
             waitSec: batchWaitOf(p, item),
-            /* 불량 — **만들 때** 거른다. 다시 만들 수 있으면 그 시간도 함께 */
+            /* 불량 — **만들 때** 거른다. 버리나 · 다시 만드나 · 내보내나 */
             scrapRate: p.scrapRate ?? 0,
-            reworkSec: reworkOf(p, item),
+            reworkSec: scrapToOf(p, item) === SCRAP_TO.REDO ? reworkOf(p, item) : 0,
+            scrapTo: scrapToOf(p, item),
             /** 한 덩어리 개수 — 벨트가 한 번에 실어 가는 단위 */
             per: Math.max(1, Math.round(p.outputCount ?? 3)),
             /* 출력 자리는 **한 덩어리 + 한 개**다. 딱 한 덩어리치면 다 만든

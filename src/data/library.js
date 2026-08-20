@@ -44,7 +44,17 @@ export const KIND = { CART: 'cart', SHELF: 'shelf', TRUCK: 'truck', STILLAGE: 's
  * 반송물의 갈래 — 어느 설비가 만들 수 있는지를 정한다.
  *  아래 `BUILTIN_LIBRARY` 가 바로 쓰므로 그보다 위에 있어야 한다.
  */
-export const FAMILY = { PART: 'PART', ASM: 'ASM' };
+/**
+ * 반송물의 갈래.
+ * ---------------------------------------------------------------------------
+ *  `SCRAP` 은 **아무 설비도 만들기로 고를 수 없는** 갈래다. 불량은 만들려고
+ *  만드는 것이 아니라 나오는 것이라, 산출물 목록에 두면 「불량품을 만드는 설비」
+ *  라는 말이 안 되는 도면을 그릴 수 있게 된다(`allowedOutOf` 가 막는다).
+ *
+ *  대신 **재료로는 고를 수 있다** — 그게 재작업 설비다. 「불량품을 먹어 제작품
+ *  1을 낸다」는 레시피 한 줄이면 검사 라우팅이 끝난다. 새 배관이 없다.
+ */
+export const FAMILY = { PART: 'PART', ASM: 'ASM', SCRAP: 'SCRAP' };
 
 export const BUILTIN_LIBRARY = [
   {
@@ -275,6 +285,17 @@ export const PAYLOAD_ITEMS = {
   ASM_C: payload('ASM_C', '조립품 1', FAMILY.ASM, ASM_MODEL, '#00ffff', [0, 1, 1]),
   ASM_M: payload('ASM_M', '조립품 2', FAMILY.ASM, ASM_MODEL, '#ff00ff', [1, 0, 1]),
   ASM_Y: payload('ASM_Y', '조립품 3', FAMILY.ASM, ASM_MODEL, '#ffff00', [1, 1, 0]),
+  /**
+   * 불량품 — **검사에서 걸러진 것.**
+   *  설비가 「불량을 내보내기」로 잡혀 있을 때만 생긴다(기본은 버림이라 이미
+   *  그린 도면에는 한 개도 안 나온다). 벨트로 빼내 재작업 설비에 먹이거나
+   *  폐기 적치대에 쌓는다 — 그 길을 그리는 것이 검사 라우팅이다.
+   *
+   *  **어느 품종의 불량인지는 안 남는다.** 한 종류로 합친다 — 품종마다 불량을
+   *  따로 두면 종류가 갑절이 되어 모든 고르개가 두 배로 길어지는데, 「무엇을
+   *  고쳐 무엇으로 되돌리나」는 재작업 설비의 레시피가 이미 말하고 있다.
+   */
+  SCRAP: payload('SCRAP', '불량품', FAMILY.SCRAP, PART_MODEL, '#7a7a7a', [0.48, 0.48, 0.48]),
 };
 
 /**
@@ -322,11 +343,15 @@ export const payloadByKey = (key) => PAYLOAD_ITEMS[canonKind(key)] ?? PAYLOAD_IT
  *  기계인지 우리가 알 수 없으므로 단정하지 않는다.
  */
 export const allowedOutOf = (item) => {
-  const all = Object.keys(PAYLOAD_ITEMS);
+  /* 불량품은 **만들기로 고를 수 없다** — 나오는 것이지 만드는 것이 아니다 */
+  const all = Object.keys(PAYLOAD_ITEMS).filter((k) => PAYLOAD_ITEMS[k].family !== FAMILY.SCRAP);
   if (!item?.makes) return all;
   const list = all.filter((k) => PAYLOAD_ITEMS[k].family === item.makes);
   return list.length ? list : all;
 };
+
+/** 불량품인가 — 만들 수는 없고 먹을 수만 있는 종류 */
+export const isScrapKind = (kind) => PAYLOAD_ITEMS[kind]?.family === FAMILY.SCRAP;
 
 /**
  * 이 설비를 놓을 때 레시피의 산출물로 심어 줄 종류 — 갈래의 첫 번째.

@@ -27,11 +27,12 @@
 
 import { flowEdges, isSource, outputKindOf, recipeOf } from './bom.js';
 import {
-  batchOf, beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, reworkOf, setupOf,
-  spacingFor, unitCycleOf,
+  SCRAP_TO,
+  batchOf, beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, reworkOf, scrapToOf,
+  setupOf, spacingFor, unitCycleOf,
 } from './process.js';
 import { beltKinds } from './link.js';
-import { outKindOf, recipesOf } from './bom.js';
+import { recipesOf, sendKindsOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
 
@@ -57,7 +58,7 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
  *      공정 2초 · 품종 2가지를 번갈아 = 한 품종에 7.0초/개
  */
 /** 이 설비가 내보내는 종류들 — 품종을 여럿 들면 여럿이다 */
-const outKindsOf = (p, item) => recipesOf(p).map((r) => outKindOf(r, item));
+const outKindsOf = (p, item) => sendKindsOf(p, item, scrapToOf(p, item) === SCRAP_TO.OUT);
 
 export function whyOf({ cyc, batch = 1, many = 1, lot = 0, setupSec = 0, scrap = 0, reworkSec = 0, eff }) {
   const parts = [`공정 ${cyc}초`];

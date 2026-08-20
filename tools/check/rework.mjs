@@ -250,7 +250,10 @@ const inspSrc = await readSrc('ui/Inspector.jsx');
 
 t('굴리는 쪽이 불량과 재작업을 넘긴다', () => {
   assert.ok(lineupSrc.includes('scrapRate: p.scrapRate ?? 0'), '설비 목록이 불량률을 안 싣는다');
-  assert.ok(lineupSrc.includes('reworkSec: reworkOf(p, item)'), '재작업 시간을 안 싣는다');
+  /* 「이 설비가 다시 만든다」로 잡혀 있을 때만 재작업 시간이 산다 — 불량을
+     내보내기로 바꿔 놓고도 재작업이 돌면 같은 불량을 두 번 처리한다 */
+  assert.ok(lineupSrc.includes('reworkSec: scrapToOf(p, item) === SCRAP_TO.REDO ? reworkOf(p, item) : 0'),
+    '재작업 시간을 안 싣는다');
   assert.ok(simSrc.includes('reworkSec: m.reworkSec'), 'sim 이 재작업을 안 넘긴다');
   assert.ok(simSrc.includes('onRedo: (n) => addRework(m.uid, n)'), '재작업 개수를 안 센다');
 });

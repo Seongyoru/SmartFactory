@@ -77,11 +77,22 @@ t('고를 수 있는 것 · 배치할 때 심어 줄 것', () => {
 });
 
 /* ---------- 종류 여섯 · 옛 이름 별칭 ---------- */
-t('제작품 셋 + 조립품 셋', () => {
+t('제작품 셋 + 조립품 셋 + 불량품', () => {
   assert.deepEqual(Object.keys(lib.PAYLOAD_ITEMS),
-    ['PART_R', 'PART_G', 'PART_B', 'ASM_C', 'ASM_M', 'ASM_Y']);
+    ['PART_R', 'PART_G', 'PART_B', 'ASM_C', 'ASM_M', 'ASM_Y', 'SCRAP']);
   assert.deepEqual(Object.values(lib.PAYLOAD_ITEMS).map((i) => i.name),
-    ['제작품 1', '제작품 2', '제작품 3', '조립품 1', '조립품 2', '조립품 3']);
+    ['제작품 1', '제작품 2', '제작품 3', '조립품 1', '조립품 2', '조립품 3', '불량품']);
+});
+
+t('불량품은 **만들기로 고를 수 없다** — 나오는 것이지 만드는 것이 아니다', () => {
+  assert.equal(lib.isScrapKind('SCRAP'), true);
+  assert.equal(lib.isScrapKind('PART_R'), false);
+  for (const item of [{ makes: 'PART' }, { makes: 'ASM' }, {}]) {
+    assert.equal(lib.allowedOutOf(item).includes('SCRAP'), false,
+      `${JSON.stringify(item)} 가 불량품을 만들 수 있다고 나온다`);
+  }
+  /* 재료로는 고를 수 있어야 한다 — 그게 재작업 설비다 */
+  assert.ok(lib.PAYLOAD_ITEMS.SCRAP, '불량품이 종류 목록에 없다');
 });
 t('갈래는 형상으로, 종류는 색으로 갈린다', () => {
   const P = lib.PAYLOAD_ITEMS;
@@ -91,7 +102,7 @@ t('갈래는 형상으로, 종류는 색으로 갈린다', () => {
   assert.notEqual(P.PART_R.url, P.ASM_C.url);
   assert.ok(P.ASM_C.url.endsWith('Assembly.glb'));
   /* 캐시 키는 여섯 다 달라야 한다 — 같으면 색이 서로 덮어쓴다 */
-  assert.equal(new Set(Object.values(P).map((i) => i.modelKey)).size, 6);
+  assert.equal(new Set(Object.values(P).map((i) => i.modelKey)).size, 7);
   /* RGB · CMY */
   assert.deepEqual([P.PART_R.tint, P.PART_G.tint, P.PART_B.tint],
     ['#ff0000', '#00ff00', '#0000ff']);

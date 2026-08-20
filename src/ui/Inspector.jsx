@@ -33,7 +33,8 @@ import {
   DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
 } from '../core/orders.js';
 import {
-  BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, REWORK_RANGE, SETUP_RANGE, VAR_MAX,
+  BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, REWORK_RANGE, SCRAP_TO,
+  SCRAP_TO_LABEL, SETUP_RANGE, VAR_MAX, scrapToOf,
   batchOf, batchWaitOf, beltPerMinute, cycleOf, effectiveCycle,
   lotOf, outputCapFor, perMinute, reworkOf, setupOf, shapeOf, spacingClamped, spacingFor, varOf,
 } from '../core/process.js';
@@ -51,7 +52,7 @@ import {
 import {
   DEFAULT_INPUT_CAP, MAX_KINDS, MAX_QTY, auditRecipes, countKinds, explode, flowEdges,
   inputCapOf, isSource, missingOf, needFor, normalizeRecipe, outKindOf, outputKindOf, recipeOf,
-  recipesOf, slotShares, tooSmallFor,
+  recipesOf, sendKindsOf, slotShares, tooSmallFor,
 } from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, REPAIR_VAR_MAX, SCRAP_RANGE,
@@ -335,7 +336,9 @@ function FaultFields({ placed, item }) {
   const set = (patch) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch });
   const mtbf = placed.mtbf ?? 0;
   const scrap = Math.min(1, Math.max(0, placed.scrapRate ?? 0));
-  const reworkSec = reworkOf(placed, item);
+  /** 불량을 어떻게 하나 — 버림 · 재작업 · 내보내기 */
+  const scrapTo = scrapToOf(placed, item);
+  const reworkSec = scrapTo === SCRAP_TO.REDO ? reworkOf(placed, item) : 0;
   /** 양품 한 개에 드는 시간 — 버리든 다시 만들든 여기 든다 */
   const goodCycle = effectiveCycle(
     cycleOf(placed, item), 0, 0, batchOf(placed, item), { scrap, reworkSec },
@@ -395,6 +398,40 @@ function FaultFields({ placed, item }) {
         */}
       {scrap > 0 && (
         <>
+          {/**
+            * 불량을 어떻게 할까 — **버림 · 재작업 · 내보내기.**
+            * -----------------------------------------------------------------
+            *  「내보내기」가 검사 라우팅이다. 불량이 **불량품**이라는 종류가 되어
+            *  출력 자리에 쌓이고, 갈래(벨트의 「보낼 종류」)로 다른 길에 태운다.
+            *  그 끝에 「불량품을 먹어 제작품을 내는」 설비를 놓으면 재작업
+            *  스테이션이고, 적치대에 쌓으면 폐기장이다 — **새 배관이 없다.**
+            */}
+          <label className="mt-2 block">
+            <span className="mb-1 flex items-center justify-between text-[11px] text-ink3">
+              불량을 어떻게
+              <span className="text-[10px] font-normal text-ink4">{SCRAP_TO_LABEL[scrapTo]}</span>
+            </span>
+            <select
+              value={scrapTo}
+              onChange={(e) => set({ scrapTo: e.target.value })}
+              className="w-full rounded-md border border-edge bg-field px-2 py-1.5 text-xs text-ink outline-none focus:border-sky-500/60"
+            >
+              {Object.values(SCRAP_TO).map((k) => (
+                <option key={k} value={k}>{SCRAP_TO_LABEL[k]}</option>
+              ))}
+            </select>
+          </label>
+          {scrapTo === SCRAP_TO.OUT && (
+            <p className="mt-1 rounded bg-raise px-2 py-1.5 text-[10.5px] leading-relaxed text-ink4 ring-1 ring-edge">
+              불량이 <b className="text-ink2">불량품</b>이 되어 출력 자리에 쌓입니다 —
+              벨트의 <b className="text-ink2">「갈래」</b>에서 불량품을 골라 다른 길로 빼세요.
+              <br />그 끝에 <b className="text-ink2">불량품을 먹는 설비</b>를 놓으면 재작업
+              스테이션이고, 적치대에 쌓으면 폐기장입니다.
+              <br /><b className="text-amber-600">빼내지 않으면 출력 자리가 차서 이 설비가 막힙니다</b> —
+              라인 밖으로 사라지지 않으니 그게 맞습니다.
+            </p>
+          )}
+          {scrapTo === SCRAP_TO.REDO && (
           <Slider
             label="재작업 시간"
             min={REWORK_RANGE[0]}
@@ -407,6 +444,8 @@ function FaultFields({ placed, item }) {
               : '0 이면 고치지 않고 버립니다 (지금까지의 동작)'}
             onChange={(v) => set({ reworkSec: v })}
           />
+          )}
+          {scrapTo === SCRAP_TO.REDO && (
           <p className="mt-1 rounded bg-raise px-2 py-1.5 text-[10.5px] leading-relaxed text-ink4 ring-1 ring-edge">
             {reworkSec > 0 ? (
               <>
@@ -423,6 +462,7 @@ function FaultFields({ placed, item }) {
               </>
             )}
           </p>
+          )}
         </>
       )}
       <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
@@ -1188,8 +1228,9 @@ function DivertSection({ link }) {
   const item = from ? itemOf(from.itemId) : null;
   if (!from || !item) return null;
 
-  /* 이 설비가 내보내는 종류들 — 안 만드는 것을 고르게 두면 그 벨트가 조용히 죽는다 */
-  const makes = [...new Set(recipesOf(from).map((r) => outKindOf(r, item)))];
+  /* 이 설비가 내보내는 종류들 — **불량품도 여기 든다**(내보내기로 잡았으면).
+     안 넣으면 불량품 벨트가 조용히 무시되어 재작업 스테이션이 안 돈다 */
+  const makes = sendKindsOf(from, item, scrapToOf(from, item) === SCRAP_TO.OUT);
   /* 같은 설비에서 나가는 벨트가 여럿일 때만 가를 것이 있다 */
   const outs = state.links.filter(
     (l) => l.from?.uid === from.uid && !l.from?.anchor && !l.from?.link

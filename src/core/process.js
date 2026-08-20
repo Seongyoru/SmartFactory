@@ -269,6 +269,7 @@ export function resetWork(uid = null) {
  *                  없으면 다 양품이다
  *  @param reworkSec 불량 한 개를 다시 만드는 데 드는 시간(초). 0 이면 **버린다**
  *  @param onRedo   재작업 줄에 넣은 개수를 알린다 (세는 쪽이 화면에 쓴다)
+ *  @param onScrap  걸러진 것을 **내보낼 때** 알린다 `(개수)` — 불량품으로 쌓는다
  *  @param pickSlot 로트를 채웠을 때 **다음 품종**을 고른다 `(지금, 개수) => 자리`.
  *                  없으면 차례대로 (`dispatch.js` 가 규칙을 안다)
  *  @returns 이번 프레임에 나온 **양품 개수**
@@ -281,7 +282,7 @@ export function runMachine(uid, dt, {
   cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
   lot = 0, setupSec = 0, shape = DEFAULT_SHAPE, kinds = 1,
   batch = 1, waitSec = 0, avail = null,
-  check = null, reworkSec = 0, onRedo = null, pickSlot = null,
+  check = null, reworkSec = 0, onRedo = null, pickSlot = null, onScrap = null,
 }) {
   took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
@@ -375,6 +376,13 @@ export function runMachine(uid, dt, {
     if (bad > 0 && reworkSec > 0 && !wasRedo) {
       redo.set(uid, (redo.get(uid) ?? 0) + bad);
       onRedo?.(bad);
+    } else if (bad > 0 && onScrap) {
+      /**
+       * **불량품으로 내보낸다** — 벨트가 실어 간다(검사 라우팅).
+       *  자리도 먹는다. 안 먹게 두면 출력 자리가 넘쳐 흐르고, 갈래로 빼내지
+       *  못한 불량이 무한히 쌓여도 라인이 안 서는 거짓 그림이 된다.
+       */
+      done += onScrap(bad);
     }
 
     /**
@@ -549,6 +557,53 @@ export const effectiveCycle = (cycleSec, lot = 0, setupSec = 0, batch = 1, opt =
   const spend = work + (redo > 0 ? bad * redo : 0);
   const yield_ = redo > 0 ? 1 - bad * bad : 1 - bad;
   return yield_ > 0 ? spend / yield_ : spend;
+};
+
+/* ==========================================================================
+ *  불량을 어떻게 할까 — **버림 · 재작업 · 내보내기**
+ * --------------------------------------------------------------------------
+ *      버림       라인 밖으로 사라진다 (**기본** — 지금까지의 동작)
+ *      재작업     그 설비가 다시 만든다 (`reworkSec`)
+ *      내보내기   **불량품**으로 출력 자리에 쌓는다 — 벨트로 빼낸다
+ *
+ *  ── 「내보내기」가 검사 라우팅이다 ───────────────────────────────────────
+ *  불량이 하나의 종류가 되면(`SCRAP`) 그 뒤는 **이미 있는 것들이 다 한다.**
+ *  갈래(`link.kinds`)로 다른 벨트에 태우고, 그 끝에 「불량품을 먹어 제작품 1을
+ *  내는」 설비를 놓으면 그것이 재작업 스테이션이다. 폐기 적치대에 쌓아도 된다.
+ *
+ *  새 배관을 하나도 안 놓는 것이 요점이다 — 검사대·불량 벨트·되돌림 경로를
+ *  따로 만들었다면 그 셋이 각자 규칙을 갖고 서로 어긋났을 것이다.
+ *
+ *  ── 「고치는 자리」가 둘로 갈린다 ────────────────────────────────────────
+ *  재작업은 **만든 자리에서** 고치고, 내보내기는 **다른 자리로 보낸다.** 라인을
+ *  그리는 사람이 고를 일이지 도구가 정할 일이 아니라, 둘 다 둔다.
+ * ======================================================================== */
+
+/** 불량 처리 */
+export const SCRAP_TO = {
+  /** 라인 밖으로 사라진다 — 지금까지의 동작 */
+  TOSS: 'toss',
+  /** 그 설비가 다시 만든다 */
+  REDO: 'redo',
+  /** 불량품으로 내보낸다 — 벨트가 실어 간다 */
+  OUT: 'out',
+};
+
+export const SCRAP_TO_LABEL = {
+  [SCRAP_TO.TOSS]: '버립니다',
+  [SCRAP_TO.REDO]: '이 설비가 다시 만듭니다',
+  [SCRAP_TO.OUT]: '불량품으로 내보냅니다',
+};
+
+/**
+ * 이 설비는 불량을 어떻게 하나.
+ *  옛 도면에는 이 값이 없다 — `reworkSec` 만 적혀 있으면 재작업으로 읽는다.
+ *  그래야 재작업만 붙여 뒀던 도면이 그대로 돈다.
+ */
+export const scrapToOf = (placed, item) => {
+  const v = placed?.scrapTo ?? item?.scrapTo;
+  if (v === SCRAP_TO.OUT || v === SCRAP_TO.REDO || v === SCRAP_TO.TOSS) return v;
+  return reworkOf(placed, item) > 0 ? SCRAP_TO.REDO : SCRAP_TO.TOSS;
 };
 
 /**

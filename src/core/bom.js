@@ -52,6 +52,9 @@ export const MAX_QTY = 20;
  */
 export const MAX_KINDS = 4;
 
+/** 불량품이 흐를 때 쓰는 종류 이름 — 라이브러리의 `PAYLOAD_ITEMS.SCRAP` */
+export const SCRAP_KIND = 'SCRAP';
+
 /* --------------------------------------------------------------------------
  * 레시피 읽기
  * ------------------------------------------------------------------------ */
@@ -124,6 +127,20 @@ export const recipeAt = (placed, slot = 0) => {
   if (!list.length) return null;
   return list[((Math.round(slot) % list.length) + list.length) % list.length];
 };
+
+/**
+ * 이 설비가 **벨트로 내보내는 종류들** — 레시피 산출물 + (내보내면) 불량품.
+ * ---------------------------------------------------------------------------
+ *  갈래(`link.kinds`)와 천장이 이 목록을 본다. 불량품을 빼놓으면 **불량품 벨트가
+ *  조용히 무시된다** — 「이 설비가 안 만드는 종류」로 걸러져서, 갈래를 그려 놓고도
+ *  아무거나 싣는 벨트가 된다. 실제로 그렇게 재작업 스테이션이 안 돌았다.
+ */
+export function sendKindsOf(placed, item, scrapsOut = false) {
+  const out = recipesOf(placed).map((r) => outKindOf(r, item));
+  const list = [...new Set(out)];
+  if (scrapsOut) list.push(SCRAP_KIND);
+  return list;
+}
 
 /** 품종을 바꿔 가며 만드는 설비인가 */
 export const isMulti = (placed) => recipesOf(placed).length > 1;
