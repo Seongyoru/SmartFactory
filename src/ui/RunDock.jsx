@@ -57,6 +57,7 @@ import { useLineWorld } from './useLineWorld.js';
 import { ciText, replicate } from '../core/replicate.js';
 import { resetRun } from '../core/sim.js';
 import { bestOf, kneeOf, kneeText, knobOf, knobsFor, sweep } from '../core/sweep.js';
+import { fitOf, fitText, matchOf, matchText, movedFrom } from '../core/calibrate.js';
 import { worldOf } from '../core/lineup.js';
 import { specReader } from './useLineWorld.js';
 import { isStillage } from '../data/library.js';
@@ -709,6 +710,8 @@ function Sweep() {
   const { state, itemOf } = useEditor();
   const [knob, setKnob] = useState(null);
   const [rows, setRows] = useState(null);
+  /** 실제 라인의 처리량(개/시) — 적으면 모델과 견준다 (calibrate.js) */
+  const [actual, setActual] = useState(0);
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState(null);
 
@@ -768,6 +771,10 @@ function Sweep() {
   const k = knobOf(pick);
   const knee = rows?.length ? kneeOf(rows) : null;
   const top = rows?.length ? bestOf(rows) : null;
+  /* 실적 보정 — 훑어 본 표를 「실적에 가장 가까운 값」으로 읽는다 */
+  const match = actual > 0 && top ? matchOf(top.mean, actual) : null;
+  const fit = actual > 0 ? fitOf(rows, actual) : null;
+  const moved = fit ? movedFrom(rows, k?.now?.(layout), fit) : null;
   const wide = top ? Math.max(1, top.mean + top.half) : 1;
 
   return (
@@ -794,6 +801,29 @@ function Sweep() {
         <Repeat size={13} /> {busy ? `돌리는 중… (${rows?.length ?? 0}/${k.values(layout).length})` : '값을 바꿔 가며 돌리기'}
       </button>
 
+      {/**
+        * 실적 보정 — **이 모델이 실제와 얼마나 맞나.**
+        * ---------------------------------------------------------------------
+        *  컨설팅에서 제일 먼저 받는 질문이다. 안 맞는 모델로 배치를 바꾸면 안
+        *  되니까 맞는 물음이기도 하다.
+        *
+        *  **새 엔진을 안 만든다.** 위에서 이미 값을 훑어 표를 냈다 — 그 표를
+        *  「가장 큰 값」이 아니라 **「실적에 가장 가까운 값」**으로 읽으면 그게
+        *  보정이다(`calibrate.js`).
+        */}
+      <label className="mt-2 flex items-center gap-1.5 border-t border-line pt-1.5 text-[10px] text-ink4">
+        실제 라인은
+        <input
+          type="number" min="0" step="10"
+          value={actual || ''}
+          onChange={(e) => setActual(Number(e.target.value) || 0)}
+          placeholder="—"
+          className="w-20 rounded border border-edge bg-field px-1 py-0.5 text-right text-[10px] tabular-nums text-ink outline-none focus:border-sky-500/60"
+        />
+        개/시
+        <span className="ml-auto text-[9.5px] text-ink4/70">적으면 모델과 견줍니다</span>
+      </label>
+
       {rows?.length > 0 && (
         <div className="mt-1.5 border-t border-line pt-1.5">
           {rows.map((r) => (
@@ -814,6 +844,25 @@ function Sweep() {
             <p className="mt-1.5 text-[10px] leading-snug text-ink2">
               <b className="text-emerald-600">{kneeText(knee, k)}</b>
             </p>
+          )}
+          {!busy && actual > 0 && (
+            <div className="mt-1.5 rounded bg-raise px-2 py-1.5 ring-1 ring-edge">
+              <p className="text-[10px] leading-snug text-ink2">
+                <b className={match?.ok ? 'text-emerald-600' : 'text-amber-600'}>
+                  {matchText(match, top?.mean ?? 0, actual)}
+                </b>
+              </p>
+              <p className="mt-1 text-[10px] leading-snug text-ink3">{fitText(fit, k, actual)}</p>
+              {moved && !moved.sure && (
+                <p className="mt-1 text-[9.5px] leading-snug text-amber-600">
+                  다만 지금 값과 <b>구별할 만큼 다르지 않습니다</b> — 바꿀 이유가 못 됩니다.
+                </p>
+              )}
+              <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+                숫자만 맞추려 들면 아무 손잡이나 비틀어 맞출 수 있습니다.
+                <b className="text-ink3"> 도면과 현장이 실제로 다른 것</b>을 짚을 때만 뜻이 있습니다.
+              </p>
+            </div>
           )}
           <p className="mt-1 text-[9.5px] leading-snug text-ink4">
             값마다 <b className="text-ink4">{SWEEP_REPS}판 × {SWEEP_MIN}분</b>, 씨앗은 같습니다 —

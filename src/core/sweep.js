@@ -59,6 +59,12 @@ export const SWEEP_TIE = 0.02;
  *  `patch` 는 **도면을 통째로 새로 만들어** 돌려준다(원본을 안 건드린다).
  *  `has` 가 false 면 그 도면에는 그 손잡이가 없다.
  */
+/**
+ * 손잡이 하나.
+ *  `now` 는 **지금 도면이 어디 있나** — 실적 보정이 「바꿀 만한 차이인가」를
+ *  물을 때 기준으로 쓴다(`calibrate.js` 의 `movedFrom`). 없으면 「지금 값과
+ *  구별이 안 된다」는 말을 아예 못 해서, 뜻 없는 변경을 권하게 된다.
+ */
 export const KNOBS = [
   {
     id: 'cartCount',
@@ -67,6 +73,7 @@ export const KNOBS = [
     why: '한 경로에 몇 대를 올릴까 — 늘려도 안 늘면 카트가 병목이 아니다',
     has: (d) => (d.carts ?? []).length > 0,
     values: () => [1, 2, 3, 4, 6, 8],
+    now: (d) => Math.max(1, Math.round((d.carts ?? [])[0]?.count ?? 1)),
     patch: (d, v) => ({ ...d, carts: (d.carts ?? []).map((c) => ({ ...c, count: v })) }),
   },
   {
@@ -76,6 +83,7 @@ export const KNOBS = [
     why: '완충을 얼마나 둘까 — 늘려도 안 늘면 완충이 병목이 아니다',
     has: (d) => (d.placed ?? []).some((p) => d.isStillage?.(p)),
     values: () => [10, 20, 40, 80, 160],
+    now: (d) => (d.placed ?? []).find((p) => d.isStillage?.(p))?.capacity ?? null,
     patch: (d, v) => ({
       ...d,
       placed: (d.placed ?? []).map((p) => (d.isStillage?.(p) ? { ...p, capacity: v } : p)),
@@ -88,6 +96,7 @@ export const KNOBS = [
     why: '몇 개마다 전환할까 — 크게 잡으면 전환이 싸지고 재공이 는다',
     has: (d) => (d.placed ?? []).some((p) => (p.setupSec ?? 0) > 0),
     values: () => [5, 10, 20, 40, 80, 160],
+    now: (d) => (d.placed ?? []).find((p) => (p.setupSec ?? 0) > 0)?.lotSize ?? null,
     patch: (d, v) => ({
       ...d,
       placed: (d.placed ?? []).map((p) => ((p.setupSec ?? 0) > 0 ? { ...p, lotSize: v } : p)),
@@ -100,6 +109,7 @@ export const KNOBS = [
     why: '빠르게 바꾸면(SMED) 얼마나 좋아지나 — 설비를 더 사기 전에 볼 값이다',
     has: (d) => (d.placed ?? []).some((p) => (p.lotSize ?? 0) > 0),
     values: () => [0, 60, 120, 300, 600],
+    now: (d) => (d.placed ?? []).find((p) => (p.lotSize ?? 0) > 0)?.setupSec ?? null,
     patch: (d, v) => ({
       ...d,
       placed: (d.placed ?? []).map((p) => ((p.lotSize ?? 0) > 0 ? { ...p, setupSec: v } : p)),
@@ -112,6 +122,7 @@ export const KNOBS = [
     why: '벨트를 빠르게 하면 — **돈이 안 드는 병목**인지 여기서 갈린다',
     has: (d) => (d.links ?? []).length > 0,
     values: () => [0.3, 0.45, 0.6, 0.9, 1.2, 1.8],
+    now: (d) => d.beltSpeed ?? null,
     patch: (d, v) => ({ ...d, beltSpeed: v }),
   },
   {
@@ -121,6 +132,7 @@ export const KNOBS = [
     why: '몇 명이면 도나 — 사람이 모자라면 배치를 고쳐도 안 풀린다',
     has: (d) => (d.shifts ?? []).length > 0,
     values: () => [0, 1, 2, 3, 4, 6, 8],
+    now: (d) => (d.shifts ?? [])[0]?.headcount ?? null,
     patch: (d, v) => ({ ...d, shifts: (d.shifts ?? []).map((s) => ({ ...s, headcount: v })) }),
   },
 ];
