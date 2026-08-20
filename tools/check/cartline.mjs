@@ -132,10 +132,13 @@ t('트럭은 이 규칙 밖이다 — 자리가 찰 때까지 여러 역에서 �
 t('나르는 능력은 **서는 역만** 센다', () => {
   /* 예전에는 싣는 역 중 가장 많이 싣는 쪽을 골랐다. 그 역이 안 서는 역이면
      화면의 능력만 크고 라인은 그대로 굶는다. */
-  const big = stations.map((s) => (s.uid === 'B' ? { ...s, dispatch: 99 } : s));
-  const h = C.haulPerMinute({ ...cart, count: 1 }, path, big);
-  const base = C.haulPerMinute({ ...cart, count: 1 }, path, stations);
-  assert.equal(h.perLap, base.perLap, '안 서는 역의 수량이 능력으로 잡힌다');
+  /* 서는 역(A)은 한 번에 1개만, 안 서는 역(B)은 99개를 내보내게 해 둔다.
+     옛 규칙(모든 싣는 역 중 최대)이면 능력이 카트 적재량 3 으로 잡히고,
+     서는 역만 세면 **1** 이 된다 — 실제로 A 에서 1개씩만 실어 오니까. */
+  const tuned = stations.map((s) =>
+    s.uid === 'A' ? { ...s, dispatch: 1 } : s.uid === 'B' ? { ...s, dispatch: 99 } : s);
+  const h = C.haulPerMinute({ ...cart, count: 1 }, path, tuned);
+  assert.equal(h.perLap, 1, `안 서는 역의 수량이 능력으로 잡힌다 (perLap ${h.perLap})`);
 });
 
 /* ---------- 화면이 그 사실을 말하는가 ------------------------------------ */
