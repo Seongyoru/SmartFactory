@@ -221,3 +221,16 @@ t('화면이 **실질 공정**을 말해 준다', () => {
   assert.ok(inspSrc.includes('effectiveCycle(cycleSec, lot, setupSec)'), '실질 공정을 안 낸다');
   assert.ok(inspSrc.includes('가동률(A)'), '어디서 빠지는 시간인지 안 말한다');
 });
+
+t('전환이 제일 크면 **배치 이야기를 안 한다** — 처방이 다르다', () => {
+  /* 화면이 「전환 4분 · 막힘 2분」을 보여 주면서 「막힘이 큽니다 — 라인 뒤쪽을
+     늘리세요」라고 했다. 라인 앞뒤를 늘려도 전환 시간은 그대로다. */
+  assert.ok(dockSrc.includes('split.change > split.block && split.change > split.starve'),
+    '전환이 큰 경우를 안 가른다');
+  assert.ok(dockSrc.includes('로트를 키우거나'), '무엇을 하라는지 안 말한다');
+  assert.ok(dockSrc.includes('라인 앞뒤를 늘려도 이 시간은 그대로입니다'),
+    '배치로는 안 풀린다는 것을 안 말한다');
+  /* 사람이 없는 것이 여전히 맨 위다 — 그건 배치로도 로트로도 안 풀린다 */
+  assert.ok(dockSrc.indexOf('사람이 없어 선 시간이') < dockSrc.indexOf('split.change > split.block'),
+    '무인보다 전환을 먼저 말한다');
+});

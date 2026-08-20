@@ -519,6 +519,14 @@ function Bottleneck({ rows, onPick }) {
         <p className="mt-1 shrink-0 rounded bg-amber-500/10 px-1.5 py-1 text-[9.5px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
           사람이 없어 선 시간이 {formatElapsed(split.crew)} 있습니다 — 배치를 고쳐도 안 풀립니다.
         </p>
+      ) : split.change > split.block && split.change > split.starve ? (
+        /* **전환이 제일 크면 배치 이야기를 하면 안 된다.** 처방이 다르다 —
+           라인 앞뒤를 늘려도 전환 시간은 그대로다. 이 줄이 없을 때 화면은
+           「전환 4분 · 막힘 2분」을 보여 주면서 「막힘이 큽니다」라고 했다. */
+        <p className="mt-1 shrink-0 text-[9.5px] leading-snug text-ink4">
+          <b className="text-ink2">전환</b>이 큽니다 — <b className="text-ink2">로트를 키우거나</b> 전환을
+          빠르게 하세요(SMED). 라인 앞뒤를 늘려도 이 시간은 그대로입니다.
+        </p>
       ) : (
         <p className="mt-1 shrink-0 text-[9.5px] leading-snug text-ink4">
           {split.starvedMore

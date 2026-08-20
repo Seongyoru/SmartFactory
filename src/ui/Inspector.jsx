@@ -659,10 +659,15 @@ function EquipmentPanel({ placed }) {
 
         {/* ── 설비가 정하는 것 ── */}
         <div className="mt-3">
+          {/* 전환을 걸어 두면 **공정 시간만으로는 거짓말이 된다** — 6초/개인데
+              실제로는 21초/개로 도는 설비를 「10 개/분」이라고 적는 셈이다.
+              (JSX 주석은 속성 사이에 못 둔다 — 여기, 태그 앞이 자리다) */}
           <Slider
             label="만드는 시간"
             text={`${cycleSec.toFixed(1)} 초/개`}
-            hint={`설비 혼자서는 ${machineRate.toFixed(1)} 개/분`}
+            hint={effCycle > cycleSec
+              ? `설비 혼자서는 ${machineRate.toFixed(1)} 개/분 — 전환까지 치면 ${(60 / effCycle).toFixed(1)} 개/분`
+              : `설비 혼자서는 ${machineRate.toFixed(1)} 개/분`}
             value={cycleSec}
             min={CYCLE_RANGE[0]}
             max={CYCLE_RANGE[1]}
