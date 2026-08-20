@@ -158,7 +158,8 @@ t('판마다 **처음부터** 시작한다 — 앞 판이 남으면 통계가 �
 });
 
 t('되돌리기를 **직접 적지 않는다** — sim 의 resetRun 을 쓴다', () => {
-  assert.match(src, /import \{ resetRun, runMachines \} from '\.\/sim\.js'/);
+  assert.ok(/import \{[^}]*\bresetRun\b[^}]*\} from '\.\/sim\.js'/.test(src), 'sim 의 resetRun 을 안 쓴다');
+  assert.ok(/import \{[^}]*\brunMachines\b[^}]*\} from '\.\/sim\.js'/.test(src), 'sim 의 runMachines 를 안 쓴다');
   assert.ok(src.includes('resetRun();'), '판마다 되돌리지 않는다');
   for (const one of ['resetMetrics', 'resetFaults', 'clearStock']) {
     assert.equal(src.includes(one), false, `${one} 를 여기서 또 적었다`);
@@ -344,4 +345,40 @@ t('훅이 **얼리 리턴보다 위**에 있다 — 창을 여는 순간 죽는�
   const guard = head.indexOf('if (!state.showScenarios) return null;');
   const hook = head.indexOf('useLineWorld()');
   assert.ok(hook > 0 && hook < guard, '훅이 얼리 리턴 뒤에 있다 — 창을 열면 화면이 죽는다');
+});
+
+/* ==========================================================================
+ *  천장(계산)과 잰 값을 나란히
+ * --------------------------------------------------------------------------
+ *  「라인 능력」은 고장도 없고 굶지도 않는 라인의 값이고, 반복 실행은 실제로
+ *  돌려서 잰 값이다. 두 숫자가 각자 다른 화면에 있으면 사람이 머리로 빼야 하는데,
+ *  **그 차이가 곧 손실**이라 그게 이 도구가 답해야 할 값이다.
+ * ======================================================================== */
+const lwSrc = await readSrc('ui/useLineWorld.js');
+const dockSrc2 = await readSrc('ui/RunDock.jsx');
+
+t('천장도 **같은 자리**에서 낸다 — 도면이 하나여야 견줄 수 있다', () => {
+  assert.ok(lwSrc.includes("import { lineBalance } from '../core/balance.js';"), 'balance 를 안 부른다');
+  assert.ok(/capacity: lineBalance\(\{/.test(lwSrc), 'capacity 를 안 돌려준다');
+  /* 카트가 천장을 정할 수 있다 — 카트를 바꿨는데 천장이 안 따라오면 안 된다 */
+  const deps = lwSrc.match(/\}, \[([^\]]*)\]\);/)?.[1] ?? '';
+  for (const k of ['state.placed', 'state.links', 'state.carts', 'state.beltSpeed']) {
+    assert.ok(deps.includes(k), `천장이 ${k} 를 안 본다`);
+  }
+});
+
+t('여러 판 결과가 천장의 몇 %인지 말한다', () => {
+  assert.ok(dockSrc2.includes('capacity } = useLineWorld();'), '천장을 안 받는다');
+  assert.ok(dockSrc2.includes('(out.mean / (capacity * 60)) * 100'), '견주는 계산이 없다');
+  assert.ok(dockSrc2.includes('고장 · 굶음 · 막힘으로 샌 것입니다'), '차이가 무엇인지 안 말한다');
+});
+
+t('천장이 0 이면 견주지 않는다 — 「0%」 는 아무 말도 아니다', () => {
+  assert.ok(dockSrc2.includes('{capacity > 0 && ('), '0 으로 나눈다');
+});
+
+t('단위를 맞춰서 견준다 — 천장은 개/분, 잰 값은 개/시', () => {
+  /* 이 도구에서 단위를 안 맞춰 놓고 한 표에 더한 적이 있다(물류 동선의
+     벨트 300 vs 카트 926). 같은 실수를 두 번 하지 않게 못 박는다. */
+  assert.ok(dockSrc2.includes('{(capacity * 60).toFixed(0)} 개/시'), '천장을 개/시로 안 바꾼다');
 });

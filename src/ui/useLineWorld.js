@@ -15,7 +15,11 @@ import { useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { linkPath } from '../core/link.js';
 import { beltFlowsOf, machinesOf } from '../core/lineup.js';
-import { lineWorld } from '../core/replicate.js';
+import { lineBalance } from '../core/balance.js';
+import { lineFlow, lineWorld } from '../core/replicate.js';
+import { cartPath, cartStations } from '../core/cart.js';
+import { floorOf, openingGates, wallLines } from '../core/area.js';
+import { isTruck } from '../data/library.js';
 import { FAULT_DEFAULTS, getDown } from '../core/faults.js';
 import { assignCrew, crewRows, isWorkable, normalizeShifts, shiftAt } from '../core/crew.js';
 import { shippedTotal, getShipped } from '../core/simStore.js';
@@ -33,6 +37,12 @@ function useModelsVersion() {
  *  @returns { world, machines, ready }
  *    world    `replicate` 에 그대로 넘기는 함수 (틱마다 halt 를 다시 답한다)
  *    ready    돌릴 것이 있는가 — 설비가 없으면 반복 실행에 뜻이 없다
+ *    capacity **돌리기 전에** 계산으로 나오는 천장 (개/분)
+ *    flow     벨트와 카트를 굴리는 그릇 — 이것이 있어야 물건이 밖으로 나간다
+ *
+ *  천장을 여기서 함께 내는 이유: 반복 실행이 내는 것은 **잰 값**이고 천장은
+ *  **계산값**이라, 둘을 나란히 놓아야 「그 차이가 곧 손실」이라는 말이 된다.
+ *  같은 도면에서 나와야 하므로 collection point 도 하나여야 한다.
  */
 export function useLineWorld() {
   const { state, itemOf } = useEditor();
@@ -46,6 +56,22 @@ export function useLineWorld() {
     const linkPaths = state.links
       .map((link) => ({ link, path: linkPath(link, placed, itemOf) }))
       .filter((x) => x.path);
+
+    /**
+     * 옮기는 쪽 — **화면의 EditorScene 과 같은 식으로** 푼다.
+     *  이것이 없을 때 반복 실행은 설비만 돌렸다. 만든 것이 아무 데도 안 가서
+     *  출력 자리가 차면 전부 막히고, 처리량은 어떤 도면에서든 0 이었다.
+     */
+    const cartPaths = state.carts
+      .map((c) => {
+        const p = cartPath(c);
+        /* 트럭은 싣기만 한다 — 방향이 처음부터 정해진 차량이다 */
+        const opt = { loadOnly: isTruck(itemOf(c.itemId)), roles: c.roles };
+        return p ? { cart: c, path: p, stations: cartStations(p, placed, itemOf, opt) } : null;
+      })
+      .filter(Boolean);
+    const floor = floorOf(state.areas);
+    const gates = openingGates(state.openings, wallLines(state.areas, state.walls));
 
     const machines = machinesOf({ placed, itemOf });
     const beltFlows = beltFlowsOf({ linkPaths, placed, itemOf, beltSpeed: state.beltSpeed });
@@ -68,6 +94,13 @@ export function useLineWorld() {
 
     return {
       ready: machines.length > 0,
+      flow: lineFlow({
+        beltFlows, cartPaths, floor, gates,
+        isTruck: (c) => isTruck(itemOf(c.itemId)),
+      }),
+      capacity: lineBalance({
+        placed, links: state.links, carts: state.carts, itemOf, specOf, beltSpeed: state.beltSpeed,
+      }).capacity,
       machines,
       world: lineWorld({
         beltFlows, machines, placed, itemOf, crew, equips,
@@ -76,5 +109,6 @@ export function useLineWorld() {
       }),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.placed, state.links, state.beltSpeed, state.shifts, itemOf, version]);
+  }, [state.placed, state.links, state.carts, state.areas, state.walls, state.openings,
+      state.beltSpeed, state.shifts, itemOf, version]);
 }

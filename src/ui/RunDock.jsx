@@ -162,7 +162,7 @@ function Knob({ label, value, unit, onChange, min, max, step, hardMax }) {
  *  남는 것보다 낫고, 말없이 비우면 「내 기록이 왜 사라졌지」가 된다.
  */
 function Replicate() {
-  const { world, ready } = useLineWorld();
+  const { world, flow, ready, capacity } = useLineWorld();
   const [reps, setReps] = useState(10);
   const [mins, setMins] = useState(30);
   const [busy, setBusy] = useState(false);
@@ -175,7 +175,7 @@ function Replicate() {
       try {
         const t0 = performance.now();
         const r = replicate({
-          reps, seconds: mins * 60, seed: 1, world,
+          reps, seconds: mins * 60, seed: 1, world, flow,
           pick: () => throughput(shippedTotal(getShipped())) ?? 0,
         });
         setOut({ ...r, ms: performance.now() - t0 });
@@ -233,6 +233,25 @@ function Replicate() {
                 {out.n}판 · 95% 구간 <b className="text-ink3">{out.lo.toFixed(0)} ~ {out.hi.toFixed(0)}</b>
                 {' · '}{Math.round(out.ms)}ms
               </p>
+              {/**
+                * **천장과 잰 값을 나란히 놓는다.**
+                * -----------------------------------------------------------
+                *  「라인 능력」은 계산으로 나오는 천장이고(고장도 없고 굶지도
+                *  않는 라인), 여기 값은 실제로 돌려서 **잰** 것이다. 두 숫자가
+                *  각자 다른 화면에 있으면 사람이 머리로 빼야 하는데, 정작
+                *  **그 차이가 곧 손실**이라 그게 이 도구가 답해야 할 값이다.
+                *
+                *  천장이 0 이면 (벨트가 안 물려 계산이 안 되는 도면) 안 그린다 —
+                *  「0% 」 는 잰 값이 있는데도 아무 말도 못 하는 것보다 나쁘다.
+                */}
+              {capacity > 0 && (
+                <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+                  천장 <b className="text-ink3">{(capacity * 60).toFixed(0)} 개/시</b> 의{' '}
+                  <b className="text-ink2">{Math.round((out.mean / (capacity * 60)) * 100)}%</b> 입니다 —
+                  나머지는 고장 · 굶음 · 막힘으로 샌 것입니다.
+                </p>
+              )}
+
           <p className="mt-1 text-[9.5px] leading-snug text-ink4">
             <b className="text-ink3">± 가 큰 것은 배치가 나쁜 게 아니라</b> 그만큼 흔들린다는 뜻입니다.
             판 수를 늘리면 구간이 좁아집니다.

@@ -68,7 +68,7 @@ export default function Scenarios() {
    *  통째로 죽었다 — 닫혀 있을 때는 훅 일곱, 열면 아홉이 되기 때문이다.
    *  값 검사로는 절대 안 잡히는 종류라, 이 주석이 곧 그 검사다.
    */
-  const { world, ready } = useLineWorld();
+  const { world, flow, ready } = useLineWorld();
   const [busy, setBusy] = useState(false);
 
   if (!state.showScenarios) return null;
@@ -92,7 +92,7 @@ export default function Scenarios() {
    */
   const captureReps = () => {
     const r = replicate({
-      reps: REPS, seconds: REP_MIN * 60, seed: 1, world,
+      reps: REPS, seconds: REP_MIN * 60, seed: 1, world, flow,
       pick: () => throughput(shippedTotal(getShipped())) ?? 0,
     });
     /* 굳힌 뒤에 비운다 — 순서가 바뀌면 담은 값이 0 이 된다 */

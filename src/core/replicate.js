@@ -30,7 +30,10 @@
  * ---------------------------------------------------------------------------
  */
 
-import { resetRun, runMachines } from './sim.js';
+import { newCartUnit, resetRun, runBelt, runCart, runMachines } from './sim.js';
+import { beltCount, makeBelt } from './belt.js';
+import { addLotsShared, addStock, getMade, takeMade } from './simStore.js';
+import { screen } from './faults.js';
 import { haltState } from './halt.js';
 import { getRan } from './metrics.js';
 
@@ -128,6 +131,109 @@ export function differs(a, b) {
  * ======================================================================== */
 
 /**
+ * =============================================================================
+ *  자재를 **옮기는** 쪽 — 벨트와 카트
+ * =============================================================================
+ *  이것이 없을 때 반복 실행은 라인의 절반만 돌았다. `runOnce` 가 `runMachines`
+ *  하나만 불렀으므로 설비는 만들고, 만든 것은 **아무 데도 안 갔다.** 출력 자리가
+ *  차면 전부 막히고, 밖으로 나간 것은 늘 0 이라 처리량이 **구조적으로 0** 이었다.
+ *
+ *  화면에서는 이 일을 BeltItems 와 CartView 가 한다. 규칙은 이미 `core/sim.js`
+ *  에 있으므로(runBelt · runCart) 여기서는 **그릇만** 만들어 같은 함수를 부른다 —
+ *  화면 쪽 콜백(onSpawn · onArrive)까지 같은 규칙으로 옮겼다. 두 벌이 되면
+ *  화면과 표가 어긋나므로, 붙여 놓은 자리를 검사가 지킨다.
+ *
+ *  @param d.beltFlows `beltFlowsOf` 의 결과 (도면에서 나온다 — 판마다 안 바뀐다)
+ *  @param d.cartPaths [{ cart, path, stations }]
+ *  @param d.floor · d.gates · d.isTruck  출하 판정에 쓴다
+ *  @returns { reset, move } — 판을 시작할 때 reset, 매 틱 move(dt, halted)
+ */
+export function lineFlow(d = {}) {
+  const flows = d.beltFlows ?? [];
+  const paths = d.cartPaths ?? [];
+  const isTruck = d.isTruck ?? (() => false);
+
+  /* 벨트 상태 — 칸 수는 경로 길이와 덩어리 간격에서 나온다(화면과 같은 식) */
+  const belts = flows.map((b) => ({
+    ...b,
+    step: Math.max(0.4, b.gap),
+    state: null,
+  }));
+  /* 카트 — 대수만큼 자리를 고르게 나눠 세운다(화면의 startS 와 같은 규칙) */
+  const fleets = paths.map(({ cart, path, stations }) => {
+    const n = Math.max(1, Math.round(cart.count ?? 1));
+    return {
+      cart, path, stations,
+      truck: isTruck(cart),
+      units: [],
+      n,
+      /* 형제들의 자리 — runCart 가 간격을 잴 때 본다 */
+      fleet: [],
+    };
+  });
+
+  const reset = () => {
+    for (const b of belts) b.state = makeBelt(beltCount(b.path?.length ?? 0, b.step));
+    for (const f of fleets) {
+      const len = f.path?.length ?? 0;
+      f.units = Array.from({ length: f.n }, (_, k) => newCartUnit((len * k) / f.n, f.cart.reverse));
+      f.fleet = f.units.map((u) => ({ s: u.s, dir: u.dir }));
+    }
+  };
+  reset();
+
+  /**
+   * 한 틱. `halted` 는 `haltState` 가 돌려준 것 — 벨트가 서는지(links)와
+   * 앞머리가 마르는지(dry)를 화면과 **같은 값**으로 본다.
+   */
+  const move = (dt, halted = {}) => {
+    for (const b of belts) {
+      if (halted.links?.has?.(b.link.uid)) continue;      // 보낼 곳이 없으면 선다
+      const per = Math.max(1, Math.round(b.owner.outputCount ?? 3));
+      const arrived = runBelt(b.state, {
+        speed: b.speed,
+        step: b.step,
+        length: b.path?.length ?? 0,
+        layers: b.layers,
+        feeding: !halted.dry?.has?.(b.link.uid),
+        /* 만들어 놓은 것만 **덩어리 단위로** 싣는다 — 화면의 onSpawn 그대로다 */
+        spawn: (n) => {
+          const bundles = Math.min(n, Math.floor(getMade(b.owner.uid) / per));
+          if (bundles > 0) takeMade(b.owner.uid, bundles * per);
+          return bundles;
+        },
+      }, dt);
+      if (arrived > 0 && b.sink) {
+        /* 불량은 쌓지 않고 버린다. **만든 설비의** 문제로 센다 */
+        const good = screen(arrived, b.owner.scrapRate ?? 0, b.owner.uid);
+        if (good <= 0) continue;
+        if (b.sink.slots) {
+          addLotsShared(b.sink.uid, Array.from({ length: good }, () => b.outKind), (k) => b.sink.slots[k] ?? 0);
+        } else {
+          addStock(b.sink.uid, good, b.sink.cap, b.outKind);
+        }
+      }
+    }
+
+    for (const f of fleets) {
+      const capacity = Math.max(0, f.cart.loadCount ?? (f.truck ? 10 : 3));
+      for (let k = 0; k < f.units.length; k++) {
+        runCart(f.units[k], {
+          path: f.path, stations: f.stations, cart: f.cart,
+          capacity, topUp: f.truck, oneWay: d.oneWay,
+          fleet: f.fleet, gap: d.gap,
+          floor: d.floor, gates: d.gates, shipOutside: f.truck,
+        }, dt);
+        f.fleet[k] = { s: f.units[k].s, dir: f.units[k].dir };
+      }
+    }
+  };
+
+  return { reset, move };
+}
+
+
+/**
  * 도면 한 벌 → **틱마다 다시 답하는** world.
  * ---------------------------------------------------------------------------
  *  「누가 서 있는가」는 도면이 아니라 **지금 재고**에 달려 있어서 매 틱 달라진다.
@@ -154,6 +260,10 @@ export function lineWorld(d = {}) {
     return {
       machines: d.machines,
       equips: d.equips ?? [],
+      /* 옮기는 쪽(lineFlow)이 보는 값 — 벨트가 서는지, 앞머리가 마르는지.
+         화면의 BeltItems 가 running·feeding 으로 받는 것과 같은 값이다. */
+      links: h.links,
+      dry: h.dry,
       halted: h.equips,
       jammed: h.jammed,
       starved: h.starved,
@@ -178,10 +288,14 @@ export function runOnce(d = {}) {
   const step = d.step ?? STEP;
 
   resetRun();
+  d.flow?.reset();
   const n = Math.round(seconds / step);
   for (let i = 0; i < n; i++) {
     const w = typeof d.world === 'function' ? d.world(i * step) : (d.world ?? {});
     runMachines(step, { ...w, rand });
+    /* 만든 것을 **옮긴다** — 이것이 없으면 출력 자리가 차서 전부 막히고,
+       밖으로 나간 것이 없어 처리량이 구조적으로 0 이 된다 */
+    d.flow?.move(step, w);
   }
   return d.pick ? d.pick() : getRan();
 }
