@@ -56,6 +56,10 @@ import { useCostInput } from './useCost.js';
 import { useLineWorld } from './useLineWorld.js';
 import { ciText, replicate } from '../core/replicate.js';
 import { resetRun } from '../core/sim.js';
+import { bestOf, kneeOf, kneeText, knobOf, knobsFor, sweep } from '../core/sweep.js';
+import { worldOf } from '../core/lineup.js';
+import { specReader } from './useLineWorld.js';
+import { isStillage } from '../data/library.js';
 import { MAX_H, MIN_H, dockHeight } from './dockLayout.js';
 
 export { MAX_H, MIN_H, dockHeight };
@@ -672,7 +676,153 @@ function Rates({ rates, set, untouched }) {
 export const DOCK_RUN = 'dock-run';
 export const DOCK_COST = 'dock-cost';
 
-const TABS = [['run', '실행'], ['cost', '원가'], ['reps', '여러 판']];
+/** 손잡이 하나의 한 값에 몇 판 · 한 판 몇 분 — **곡선의 모양**을 보는 자리라 짧다 */
+const SWEEP_REPS = 6;
+const SWEEP_MIN = 20;
+
+/**
+ * **손잡이 돌리기** — 「얼마가 좋은가」.
+ * ---------------------------------------------------------------------------
+ *  「카트를 몇 대 두면 되나?」 지금까지는 값을 손으로 바꾸고 다시 돌리기를
+ *  되풀이해야 답할 수 있었다. 여섯 번 바꾸려면 여섯 번 손을 움직이고, 그
+ *  사이에 앞의 값이 뭐였는지 잊는다.
+ *
+ *  ── **한 값씩 잘라 돌린다** ──────────────────────────────────────────────
+ *  여섯 값 × 여섯 판이면 한 덩어리로 1초가 넘는다. 배치 탐색에서 배운 그대로,
+ *  값 하나를 돌리고 `setTimeout(0)` 으로 숨을 쉰다 — 화면이 안 멈추고 표가
+ *  **한 줄씩 채워지는 것이 보인다.**
+ */
+function Sweep() {
+  const { state, itemOf } = useEditor();
+  const [knob, setKnob] = useState(null);
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState(null);
+
+  /* 이 도면으로 만들 수 있는 손잡이 — 도면이 바뀌면 다시 본다 */
+  const layout = {
+    placed: state.placed, links: state.links, carts: state.carts,
+    areas: state.areas, walls: state.walls, openings: state.openings,
+    shifts: state.shifts, beltSpeed: state.beltSpeed,
+    isStillage: (p) => isStillage(itemOf(p.itemId)),
+  };
+  const knobs = knobsFor(layout);
+  const pick = knob && knobs.some((k) => k.id === knob) ? knob : knobs[0]?.id ?? null;
+
+  const go = () => {
+    if (!pick) return;
+    setBusy(true);
+    setRows([]);
+    setWhy(null);
+    const k = knobOf(pick);
+    const values = k.values(layout);
+    const acc = [];
+    const specOf = specReader();
+    let i = 0;
+    const tick = () => {
+      try {
+        /* 값 하나만 돌린다 — 그래야 화면이 숨을 쉰다 */
+        const r = sweep({
+          knob: pick, layout, values: [values[i]],
+          build: (d) => worldOf({ ...d, itemOf, specOf }),
+          pick: () => throughput(shippedTotal(getShipped())) ?? 0,
+          seconds: SWEEP_MIN * 60, reps: SWEEP_REPS, seed: 1,
+        });
+        /* 굳힌 뒤에 비운다 — 여러 판이 화면의 이번 실행과 같은 자리를 쓴다 */
+        resetRun();
+        if (r.rows?.length) acc.push(r.rows[0]);
+        setRows([...acc]);
+        if (++i < values.length) { setTimeout(tick, 0); return; }
+        if (!acc.some((x) => x.mean > 0)) setWhy('all-zero');
+      } catch (e) {
+        console.error('[손잡이 돌리기] 실패', e);
+        setWhy('error');
+      }
+      setBusy(false);
+    };
+    setTimeout(tick, 30);
+  };
+
+  if (!knobs.length) {
+    return (
+      <p className="text-[10.5px] leading-relaxed text-ink4">
+        돌려 볼 손잡이가 없습니다 — 카트나 벨트, 교대조를 두면 <b className="text-ink3">얼마가 좋은지</b>를
+        값을 바꿔 가며 재 봅니다.
+      </p>
+    );
+  }
+
+  const k = knobOf(pick);
+  const knee = rows?.length ? kneeOf(rows) : null;
+  const top = rows?.length ? bestOf(rows) : null;
+  const wide = top ? Math.max(1, top.mean + top.half) : 1;
+
+  return (
+    <>
+      <div className="flex flex-wrap gap-1">
+        {knobs.map((one) => (
+          <button
+            key={one.id}
+            type="button"
+            onClick={() => { setKnob(one.id); setRows(null); setWhy(null); }}
+            className={`rounded px-1.5 py-0.5 text-[10px] ring-1 transition-colors ${
+              pick === one.id
+                ? 'bg-sky-500/15 text-sky-600 ring-sky-500/40'
+                : 'bg-raise text-ink4 ring-edge hover:bg-raiseh hover:text-ink3'
+            }`}
+          >
+            {one.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-[9.5px] leading-snug text-ink4">{k?.why}</p>
+
+      <button type="button" onClick={go} disabled={busy} className={`${OUT_BTN} mt-1.5 w-full justify-center disabled:opacity-50`}>
+        <Repeat size={13} /> {busy ? `돌리는 중… (${rows?.length ?? 0}/${k.values(layout).length})` : '값을 바꿔 가며 돌리기'}
+      </button>
+
+      {rows?.length > 0 && (
+        <div className="mt-1.5 border-t border-line pt-1.5">
+          {rows.map((r) => (
+            <div key={r.v} className="flex items-center gap-1.5 text-[10px]">
+              <span className="w-12 shrink-0 text-right tabular-nums text-ink3">{r.v}{k.unit}</span>
+              <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-kbd">
+                <span
+                  className={`block h-full rounded-full ${knee && r.v === knee.v ? 'bg-emerald-500' : 'bg-sky-500'}`}
+                  style={{ width: `${Math.min(100, (r.mean / wide) * 100)}%` }}
+                />
+              </span>
+              <span className="w-24 shrink-0 text-right tabular-nums text-ink2">
+                {r.mean.toFixed(0)}{r.n > 1 && <span className="text-ink4"> ± {r.half.toFixed(0)}</span>}
+              </span>
+            </div>
+          ))}
+          {!busy && (
+            <p className="mt-1.5 text-[10px] leading-snug text-ink2">
+              <b className="text-emerald-600">{kneeText(knee, k)}</b>
+            </p>
+          )}
+          <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+            값마다 <b className="text-ink4">{SWEEP_REPS}판 × {SWEEP_MIN}분</b>, 씨앗은 같습니다 —
+            값 사이의 차이만 남게 하려는 것입니다.
+          </p>
+        </div>
+      )}
+
+      {why === 'all-zero' && (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-ink4">
+          어느 값에서도 <b className="text-ink3">밖으로 나간 것이 없습니다</b>. 처리량은 트럭이 개구부로
+          실어 낸 것을 셉니다 — 출하 경로를 놓아야 잡힙니다.
+        </p>
+      )}
+      <p className="mt-1.5 text-[9.5px] leading-snug text-amber-600">
+        화면의 이번 실행은 <b>비워집니다</b> — 여러 판이 같은 자리를 쓰기 때문입니다.
+      </p>
+    </>
+  );
+}
+
+const TABS = [['run', '실행'], ['cost', '원가'], ['reps', '여러 판'], ['sweep', '얼마나']];
 
 export default function RunDock() {
   const { state, dispatch } = useEditor();
@@ -842,6 +992,33 @@ export default function RunDock() {
             <p className="mt-1.5 text-[9.5px] leading-snug text-ink4">
               판마다 <b className="text-ink4">처음부터</b> 시작합니다. 씨앗은 고정이라 같은 도면을
               다시 돌리면 같은 결과가 나옵니다.
+            </p>
+          </Col>
+        </div>
+      )}
+
+      {open && tab === 'sweep' && (
+        <div className="flex min-h-0 flex-1 divide-x divide-line overflow-x-auto">
+          <Col title="값을 바꿔 가며" width={300}>
+            <Sweep />
+          </Col>
+          <Col title="무엇을 답하나">
+            <p className="text-[10.5px] leading-relaxed text-ink3">
+              「<b className="text-ink2">카트를 몇 대 두면 되나</b>」 「버퍼를 얼마로 잡아야 하나」 —
+              계획하는 사람이 실제로 묻는 질문입니다. 값을 손으로 바꾸고 다시 돌리기를 되풀이하는
+              대신, 도구가 <b className="text-ink2">값을 바꿔 가며 돌려 보고</b> 표로 냅니다.
+            </p>
+            <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink4">
+              값마다 <b className="text-ink3">같은 난수</b>를 먹입니다. 다른 운을 주면 곡선이 들쭉날쭉해서
+              「여기서 꺾인다」가 운인지 실력인지 알 수 없습니다.
+            </p>
+            <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink4">
+              답은 <b className="text-ink3">무릎</b>입니다 — 「이만큼이면 충분하다」. 표에서 제일 큰 값이
+              아닙니다: 흔들림 안에서 우연히 위로 튄 값을 최고라고 하면 <b className="text-ink3">필요 없는
+              카트를 더 사게</b> 됩니다.
+            </p>
+            <p className="mt-1.5 text-[9.5px] leading-snug text-ink4">
+              한 값씩 잘라 돌리므로 화면이 안 멈추고 표가 한 줄씩 채워집니다.
             </p>
           </Col>
         </div>
