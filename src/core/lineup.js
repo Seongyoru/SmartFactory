@@ -19,6 +19,7 @@
  */
 
 import { inputCapOf, isSource, needFor, outKindOf, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
+import { ruleOf } from './dispatch.js';
 import {
   batchOf, batchWaitOf, cycleOf, lotOf, outputCapFor, reworkOf, setupOf, shapeOf, spacingFor,
   unitCycleOf, varOf,
@@ -141,6 +142,8 @@ export function machinesOf(d = {}) {
             /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
             lot: lotOf(p, item),
             setupSec: setupOf(p, item),
+            /* 다음 품종을 고르는 규칙 — 기본은 「차례대로」(예전 그대로) */
+            rule: ruleOf(p, item),
             /* 배치 공정 — 한 판에 몇 개를 굽나. 1 이면 예전 그대로다 */
             batch: batchOf(p, item),
             waitSec: batchWaitOf(p, item),
@@ -241,6 +244,12 @@ export function worldOf(d = {}) {
       beltFlows, machines, placed, itemOf, crew, equips,
       downMap: getDown,
       shipped: () => shippedTotal(getShipped()),
+      /**
+       * **오더가 라인을 이끈다** — 디스패칭 규칙이 이 값을 읽는다.
+       *  진척은 매 틱 달라지므로 함수로 넘긴다. 여기서 한 번 계산해 두면
+       *  「처음에 밀렸던 것」을 끝까지 먼저 만드는 엉뚱한 라인이 된다.
+       */
+      orders: d.orders ?? [],
     }),
     flow: lineFlow({
       beltFlows, cartPaths, floor, gates,

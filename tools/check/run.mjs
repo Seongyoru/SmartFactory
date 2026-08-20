@@ -49,6 +49,7 @@ await import('./multi.mjs');
 await import('./batch.mjs');
 await import('./rework.mjs');
 await import('./calendar.mjs');
+await import('./dispatch.mjs');
 await import('./random.mjs');
 await import('./sweep.mjs');
 

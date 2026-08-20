@@ -87,13 +87,14 @@ import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox, shelfCapacity } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import {
-  addLotsShared, addMade, addStock, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
+  addLotsShared, addMade, addStock, arrivedOf, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
   useAllStock, useShipped, takeBundles,
 } from '../core/simStore.js';
 import { cycleOf, outputCapFor, runMachine, shapeOf as varShapeOf, spacingFor, varOf } from '../core/process.js';
 import { isClosed, rawStep, setShifts, tick, useElapsed } from '../core/clock.js';
 import { runMachines } from '../core/sim.js';
 import { haltState } from '../core/halt.js';
+import { orderInfoOf } from '../core/orders.js';
 import { beltFlowsOf, machinesOf } from '../core/lineup.js';
 import { accumulate, plannedStop } from '../core/metrics.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
@@ -125,8 +126,19 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts }) {
-  const shipped = shippedTotal(useShipped());
+function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts, orders }) {
+  const ship = useShipped();
+  const shipped = shippedTotal(ship);
+  const elapsedSec = useElapsed();
+  /**
+   * **오더가 라인을 이끈다** — 디스패칭 규칙이 읽는 값(`dispatch.js`).
+   *  헤드리스 쪽은 `lineWorld` 가 같은 함수로 같은 값을 만든다. 두 곳이 따로
+   *  계산하면 화면에서 본 순서와 반복 실행의 순서가 갈린다.
+   */
+  const orderInfo = useMemo(
+    () => orderInfoOf(orders, { shipped: ship, arrivedOf }, elapsedSec),
+    [orders, ship, elapsedSec],
+  );
   /* 교대표를 시계에 물린다 — **쉬는 시간 판정이 시계 안에 있어야** 벨트·카트·
      설비가 한 번에 선다(clock.js 의 simStep). 소비자마다 따로 물으면 하나를
      반드시 빠뜨린다. */
@@ -139,7 +151,7 @@ function SimClock({ running, halted, jammed, starved, unmanned, equips, machines
     if (!(dt > 0)) return;
     /* 굴리는 일은 core/sim.js 가 한다 — 화면 없이도 같은 함수가 돈다.
        고장 판정 · 설비 공정 · 「선 이유를 하나만 세기」가 전부 거기 있다. */
-    runMachines(dt, { equips, machines, halted, jammed, starved, unmanned, shipped });
+    runMachines(dt, { equips, machines, halted, jammed, starved, unmanned, shipped, orderInfo });
   });
   return null;
 }
@@ -2016,6 +2028,7 @@ function SceneContent() {
         equips={faultParams}
         machines={machines}
         shifts={state.shifts}
+        orders={state.orders}
       />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />

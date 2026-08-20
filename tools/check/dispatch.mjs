@@ -1,0 +1,205 @@
+/**
+ * =============================================================================
+ *  디스패칭 — **다음에 무엇을 만들까**
+ * =============================================================================
+ *  품종을 여럿 든 설비는 로트를 채울 때마다 고를 것이 생긴다. 규칙을 바꾸면
+ *  **같은 설비로 같은 개수를 만들어도** 납기를 맞추기도 하고 놓치기도 한다.
+ *
+ *  ── 여기서 지켜야 하는 것 ─────────────────────────────────────────────────
+ *  **① 이미 그린 도면이 안 바뀐다.** 기본은 「차례대로」다.
+ *  **② 답을 못 내면 차례대로.** 오더가 없거나 견줄 것이 없는데 아무거나 고르면
+ *     같은 도면이 매번 다르게 돌아 견줄 수가 없다.
+ *  **③ 굶는 품종이 없다.** 같은 값이면 차례대로 가른다 — 안 그러면 늘 첫 자리가
+ *     이겨서 뒤쪽 품종을 영영 안 만든다.
+ *  **④ 두 길이 같은 값을 본다.** 화면과 헤드리스가 각자 오더를 읽으면 눈으로 본
+ *     순서와 반복 실행의 순서가 갈린다.
+ * ---------------------------------------------------------------------------
+ */
+
+import assert from 'node:assert/strict';
+import { SRC, group, readSrc, t } from './_harness.mjs';
+
+group('디스패칭');
+
+const D = await import(SRC + 'core/dispatch.js');
+const O = await import(SRC + 'core/orders.js');
+const P = await import(SRC + 'core/process.js');
+
+const KINDS = ['PART_R', 'PART_G', 'PART_B'];
+
+/* ---------- 값 읽기 ------------------------------------------------------- */
+t('규칙은 **기본이 차례대로** — 이미 그린 도면은 안 바뀐다', () => {
+  assert.equal(D.ruleOf({}, {}), D.RULE.ORDER);
+  assert.equal(D.ruleOf({ dispatch: 'due' }, {}), D.RULE.DUE);
+  assert.equal(D.ruleOf({ dispatch: 'behind' }, {}), D.RULE.BEHIND);
+  /* 손으로 고친 도면에 없는 규칙이 적혀 있어도 차례대로 */
+  assert.equal(D.ruleOf({ dispatch: 'spt' }, {}), D.RULE.ORDER);
+});
+
+/* ---------- 차례대로 ------------------------------------------------------ */
+t('차례대로는 **돌고 돈다**', () => {
+  assert.equal(D.nextSlot(0, KINDS), 1);
+  assert.equal(D.nextSlot(1, KINDS), 2);
+  assert.equal(D.nextSlot(2, KINDS), 0);
+  /* 품종이 하나뿐이면 고를 것이 없다 */
+  assert.equal(D.nextSlot(0, ['PART_R']), 0);
+});
+
+t('오더가 없으면 **어느 규칙이든 차례대로**', () => {
+  for (const rule of [D.RULE.DUE, D.RULE.BEHIND]) {
+    assert.equal(D.nextSlot(0, KINDS, rule, () => null), 1, rule);
+    assert.equal(D.nextSlot(0, KINDS, rule, null), 1, rule);
+  }
+});
+
+/* ---------- 납기 먼저 ----------------------------------------------------- */
+t('**납기가 급한 것**을 고른다', () => {
+  const info = (k) => ({
+    PART_R: { due: 900, ratio: 0.1 },
+    PART_G: { due: 120, ratio: 0.9 },     // 가장 급하다
+    PART_B: { due: 600, ratio: 0.5 },
+  })[k] ?? null;
+  assert.equal(D.nextSlot(0, KINDS, D.RULE.DUE, info), 1);
+  /* 지금 만들고 있는 것이 가장 급해도 **다시 그것을 고른다** — 로트를 또 태운다 */
+  assert.equal(D.nextSlot(1, KINDS, D.RULE.DUE, info), 1);
+});
+
+t('**다 찬 오더는 안 본다** — 끝난 것을 계속 만들면 남은 것이 안 끝난다', () => {
+  const info = (k) => (k === 'PART_G' ? null : { due: 900, ratio: 0.2 });
+  /* PART_G 가 가장 급했더라도 다 찼으면(null) 안 고른다 */
+  assert.notEqual(D.nextSlot(0, KINDS, D.RULE.DUE, info), 1);
+});
+
+/* ---------- 밀린 것 먼저 --------------------------------------------------- */
+t('**가장 뒤처진 것**을 고른다', () => {
+  const info = (k) => ({
+    PART_R: { due: Infinity, ratio: 0.8 },
+    PART_G: { due: Infinity, ratio: 0.9 },
+    PART_B: { due: Infinity, ratio: 0.1 },   // 가장 밀렸다
+  })[k] ?? null;
+  assert.equal(D.nextSlot(0, KINDS, D.RULE.BEHIND, info), 2);
+  assert.equal(D.nextSlot(2, KINDS, D.RULE.BEHIND, info), 2);
+});
+
+t('납기를 안 정한 오더는 **급하지 않다**', () => {
+  const info = (k) => (k === 'PART_R'
+    ? { due: Infinity, ratio: 0.1 }
+    : { due: 300, ratio: 0.9 });
+  /* 납기가 있는 쪽이 이긴다 */
+  assert.notEqual(D.nextSlot(0, KINDS, D.RULE.DUE, info), 0);
+  /* 밀린 것 먼저로 보면 반대다 — 규칙이 다르면 답도 달라야 한다 */
+  assert.equal(D.nextSlot(0, KINDS, D.RULE.BEHIND, info), 0);
+});
+
+t('**같은 값이면 차례대로** — 굶는 품종이 없어야 한다', () => {
+  const same = () => ({ due: 300, ratio: 0.5 });
+  /* 늘 첫 자리가 이기면 뒤쪽 품종을 영영 안 만든다 */
+  assert.equal(D.nextSlot(0, KINDS, D.RULE.DUE, same), 1);
+  assert.equal(D.nextSlot(1, KINDS, D.RULE.DUE, same), 2);
+  assert.equal(D.nextSlot(2, KINDS, D.RULE.DUE, same), 0);
+});
+
+/* ---------- 오더에서 값을 뽑는다 ------------------------------------------ */
+const ORDERS = [
+  { uid: 'O1', kind: 'PART_R', qty: 100, dueMin: 30, at: 'ship' },
+  { uid: 'O2', kind: 'PART_G', qty: 100, dueMin: 10, at: 'ship' },
+];
+
+t('오더에서 **남은 납기와 진척**을 뽑는다', () => {
+  const info = O.orderInfoOf(ORDERS, { shipped: { PART_R: 50 } }, 300);
+  assert.equal(info('PART_R').due, 30 * 60 - 300);
+  assert.equal(info('PART_R').ratio, 0.5);
+  assert.equal(info('PART_G').due, 10 * 60 - 300);
+  assert.equal(info('PART_G').ratio, 0);
+  assert.equal(info('PART_B'), null, '오더가 없는 종류에 값을 준다');
+});
+
+t('**다 찬 오더는 목록에서 빠진다**', () => {
+  const info = O.orderInfoOf(ORDERS, { shipped: { PART_R: 100 } }, 0);
+  assert.equal(info('PART_R'), null, '다 찼는데 계속 만들라고 한다');
+  assert.ok(info('PART_G'));
+});
+
+t('오더가 없으면 **아무 값도 안 준다**', () => {
+  assert.equal(O.orderInfoOf([], {}, 0)('PART_R'), null);
+});
+
+t('한 종류에 오더가 여럿이면 **더 급한 쪽**', () => {
+  const two = [
+    { uid: 'A', kind: 'PART_R', qty: 100, dueMin: 60, at: 'ship' },
+    { uid: 'B', kind: 'PART_R', qty: 100, dueMin: 10, at: 'ship' },
+  ];
+  assert.equal(O.orderInfoOf(two, {}, 0)('PART_R').due, 600);
+});
+
+/* ---------- 굴려 본다 ----------------------------------------------------- */
+/** 로트를 채울 때마다 무엇을 골랐는지 — 실제로 `runMachine` 을 거친다 */
+const sequence = (rule, info, rounds = 6) => {
+  P.resetWork();
+  const seen = [];
+  for (let i = 0; i < rounds * 40; i++) {
+    P.runMachine('M', 1, {
+      cycleSec: 1, room: 9999, lot: 2, kinds: 3,
+      pay: () => true,
+      pickSlot: (cur, many) => D.nextSlot(cur, KINDS.slice(0, many), rule, info),
+    });
+    const s = P.slotOf('M');
+    if (seen[seen.length - 1] !== s) seen.push(s);
+  }
+  return seen;
+};
+
+t('**굴려도 규칙대로** 고른다 — 차례대로', () => {
+  /* 첫 값은 **시작 자리(0)** 다 — 아직 아무것도 안 골랐을 때의 상태다 */
+  const seq = sequence(D.RULE.ORDER, null);
+  assert.deepEqual(seq.slice(0, 7), [0, 1, 2, 0, 1, 2, 0], `${seq.join(',')}`);
+});
+
+t('**굴려도 규칙대로** 고른다 — 급한 것만 계속', () => {
+  /* 두 번째 품종만 급하고 진척이 안 바뀌면 계속 그것만 만든다.
+     실제 라인에서는 만들수록 진척이 차서 다른 것으로 넘어간다 */
+  const info = (k) => (k === 'PART_G' ? { due: 60, ratio: 0 } : { due: 9999, ratio: 0 });
+  const seq = sequence(D.RULE.DUE, info);
+  /* 시작 자리(0)에서 급한 것(1)으로 넘어간 뒤 **거기서 안 움직인다** */
+  assert.deepEqual(seq, [0, 1], `${seq.join(',')}`);
+  /* 같은 도면을 차례대로로 돌리면 셋을 다 돈다 — 규칙이 답을 바꿔야 뜻이 있다 */
+  assert.ok(sequence(D.RULE.ORDER, info).length > 3, '규칙을 바꿔도 결과가 같다');
+});
+
+/* ---------- 배선 ---------------------------------------------------------- */
+const simSrc = await readSrc('core/sim.js');
+const lineupSrc = await readSrc('core/lineup.js');
+const repSrc = await readSrc('core/replicate.js');
+const sceneSrc = await readSrc('scene/EditorScene.jsx');
+const inspSrc = await readSrc('ui/Inspector.jsx');
+const procSrc = await readSrc('core/process.js');
+
+t('굴리는 쪽이 규칙을 넘긴다', () => {
+  assert.ok(lineupSrc.includes('rule: ruleOf(p, item)'), '설비 목록이 규칙을 안 싣는다');
+  assert.ok(simSrc.includes('pickSlot: (cur) => nextSlot(cur, many.map((k) => k.out), m.rule, d.orderInfo)'),
+    'sim 이 규칙을 안 쓴다');
+  assert.ok(procSrc.includes('pickSlot ? pickSlot(slotOf(uid), many) : (slotOf(uid) + 1) % many'),
+    '공정이 규칙을 안 본다');
+});
+
+t('두 길이 **같은 함수**로 오더를 읽는다', () => {
+  /* 각자 계산하면 눈으로 본 순서와 반복 실행의 순서가 갈린다 */
+  assert.ok(repSrc.includes('orderInfo: orderInfoOf('), '헤드리스가 오더를 안 읽는다');
+  assert.ok(sceneSrc.includes('orderInfoOf(orders, { shipped: ship, arrivedOf }, elapsedSec)'),
+    '화면이 오더를 안 읽는다');
+  /* 진척은 매 틱 달라진다 — 한 번 만들어 두면 처음에 밀렸던 것만 계속 만든다 */
+  assert.ok(repSrc.includes('return (elapsed = 0) => {'), '헤드리스가 오더를 한 번만 읽는다');
+});
+
+t('화면이 규칙을 받고, **품종이 여럿일 때만** 보여 준다', () => {
+  assert.ok(inspSrc.includes("patch: { dispatch: e.target.value }"), '규칙을 저장 안 한다');
+  assert.ok(inspSrc.includes('{kinds > 1 && ('), '품종이 하나인 설비에도 고르기가 뜬다');
+  /* 규칙마다 무슨 뜻인지 적어 준다 — 이름만으로는 EDD 를 못 읽는다 */
+  assert.ok(inspSrc.includes('RULE_HINT[rule]'), '규칙이 무슨 뜻인지 안 말한다');
+});
+
+t('있지도 않은 선택지를 두지 않는다', () => {
+  /* 한 설비의 품종들은 공정 시간이 같아서 SPT 로 고를 것이 없다 */
+  assert.deepEqual(Object.values(D.RULE), ['order', 'due', 'behind']);
+  assert.equal(/SPT|짧은 것 먼저/.test(inspSrc), false, '고를 수 없는 규칙을 화면에 뒀다');
+});

@@ -21,6 +21,7 @@ import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
 import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
 import { deltaText, improvePlan } from '../core/improve.js';
 import { gainText, searchLayout } from '../core/optimize.js';
+import { RULE, RULE_HINT, RULE_LABEL, ruleOf } from '../core/dispatch.js';
 import { worldOf } from '../core/lineup.js';
 import { replicate } from '../core/replicate.js';
 import { captureRun } from '../core/scenarios.js';
@@ -781,6 +782,8 @@ function EquipmentPanel({ placed }) {
   const setupSec = setupOf(placed, item);
   /** 이 설비가 든 품종 수 — 슬라이더의 **이름이 여기에 달려 있다** */
   const kinds = recipesOf(placed).length;
+  /** 로트를 채웠을 때 다음 품종을 무엇으로 고르나 (dispatch.js) */
+  const rule = ruleOf(placed, item);
   /**
    * 배치 공정 — **공정 시간은 한 판에 드는 시간이다.**
    *  20개를 600초에 굽는 오븐은 600초짜리 설비가 아니라 30초/개다. 개당으로
@@ -1021,6 +1024,33 @@ function EquipmentPanel({ placed }) {
               step={SETUP_RANGE[2]}
               onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { setupSec: v } })}
             />
+          )}
+          {/**
+            * 디스패칭 — **다음에 무엇을 만들까.**
+            * -----------------------------------------------------------------
+            *  품종이 하나면 고를 것이 없다. 여럿일 때만 뜬다.
+            *
+            *  규칙을 바꾸면 **같은 설비로 같은 개수를 만들어도** 납기를 맞추기도
+            *  하고 놓치기도 한다 — 그것이 이 손잡이의 값이다. 그리고 이 규칙들이
+            *  오더를 읽으므로, 비로소 **오더가 라인을 움직인다.**
+            */}
+          {kinds > 1 && (
+            <label className="mt-2 block">
+              <span className="mb-1 flex items-center justify-between text-[11px] text-ink3">
+                다음 품종 고르기
+                <span className="text-[10px] font-normal text-ink4">{RULE_LABEL[rule]}</span>
+              </span>
+              <select
+                value={rule}
+                onChange={(e) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { dispatch: e.target.value } })}
+                className="w-full rounded-md border border-edge bg-field px-2 py-1.5 text-xs text-ink outline-none focus:border-sky-500/60"
+              >
+                {Object.values(RULE).map((k) => (
+                  <option key={k} value={k}>{RULE_LABEL[k]}</option>
+                ))}
+              </select>
+              <span className="mt-1 block text-[9.5px] leading-snug text-ink4">{RULE_HINT[rule]}</span>
+            </label>
           )}
           {lot > 0 && setupSec > 0 && (
             <p className="mt-1 text-[9.5px] leading-snug text-ink4">

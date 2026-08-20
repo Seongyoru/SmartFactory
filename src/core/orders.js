@@ -96,6 +96,36 @@ export function doneOf(order, { shipped = {}, arrivedOf = () => 0 } = {}) {
 }
 
 export const remainOf = (order, done) => Math.max(0, (order?.qty ?? 0) - Math.max(0, done));
+
+/**
+ * 종류마다 **얼마나 급하고 얼마나 밀렸나** — 디스패칭이 읽는 값.
+ * ---------------------------------------------------------------------------
+ *  설비가 「다음에 무엇을 만들까」를 정할 때 보는 것이 이것뿐이다(`dispatch.js`).
+ *  고르는 규칙은 순수 함수로 두고, **재고와 시계를 읽는 일은 여기서** 한다 —
+ *  두 곳에서 읽으면 화면과 헤드리스가 서로 다른 값을 본다.
+ *
+ *  한 종류에 오더가 여럿이면 **가장 급한 것**을 그 종류의 값으로 본다.
+ *  다 찬 오더는 안 본다 — 끝난 것을 계속 만들면 남은 오더가 영영 안 끝난다.
+ *
+ *  @returns (종류) => { due, ratio } · 볼 오더가 없으면 null
+ *            due   남은 납기(초). 납기를 안 정했으면 Infinity(급하지 않다)
+ *            ratio 진척 0~1
+ */
+export function orderInfoOf(orders, ctx = {}, elapsedSec = 0) {
+  const rows = normalizeOrders(orders);
+  if (!rows.length) return () => null;
+  const by = new Map();
+  for (const o of rows) {
+    const done = doneOf(o, ctx);
+    if (done >= o.qty) continue;                       // 다 찼다
+    const due = o.dueMin > 0 ? o.dueMin * 60 - elapsedSec : Infinity;
+    const cur = { due, ratio: progressOf(o, done) };
+    const had = by.get(o.kind);
+    /* 같은 종류에 오더가 여럿이면 **더 급한 쪽**을 남긴다 */
+    if (!had || cur.due < had.due) by.set(o.kind, cur);
+  }
+  return (kind) => by.get(kind) ?? null;
+}
 export const progressOf = (order, done) =>
   (order?.qty > 0 ? Math.min(1, Math.max(0, done / order.qty)) : 0);
 

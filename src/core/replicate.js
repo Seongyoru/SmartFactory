@@ -31,10 +31,10 @@
  */
 
 import { isClosedAt } from './crew.js';
+import { orderInfoOf } from './orders.js';
 import { newCartUnit, resetRun, runBelt, runCart, runMachines } from './sim.js';
 import { beltCount, makeBelt } from './belt.js';
-import { addLotsShared, addStock, takeBundles } from './simStore.js';
-import { screen } from './faults.js';
+import { addLotsShared, addStock, arrivedOf, getShipped, takeBundles } from './simStore.js';
 import { haltState } from './halt.js';
 import { getRan } from './metrics.js';
 
@@ -295,7 +295,7 @@ export function lineFlow(d = {}) {
  *  @param d.downMap  () => 지금 고장 난 설비. `faults.getDown` 을 그대로 준다
  */
 export function lineWorld(d = {}) {
-  return () => {
+  return (elapsed = 0) => {
     const h = haltState({
       beltFlows: d.beltFlows,
       machines: d.machines,
@@ -316,6 +316,15 @@ export function lineWorld(d = {}) {
       starved: h.starved,
       unmanned: h.unmanned,
       shipped: d.shipped ? d.shipped() : 0,
+      /**
+       * **오더가 라인을 이끈다** — 디스패칭 규칙(`dispatch.js`)이 읽는 값.
+       *  진척은 매 틱 달라지므로 **여기서 매번 다시 뽑는다.** 한 번 만들어
+       *  두면 「처음에 밀렸던 것」을 끝까지 먼저 만드는 엉뚱한 라인이 된다.
+       */
+      orderInfo: orderInfoOf(d.orders ?? [], {
+        shipped: getShipped(),
+        arrivedOf,
+      }, elapsed),
     };
   };
 }

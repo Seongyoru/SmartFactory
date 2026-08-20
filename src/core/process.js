@@ -269,6 +269,8 @@ export function resetWork(uid = null) {
  *                  없으면 다 양품이다
  *  @param reworkSec 불량 한 개를 다시 만드는 데 드는 시간(초). 0 이면 **버린다**
  *  @param onRedo   재작업 줄에 넣은 개수를 알린다 (세는 쪽이 화면에 쓴다)
+ *  @param pickSlot 로트를 채웠을 때 **다음 품종**을 고른다 `(지금, 개수) => 자리`.
+ *                  없으면 차례대로 (`dispatch.js` 가 규칙을 안다)
  *  @returns 이번 프레임에 나온 **양품 개수**
  *
  *  한 프레임에 여러 개가 끝날 수 있다(높은 배속·짧은 공정). 남는 시간을 버리지
@@ -279,7 +281,7 @@ export function runMachine(uid, dt, {
   cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
   lot = 0, setupSec = 0, shape = DEFAULT_SHAPE, kinds = 1,
   batch = 1, waitSec = 0, avail = null,
-  check = null, reworkSec = 0, onRedo = null,
+  check = null, reworkSec = 0, onRedo = null, pickSlot = null,
 }) {
   took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
@@ -388,7 +390,8 @@ export function runMachine(uid, dt, {
       if (n >= lot) {
         lots.set(uid, 0);
         const many = Math.max(1, Math.round(kinds));
-        if (many > 1) slots.set(uid, (slotOf(uid) + 1) % many);
+        /* 다음 품종은 **규칙이 고른다** — 없으면 차례대로 (dispatch.js) */
+        if (many > 1) slots.set(uid, pickSlot ? pickSlot(slotOf(uid), many) : (slotOf(uid) + 1) % many);
         if (setupSec > 0) {
           const use = Math.min(t, setupSec);
           t -= use;
