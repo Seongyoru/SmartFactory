@@ -3510,7 +3510,7 @@ function Tidy({ per }) {
           </ol>
           <button
             type="button" onClick={apply}
-            className="mt-1.5 w-full rounded-md bg-sky-500/15 px-2 py-1 text-[11px] font-medium text-sky-600 ring-1 ring-sky-500/40 hover:bg-sky-500/25"
+            className={`${OUT_BTN} mt-1.5 w-full justify-center`}
           >
             이대로 옮기기 ({plan.steps.length}번)
           </button>
