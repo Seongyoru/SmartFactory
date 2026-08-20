@@ -36,12 +36,12 @@
 import { followDistance, forgetStation, loadRoom, pickSet, stepCart } from './cart.js';
 import { advanceBelt, beltOffset } from './belt.js';
 import { runMachine, resetWork, setupTook, slotOf } from './process.js';
-import { slotShares } from './bom.js';
+import { countKinds, needTimes, scaleNeed, slotShares } from './bom.js';
 import { resetFaults, resetQuality, stepFaults } from './faults.js';
 import { accumulate, accumulateCart, resetMetrics } from './metrics.js';
 import {
   addByGroup, addLots, addLotsShared, addShipped, addMade, clearStock,
-  getMade, takeEach, takeLots, takeMade,
+  getLots, getMade, takeEach, takeLots, takeMade,
 } from './simStore.js';
 import { inGate, pointInMP } from './area.js';
 import { resetClock } from './clock.js';
@@ -108,6 +108,9 @@ export function runMachines(dt, d = {}) {
     const now = many.length ? many[slotOf(m.uid) % many.length] : null;
     const room = m.cap - getMade(m.uid);
     if (room <= 0) continue;
+    /* 배치 공정 — 한 판에 여러 개. 판을 걸 때 재료도 **그만큼 한꺼번에** 낸다.
+       `need` 는 한 개분이라 판 크기를 곱한다 */
+    const need = now?.need ?? m.need;
     const n = runMachine(m.uid, dt, {
       cycleSec: m.cycleSec,
       cycleVar: m.cycleVar,
@@ -120,7 +123,11 @@ export function runMachines(dt, d = {}) {
       room,
       /* `kinds` 가 없는 설비 객체(옛 꼴)는 `need` 를 그대로 쓴다 — 검사가
          이걸 잡았다. 새 자리를 만들었다고 옛 자리가 죽으면 안 된다. */
-      pay: (now?.need ?? m.need) ? () => takeEach(m.uid, now?.need ?? m.need) : null,
+      batch: m.batch,
+      waitSec: m.waitSec,
+      /* 지금 재료로 **몇 개**를 만들 수 있나 — 판이 찼는지 보는 값이다 */
+      avail: need ? () => needTimes(countKinds(getLots(m.uid)), need) : null,
+      pay: need ? (n) => takeEach(m.uid, scaleNeed(need, n)) : null,
       rand,
     });
     if (n > 0) addMade(m.uid, n, now?.out);

@@ -26,7 +26,10 @@
  */
 
 import { flowEdges, isSource, outputKindOf, recipeOf } from './bom.js';
-import { beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, setupOf, spacingFor } from './process.js';
+import {
+  batchOf, beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, setupOf,
+  spacingFor, unitCycleOf,
+} from './process.js';
 import { recipesOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
@@ -42,6 +45,25 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
  *    capacity  라인 능력 (최종 개/분) — 가장 약한 고리
  *    neck      그 고리
  */
+/**
+ * 왜 이 속도인가 — **한 줄로 읽히게** 이어 붙인다.
+ * ---------------------------------------------------------------------------
+ *  공정 · 배치 · 품종 · 전환이 각각 개당 시간을 바꾼다. 셋이 겹칠 수 있어서
+ *  경우를 나눠 문장을 따로 쓰면 조합이 여덟 가지가 된다 — 그래서 **조각을
+ *  이어 붙인다.** 아무것도 안 걸리면 예전 그대로 「공정 6초/개」다.
+ *
+ *      공정 600초 · 한 판에 20개 = 30.0초/개
+ *      공정 2초 · 품종 2가지를 번갈아 = 한 품종에 7.0초/개
+ */
+export function whyOf({ cyc, batch = 1, many = 1, lot = 0, setupSec = 0, eff }) {
+  const parts = [`공정 ${cyc}초`];
+  if (batch > 1) parts.push(`한 판에 ${batch}개`);
+  if (many > 1) parts.push(`품종 ${many}가지를 번갈아`);
+  if (lot > 0 && setupSec > 0) parts.push(`전환 ${setupSec}초/${lot}개`);
+  if (parts.length === 1) return `공정 ${cyc}초/개`;
+  return `${parts.join(' · ')} = ${many > 1 ? '한 품종에 ' : ''}${(eff * many).toFixed(1)}초/개`;
+}
+
 export function lineBalance({ placed = [], links = [], carts = [], itemOf, specOf = () => null, beltSpeed = 0.6 } = {}) {
   const byUid = new Map(placed.map((p) => [p.uid, p]));
   const edges = flowEdges(links, byUid, itemOf);
@@ -87,7 +109,13 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
      */
     const lot = lotOf(p, item);
     const setupSec = setupOf(p, item);
-    const eff = effectiveCycle(cyc, lot, setupSec);
+    /**
+     * **배치는 개당 시간을 판 크기로 나눈다.**
+     *  20개를 600초에 굽는 오븐은 「600초짜리 설비」가 아니라 30초/개다 —
+     *  안 나누면 천장이 스무 배 낮게 나온다.
+     */
+    const batch = batchOf(p, item);
+    const eff = effectiveCycle(cyc, lot, setupSec, batch);
     /**
      * **품종이 여럿이면 한 품종의 몫은 그만큼 준다.**
      *  20개씩 두 품종을 번갈아 만드는 설비는 제작품 1을 「6초에 하나」가 아니라
@@ -104,11 +132,7 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own,
       mult: m,
       capacity: own / m,
-      why: many > 1
-        ? `공정 ${cyc}초 · 품종 ${many}가지를 번갈아 = 한 품종에 ${(eff * many).toFixed(1)}초/개`
-        : eff > cyc
-          ? `공정 ${cyc}초 + 전환 ${setupSec}초/${lot}개 = ${eff.toFixed(1)}초/개`
-          : `공정 ${cyc}초/개`,
+      why: whyOf({ cyc, batch, many, lot, setupSec, eff }),
     });
   }
 
@@ -121,7 +145,9 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     /* 한 번에 내보내는 개수 — 이름이 outputCount 다(process.bundleOf) */
     const layers = bundleOf(from);
     const v = Number(l.speed) > 0 ? Number(l.speed) : beltSpeed;
-    const gap = spacingFor(cycleOf(from, itemOf(from.itemId)), layers, v);
+    /* 벨트 간격은 **개당** 시간을 본다 — 배치 설비는 한 판을 한꺼번에 내므로
+       공정 시간을 그대로 쓰면 간격이 판 크기만큼 벌어진다 */
+    const gap = spacingFor(unitCycleOf(from, itemOf(from.itemId)), layers, v);
     const own = beltPerMinute(gap, v, layers);
     const m = mult.get(from.uid) ?? 1;
     rows.push({

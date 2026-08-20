@@ -19,7 +19,10 @@
  */
 
 import { inputCapOf, isSource, needFor, outKindOf, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
-import { cycleOf, lotOf, outputCapFor, setupOf, shapeOf, spacingFor, varOf } from './process.js';
+import {
+  batchOf, batchWaitOf, cycleOf, lotOf, outputCapFor, setupOf, shapeOf, spacingFor,
+  unitCycleOf, varOf,
+} from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { linkPath } from './link.js';
@@ -100,7 +103,10 @@ export function beltFlowsOf(d = {}) {
            */
           const layers = Math.max(1, Math.round(owner.outputCount ?? 3));
           const speed = link.speed ?? beltSpeed;
-          const gap = spacingFor(cycleOf(owner, itemOf(owner.itemId)), layers, speed);
+          /* 간격은 **개당** 시간에서 나온다 — 배치 설비의 공정 시간은 한 판에
+             드는 시간이라, 그대로 쓰면 간격이 판 크기만큼 벌어져 벨트가 텅 빈
+             채로 돈다(실측: 20개 판에서 천장의 5%만 나왔다) */
+          const gap = spacingFor(unitCycleOf(owner, itemOf(owner.itemId)), layers, speed);
           return { link, path, owner, sink, recipe, outKind, layers, speed, gap };
         })
         .filter(Boolean)
@@ -135,12 +141,15 @@ export function machinesOf(d = {}) {
             /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
             lot: lotOf(p, item),
             setupSec: setupOf(p, item),
+            /* 배치 공정 — 한 판에 몇 개를 굽나. 1 이면 예전 그대로다 */
+            batch: batchOf(p, item),
+            waitSec: batchWaitOf(p, item),
             /** 한 덩어리 개수 — 벨트가 한 번에 실어 가는 단위 */
             per: Math.max(1, Math.round(p.outputCount ?? 3)),
             /* 출력 자리는 **한 덩어리 + 한 개**다. 딱 한 덩어리치면 다 만든
                순간부터 벨트 칸이 올 때까지 설비가 서서, 멀쩡한 라인이 1초에
                한 번씩 붉게 깜빡인다 (process.js 의 OUT_SPARE). */
-            cap: outputCapFor(p.outputCount ?? 3),
+            cap: outputCapFor(p.outputCount ?? 3, batchOf(p, item)),
             /* 재료는 **한 개분씩** 낸다 — 공정이 한 개 단위로 돌기 때문이다.
                예전처럼 한 덩어리치를 한꺼번에 내면, 두 개분 재료로 세 개짜리
                덩어리를 못 만들어 멀쩡한 재료가 놀게 된다. */

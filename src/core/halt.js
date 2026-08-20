@@ -30,7 +30,7 @@
  */
 
 import { buildableCount, countKinds, isSource, recipeAt } from './bom.js';
-import { slotOf } from './process.js';
+import { batchOf, batchWaitOf, slotOf, trayOf } from './process.js';
 import { getLots, getMade, getStock } from './simStore.js';
 import { isShelf, isStillage } from '../data/library.js';
 
@@ -120,7 +120,16 @@ export function haltState(d = {}) {
      */
     const recipe = recipeAt(p, slotOf(p.uid));
     if (isSource(recipe)) continue;
-    if (buildableCount(countKinds(getLots(p.uid)), recipe) >= 1) continue;
+    const have = buildableCount(countKinds(getLots(p.uid)), recipe);
+    /**
+     * **배치 설비는 한 판을 못 걸면 서 있는 것이다.**
+     *  판을 채우며 기다리는 시간도 굶음으로 센다 — 푸는 방법이 「앞 공정을
+     *  빠르게 하거나 판을 줄이는 것」이라 재료가 없는 것과 처방이 같다.
+     *
+     *  거는 규칙은 **굴리는 쪽과 같은 함수**를 본다(`trayOf`). 두 곳이 각자
+     *  판단하면 굽고 있는 설비를 굶었다고 빨갛게 칠하는 화면이 나온다.
+     */
+    if (trayOf(p.uid, have, batchOf(p, item), batchWaitOf(p, item)) > 0) continue;
     equips.add(p.uid);
     starved.add(p.uid);
   }

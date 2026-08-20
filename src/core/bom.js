@@ -242,6 +242,33 @@ export function needFor(recipe, count) {
   return need;
 }
 
+/**
+ * 한 개분 소요를 **n 배** 한다 — 한 판을 한꺼번에 낼 때 쓴다(배치 공정).
+ *  `needFor(recipe, n)` 과 같은 값이지만, 굴리는 쪽은 레시피가 아니라
+ *  이미 뽑아 둔 소요표만 들고 있다.
+ */
+export function scaleNeed(need, n) {
+  const many = Math.max(0, Math.round(n) || 0);
+  const out = {};
+  for (const [kind, qty] of Object.entries(need ?? {})) out[kind] = qty * many;
+  return out;
+}
+
+/**
+ * 이 재고로 **몇 벌**을 낼 수 있나 — 판이 찼는지 보는 값.
+ *  먹을 것이 없으면(원자재 공급원) 제한이 없다(Infinity).
+ */
+export function needTimes(have, need) {
+  const rows = Object.entries(need ?? {}).filter(([, q]) => q > 0);
+  if (!rows.length) return Infinity;
+  let n = Infinity;
+  for (const [kind, qty] of rows) {
+    n = Math.min(n, Math.floor((have?.[kind] ?? 0) / qty));
+    if (n <= 0) return 0;
+  }
+  return n;
+}
+
 /** 쌓여 있는 것의 종류별 개수 — [종류, …] → { 종류: 개수 } */
 export function countKinds(lots) {
   const out = {};

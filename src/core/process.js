@@ -93,11 +93,33 @@ export const DEFAULT_BUNDLE = 3;
 export const bundleOf = (p) => Math.max(1, Math.round(p?.outputCount ?? DEFAULT_BUNDLE) || 1);
 
 /** 이 설비가 놓아 둘 수 있는 완성품 수 */
-export const outputCapFor = (layers) =>
-  Math.max(1, Math.round(layers) || 1) + OUT_SPARE;
+export function outputCapFor(layers, batch = 1) {
+  const per = Math.max(1, Math.round(layers) || 1);
+  const tray = Math.max(1, Math.round(batch) || 1);
+  /**
+   * **한 판이 나가는 동안 다음 판을 굽는다** — 그래서 판 두 개분이다.
+   *  한 판치만 두면 오븐이 다 굽고도 앞판이 다 빠질 때까지 서 있어서, 60초에
+   *  굽는 설비가 120초에 한 판씩 낸다(실측: 천장의 5%까지 떨어졌다).
+   *
+   *  거기에 **한 덩어리를 더** 얹는다. 판이 덩어리로 딱 나눠떨어지지 않으면
+   *  자투리가 다음 판을 기다리며 자리를 물고 있어서, 그만큼 자리가 모자라면
+   *  오븐이 다음 판을 못 건다 — 5개짜리 판에서 천장의 83% 밖에 안 나왔다.
+   *  한 개짜리 설비에 자리를 하나 더 주는 것(`OUT_SPARE`)과 같은 이유다.
+   */
+  return tray > 1 ? tray * 2 + per : per + OUT_SPARE;
+}
 
 /** 초/개 → 개/분 */
 export const perMinute = (sec) => (sec > 0 ? 60 / sec : 0);
+
+/**
+ * 이 설비가 **한 개**를 내는 데 걸리는 시간.
+ *  공정 시간은 **한 판에** 드는 시간이라, 배치 설비는 판 크기로 나눠야 한다.
+ *  벨트 간격도 이 값을 봐야 한다 — 안 그러면 20개를 한 번에 내는 오븐 뒤에
+ *  600초짜리 간격이 잡혀 벨트가 텅 빈 채로 돈다.
+ */
+export const unitCycleOf = (placed, item) =>
+  cycleOf(placed, item) / batchOf(placed, item);
 
 /** 한 덩어리를 만드는 데 걸리는 시간(초) */
 export const bundleSeconds = (cycleSec, layers) =>
@@ -180,6 +202,8 @@ const lots = new Map();
 const took = new Map();
 /** 지금 몇 번째 레시피를 만들고 있나 (품종 전환) */
 const slots = new Map();
+/** 판을 채우며 기다린 시간(초) — 배치 공정. 판을 걸면 0 으로 돌아간다 */
+const waits = new Map();
 
 /**
  * 이보다 적게 남았으면 끝난 것으로 본다 (1 나노초).
@@ -218,8 +242,11 @@ export function bundleProgress(uid, per, made) {
 }
 
 export function resetWork(uid = null) {
-  if (uid == null) { work.clear(); setups.clear(); lots.clear(); took.clear(); slots.clear(); } else {
-    work.delete(uid); setups.delete(uid); lots.delete(uid); took.delete(uid); slots.delete(uid);
+  if (uid == null) {
+    work.clear(); setups.clear(); lots.clear(); took.clear(); slots.clear(); waits.clear();
+  } else {
+    work.delete(uid); setups.delete(uid); lots.delete(uid); took.delete(uid);
+    slots.delete(uid); waits.delete(uid);
   }
 }
 
@@ -231,7 +258,10 @@ export function resetWork(uid = null) {
  *  @param cycleVar 편차 비율
  *  @param room     앞으로 몇 개까지 더 받아 둘 수 있는가 (출력 자리의 빈칸).
  *                  0 이면 **막힘** — 만들어 놓을 데가 없으니 시작도 안 한다
- *  @param pay      한 개분 재료를 내는 함수 → 성공하면 true. 없으면 공급원
+ *  @param pay      한 판분 재료를 내는 함수 `pay(n)` → 성공하면 true. 없으면 공급원
+ *  @param avail    지금 재료로 **몇 개**를 만들 수 있나 (배치가 찼는지 본다)
+ *  @param batch    한 판에 몇 개 — 1 이면 지금까지의 동작 그대로
+ *  @param waitSec  판이 덜 찼을 때 더 기다리는 한도(초). 0 이면 안 기다린다
  *  @returns 이번 프레임에 **완성된 개수**
  *
  *  한 프레임에 여러 개가 끝날 수 있다(높은 배속·짧은 공정). 남는 시간을 버리지
@@ -241,6 +271,7 @@ export function resetWork(uid = null) {
 export function runMachine(uid, dt, {
   cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
   lot = 0, setupSec = 0, shape = DEFAULT_SHAPE, kinds = 1,
+  batch = 1, waitSec = 0, avail = null,
 }) {
   took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
@@ -265,11 +296,28 @@ export function runMachine(uid, dt, {
   let w = work.get(uid) ?? null;
   let done = 0;
 
+  const many = Math.max(1, Math.round(batch) || 1);
+
   while (t > EPS && done < room) {
     if (w == null) {
-      /* 새 개를 건다 — 재료는 여기서 낸다. 못 내면 그대로 굶는다(시간은 흘렀다) */
-      if (pay && !pay()) break;
-      w = { done: 0, mult: drawMult(cycleVar, rand, shape) };
+      /**
+       * **판을 건다** — 몇 개를 얹을지 여기서 정한다.
+       *  `avail` 이 없으면 옛 꼴(한 개짜리)이라 늘 꽉 찬 판이다.
+       */
+      const have = avail ? Math.max(0, Math.floor(avail())) : many;
+      const n = trayOf(uid, have, many, waitSec);
+      if (n <= 0) {
+        /* 아직 못 건다. **재료가 좀 있는데** 안 걸었다면 그건 모으는 중이니
+           남은 시간을 기다림으로 적는다 — 아예 없으면 그냥 굶은 것이다 */
+        if (have > 0) waits.set(uid, (waits.get(uid) ?? 0) + t);
+        break;
+      }
+      /* 낼 자리가 판만큼 없으면 시작도 안 한다 — 다 구워 놓고 못 내리면
+         그 판이 어디에도 없이 사라진다(막힘으로 남는 것이 맞다) */
+      if (done + n > room) break;
+      if (pay && !pay(n)) break;
+      waits.delete(uid);
+      w = { n, done: 0, mult: drawMult(cycleVar, rand, shape) };
     }
     /* 이번 개에 걸리는 시간을 **매 프레임 다시 잰다** — 그래서 공정 시간을
        바꾸면 걸려 있던 것에도 바로 반영된다 */
@@ -277,8 +325,10 @@ export function runMachine(uid, dt, {
     const rest = (1 - w.done) * dur;
     if (rest > t + EPS) { w.done = Math.min(1, w.done + t / dur); t = 0; break; }
     t -= rest;
+    /* 한 판은 **통째로** 끝난다 — 굽는 도중에 절반만 꺼낼 수 없다 */
+    const made = w.n ?? 1;
     w = null;
-    done++;
+    done += made;
 
     /**
      * 로트를 채웠으면 **다음 품종으로 넘어간다.**
@@ -286,7 +336,10 @@ export function runMachine(uid, dt, {
      *  청소라서 맞다(로트 전환). 품종이 여럿이면 **바뀌는 그 순간**이 셋업이다.
      */
     if (lot > 0) {
-      const n = (lots.get(uid) ?? 0) + 1;
+      /* 로트는 **개수로** 센다. 한 판이 로트를 넘겨도 전환은 **한 번만**
+         문다 — 넘긴 만큼 여러 번 물리면 굽지도 않은 판의 전환을 세게 된다.
+         (그래서 배치 설비의 로트는 판 크기의 배수로 잡는 것이 자연스럽다) */
+      const n = (lots.get(uid) ?? 0) + made;
       if (n >= lot) {
         lots.set(uid, 0);
         const many = Math.max(1, Math.round(kinds));
@@ -308,6 +361,69 @@ export function runMachine(uid, dt, {
   return done;
 }
 
+
+/* ==========================================================================
+ *  배치 공정 — **N개를 한 판에 굽는다**
+ * --------------------------------------------------------------------------
+ *  오븐 · 도장 부스 · 열처리로 · 세척기. 이런 설비는 한 개씩 흘려보내지 않고
+ *  **한 판을 모아 한 번에** 처리한다. 20개를 600초에 구우면 개당 30초다 —
+ *  「600초짜리 설비」로 적으면 처리량이 스무 배 틀린다.
+ *
+ *  ── 공정 시간은 **한 판에** 드는 시간이다 ────────────────────────────────
+ *  판이 20개든 1개든 굽는 시간은 같다. 그래서 배치가 클수록 개당 시간이 싸진다:
+ *
+ *      개당 = 공정 ÷ 판 크기        600초 ÷ 20개 = 30초/개
+ *
+ *  **천장(`balance.js`)이 이 값을 써야 한다.** 안 쓰면 「돌리기 전 계산」과
+ *  「돌려 본 결과」가 스무 배로 갈린다.
+ *
+ *  ── 덜 찬 판을 어떻게 하나 — **기다림 한도** ──────────────────────────────
+ *  「꽉 차야 굽는다」로 두면 라인이 통째로 선다. 앞 공정이 느려서 20개가 영영
+ *  안 모이면 오븐은 영원히 안 돌고, 화면에는 **멀쩡해 보이는 설비가 아무것도
+ *  안 하는** 그림만 남는다. 품종 전환의 자투리와 같은 함정이다.
+ *
+ *  그래서 기다림 한도 T 를 둔다:
+ *
+ *      T = 0    안 기다린다 — **있는 만큼** 굽는다
+ *      T > 0    판이 차거나 T초가 지나면 굽는다
+ *
+ *  **0 이 기본이고, 그것으로도 배치는 제 노릇을 한다.** 오븐이 병목이면 굽는
+ *  동안 앞에 재료가 쌓여서 다음 판은 저절로 꽉 찬다 — 스스로 균형을 잡는다.
+ *  T 를 주는 것은 재료가 띄엄띄엄 올 때 **굽는 횟수를 줄이려는** 선택이다.
+ *
+ *  기다리는 시간은 **굶음으로 센다.** 서 있는 이유를 가르는 잣대는 늘 같다 —
+ *  푸는 방법이 다른가. 판을 못 채워 기다리는 것은 앞 공정을 빠르게 하거나 판을
+ *  줄여서 푼다. 재료가 없어 서 있는 것과 처방이 같으니 같은 자리에 센다.
+ * ======================================================================== */
+
+/** 한 판에 몇 개 — 1 이면 지금까지의 동작 그대로 (이미 그린 도면이 안 바뀐다) */
+export const BATCH_RANGE = [1, 50, 1];
+/** 덜 찬 판을 두고 더 기다리는 한도(초) */
+export const BATCH_WAIT_RANGE = [0, 600, 10];
+
+export const batchOf = (placed, item) =>
+  Math.max(1, Math.round(Number(placed?.batchSize ?? item?.batchSize ?? 1) || 1));
+
+export const batchWaitOf = (placed, item) =>
+  Math.max(0, Math.round(Number(placed?.batchWaitSec ?? item?.batchWaitSec ?? 0) || 0));
+
+/**
+ * 이번에 판에 몇 개를 얹나 — 0 이면 아직 못 건다.
+ * ---------------------------------------------------------------------------
+ *  `runMachine` 과 `haltState` 가 **같은 이 함수**를 본다. 두 곳이 각자
+ *  판단하면 「굶었다고 빨갛게 칠해 놓고 굽고 있는」 화면이 나온다.
+ *  읽기만 하므로 굶음 판정이 기다린 시간을 건드리지 않는다.
+ */
+export function trayOf(uid, have, batch = 1, waitSec = 0) {
+  const many = Math.max(1, Math.round(batch) || 1);
+  if (have >= many) return many;                    // 꽉 찼다
+  if (have <= 0) return 0;                          // 재료가 아예 없다
+  if (waitSec <= 0) return have;                    // 안 기다린다 — 있는 만큼
+  return (waits.get(uid) ?? 0) >= waitSec ? have : 0;
+}
+
+/** 판을 채우며 기다린 시간(초) — 화면이 「몇 초째 모으는 중」을 말한다 */
+export const batchWaited = (uid) => waits.get(uid) ?? 0;
 
 /* ==========================================================================
  *  로트 전환 (셋업)
@@ -360,8 +476,12 @@ export const setupOf = (placed, item) =>
  *
  *  로트가 작을수록 전환이 비싸진다는 것이 이 한 줄에 그대로 들어 있다.
  */
-export const effectiveCycle = (cycleSec, lot = 0, setupSec = 0) =>
-  (lot > 0 && setupSec > 0 ? cycleSec + setupSec / lot : cycleSec);
+export const effectiveCycle = (cycleSec, lot = 0, setupSec = 0, batch = 1) => {
+  /* 공정 시간은 **한 판에** 드는 시간이다 — 판 크기로 나눠야 개당이 된다.
+     전환은 개수로 세므로(로트 N개마다) 나누지 않는다 */
+  const per = cycleSec / Math.max(1, Math.round(batch) || 1);
+  return lot > 0 && setupSec > 0 ? per + setupSec / lot : per;
+};
 
 /** 지금 전환 중인가 · 이번 틱에 전환으로 쓴 시간(초) */
 export const inSetup = (uid) => (setups.get(uid) ?? 0) > 0;
