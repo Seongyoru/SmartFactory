@@ -20,7 +20,7 @@
 
 import { inputCapOf, isSource, needFor, outKindOf, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
 import {
-  batchOf, batchWaitOf, cycleOf, lotOf, outputCapFor, setupOf, shapeOf, spacingFor,
+  batchOf, batchWaitOf, cycleOf, lotOf, outputCapFor, reworkOf, setupOf, shapeOf, spacingFor,
   unitCycleOf, varOf,
 } from './process.js';
 import { stillageCapacity } from './stillage.js';
@@ -144,6 +144,9 @@ export function machinesOf(d = {}) {
             /* 배치 공정 — 한 판에 몇 개를 굽나. 1 이면 예전 그대로다 */
             batch: batchOf(p, item),
             waitSec: batchWaitOf(p, item),
+            /* 불량 — **만들 때** 거른다. 다시 만들 수 있으면 그 시간도 함께 */
+            scrapRate: p.scrapRate ?? 0,
+            reworkSec: reworkOf(p, item),
             /** 한 덩어리 개수 — 벨트가 한 번에 실어 가는 단위 */
             per: Math.max(1, Math.round(p.outputCount ?? 3)),
             /* 출력 자리는 **한 덩어리 + 한 개**다. 딱 한 덩어리치면 다 만든

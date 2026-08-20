@@ -27,7 +27,7 @@
 
 import { flowEdges, isSource, outputKindOf, recipeOf } from './bom.js';
 import {
-  batchOf, beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, setupOf,
+  batchOf, beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, reworkOf, setupOf,
   spacingFor, unitCycleOf,
 } from './process.js';
 import { recipesOf } from './bom.js';
@@ -55,13 +55,18 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
  *      공정 600초 · 한 판에 20개 = 30.0초/개
  *      공정 2초 · 품종 2가지를 번갈아 = 한 품종에 7.0초/개
  */
-export function whyOf({ cyc, batch = 1, many = 1, lot = 0, setupSec = 0, eff }) {
+export function whyOf({ cyc, batch = 1, many = 1, lot = 0, setupSec = 0, scrap = 0, reworkSec = 0, eff }) {
   const parts = [`공정 ${cyc}초`];
   if (batch > 1) parts.push(`한 판에 ${batch}개`);
   if (many > 1) parts.push(`품종 ${many}가지를 번갈아`);
   if (lot > 0 && setupSec > 0) parts.push(`전환 ${setupSec}초/${lot}개`);
+  /* 불량은 **양품 한 개에 드는 시간**을 늘린다 — 버리든 다시 만들든 */
+  if (scrap > 0) {
+    parts.push(`불량 ${(scrap * 100).toFixed(0)}% ${reworkSec > 0 ? `재작업 ${reworkSec}초` : '버림'}`);
+  }
   if (parts.length === 1) return `공정 ${cyc}초/개`;
-  return `${parts.join(' · ')} = ${many > 1 ? '한 품종에 ' : ''}${(eff * many).toFixed(1)}초/개`;
+  const head = `${many > 1 ? '한 품종에 ' : ''}${scrap > 0 ? '양품 ' : ''}`;
+  return `${parts.join(' · ')} = ${head}${(eff * many).toFixed(1)}초/개`;
 }
 
 export function lineBalance({ placed = [], links = [], carts = [], itemOf, specOf = () => null, beltSpeed = 0.6 } = {}) {
@@ -115,7 +120,11 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
      *  안 나누면 천장이 스무 배 낮게 나온다.
      */
     const batch = batchOf(p, item);
-    const eff = effectiveCycle(cyc, lot, setupSec, batch);
+    /* 불량률과 재작업도 **양품 개당 시간**을 늘린다. 안 넣으면 불량률만 올려도
+       천장과 실측이 갈린다 — 실제로 「천장 600 · 실제 544」가 나왔다 */
+    const scrap = Math.min(1, Math.max(0, Number(p.scrapRate) || 0));
+    const reworkSec = reworkOf(p, item);
+    const eff = effectiveCycle(cyc, lot, setupSec, batch, { scrap, reworkSec });
     /**
      * **품종이 여럿이면 한 품종의 몫은 그만큼 준다.**
      *  20개씩 두 품종을 번갈아 만드는 설비는 제작품 1을 「6초에 하나」가 아니라
@@ -132,7 +141,7 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own,
       mult: m,
       capacity: own / m,
-      why: whyOf({ cyc, batch, many, lot, setupSec, eff }),
+      why: whyOf({ cyc, batch, many, lot, setupSec, scrap, reworkSec, eff }),
     });
   }
 

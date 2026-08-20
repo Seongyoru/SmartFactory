@@ -265,7 +265,7 @@ t('**벨트 간격은 개당 시간을 본다** — 여기가 5% 사건의 자�
 });
 
 t('천장이 판을 본다', () => {
-  assert.ok(balSrc.includes('effectiveCycle(cyc, lot, setupSec, batch)'), '천장이 판을 안 나눈다');
+  assert.ok(balSrc.includes('effectiveCycle(cyc, lot, setupSec, batch, { scrap, reworkSec })'), '천장이 판을 안 나눈다');
 });
 
 t('화면이 판과 기다림을 받는다', () => {

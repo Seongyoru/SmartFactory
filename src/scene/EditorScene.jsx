@@ -2293,10 +2293,9 @@ function SceneContent() {
             /* 같은 벨트 위에 두 품종이 앞뒤로 흐른다. 줄에 이름표 하나만
                붙이면 도착한 것이 엉뚱한 종류로 쌓인다. */
             for (const kind of Object.keys(byKind ?? {})) {
-              /* 만든 것 중 일부는 불량이다 — 쌓지 않고 버린다(faults.screen).
-                 적치대에 넣으면 자리를 차지해 멀쩡한 라인을 세우게 된다.
-                 누가 만들었는지도 넘긴다 — 불량은 **만든 설비의** 문제다. */
-              const good = screen(byKind[kind], owner.scrapRate ?? 0, owner.uid);
+              /* 불량은 **만들 때** 이미 걸렀다(sim 의 runMachines) — 벨트에는
+                 양품만 실린다. 여기서 또 거르면 같은 불량률을 두 번 문다. */
+              const good = byKind[kind];
               if (good <= 0) continue;
               /* 재료를 먹는 설비는 **그 종류 몫**까지만 받는다. 안 쓰는 종류면
                  몫이 0 이라 한 개도 안 들어간다(위 sink 주석 참고). */

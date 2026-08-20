@@ -204,6 +204,8 @@ const took = new Map();
 const slots = new Map();
 /** 판을 채우며 기다린 시간(초) — 배치 공정. 판을 걸면 0 으로 돌아간다 */
 const waits = new Map();
+/** 다시 만들려고 줄 세워 둔 개수 — 재작업 */
+const redo = new Map();
 
 /**
  * 이보다 적게 남았으면 끝난 것으로 본다 (1 나노초).
@@ -243,10 +245,11 @@ export function bundleProgress(uid, per, made) {
 
 export function resetWork(uid = null) {
   if (uid == null) {
-    work.clear(); setups.clear(); lots.clear(); took.clear(); slots.clear(); waits.clear();
+    work.clear(); setups.clear(); lots.clear(); took.clear(); slots.clear();
+    waits.clear(); redo.clear();
   } else {
     work.delete(uid); setups.delete(uid); lots.delete(uid); took.delete(uid);
-    slots.delete(uid); waits.delete(uid);
+    slots.delete(uid); waits.delete(uid); redo.delete(uid);
   }
 }
 
@@ -262,7 +265,11 @@ export function resetWork(uid = null) {
  *  @param avail    지금 재료로 **몇 개**를 만들 수 있나 (배치가 찼는지 본다)
  *  @param batch    한 판에 몇 개 — 1 이면 지금까지의 동작 그대로
  *  @param waitSec  판이 덜 찼을 때 더 기다리는 한도(초). 0 이면 안 기다린다
- *  @returns 이번 프레임에 **완성된 개수**
+ *  @param check    만든 것 중 쓸 수 있는 개수를 돌려준다 `check(n, 재작업인가)`.
+ *                  없으면 다 양품이다
+ *  @param reworkSec 불량 한 개를 다시 만드는 데 드는 시간(초). 0 이면 **버린다**
+ *  @param onRedo   재작업 줄에 넣은 개수를 알린다 (세는 쪽이 화면에 쓴다)
+ *  @returns 이번 프레임에 나온 **양품 개수**
  *
  *  한 프레임에 여러 개가 끝날 수 있다(높은 배속·짧은 공정). 남는 시간을 버리지
  *  않고 다음 개로 이어 넣어야 배속을 올려도 처리량이 같다 — 배속마다 결과가
@@ -272,6 +279,7 @@ export function runMachine(uid, dt, {
   cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
   lot = 0, setupSec = 0, shape = DEFAULT_SHAPE, kinds = 1,
   batch = 1, waitSec = 0, avail = null,
+  check = null, reworkSec = 0, onRedo = null,
 }) {
   took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
@@ -297,9 +305,28 @@ export function runMachine(uid, dt, {
   let done = 0;
 
   const many = Math.max(1, Math.round(batch) || 1);
+  /** 이번 프레임에 나온 양품 — 돌려주는 값이다(`done` 은 자리 셈에 쓴다) */
+  let good = 0;
 
   while (t > EPS && done < room) {
     if (w == null) {
+      /**
+       * **다시 만들 것이 있으면 그것부터.**
+       * -----------------------------------------------------------------------
+       *  규칙을 하나만 둔다 — 재작업품을 뒤로 미루는 공장도 있지만, 그러면
+       *  「언제 처리하나」가 손잡이 하나 더가 되고 되풀이도 안 된다. 먼저 하면
+       *  재작업 줄이 안 쌓여서 화면에서 읽기도 쉽다.
+       *
+       *  **재료는 안 든다** — 이미 물건이 되어 있고, 그것을 고치는 것이다.
+       */
+      const again = redo.get(uid) ?? 0;
+      if (again > 0) {
+        const n = Math.min(again, many);
+        if (done + n > room) break;
+        redo.set(uid, again - n);
+        w = { n, again: true, done: 0, mult: drawMult(cycleVar, rand, shape) };
+        continue;
+      }
       /**
        * **판을 건다** — 몇 개를 얹을지 여기서 정한다.
        *  `avail` 이 없으면 옛 꼴(한 개짜리)이라 늘 꽉 찬 판이다.
@@ -321,14 +348,32 @@ export function runMachine(uid, dt, {
     }
     /* 이번 개에 걸리는 시간을 **매 프레임 다시 잰다** — 그래서 공정 시간을
        바꾸면 걸려 있던 것에도 바로 반영된다 */
-    const dur = Math.max(0.05, (cycleSec > 0 ? cycleSec : DEFAULT_CYCLE) * w.mult);
+    /* 재작업은 **제 시간**을 쓴다 — 처음부터 만드는 것보다 대개 짧다 */
+    const base = w.again ? reworkSec * w.n : (cycleSec > 0 ? cycleSec : DEFAULT_CYCLE);
+    const dur = Math.max(0.05, base * w.mult);
     const rest = (1 - w.done) * dur;
     if (rest > t + EPS) { w.done = Math.min(1, w.done + t / dur); t = 0; break; }
     t -= rest;
     /* 한 판은 **통째로** 끝난다 — 굽는 도중에 절반만 꺼낼 수 없다 */
     const made = w.n ?? 1;
+    const wasRedo = !!w.again;
     w = null;
-    done += made;
+
+    /**
+     * **만들 때 거른다.**
+     *  불량품은 벨트를 안 탄다 — 실제로도 검사에서 걸러진 것을 굳이 실어
+     *  보내지 않는다. 그리고 여기서 걸러야 **재작업으로 되돌릴 수 있다.**
+     */
+    const ok = check ? check(made, wasRedo) : made;
+    const bad = made - ok;
+    good += ok;
+    done += ok;                                   // 자리를 먹는 것은 양품뿐이다
+    /* 다시 만들 수 있으면 줄에 세운다. **재작업품이 또 불량이면 버린다** —
+       안 그러면 불량률을 아무리 올려도 양품률이 100% 가 된다 */
+    if (bad > 0 && reworkSec > 0 && !wasRedo) {
+      redo.set(uid, (redo.get(uid) ?? 0) + bad);
+      onRedo?.(bad);
+    }
 
     /**
      * 로트를 채웠으면 **다음 품종으로 넘어간다.**
@@ -339,7 +384,7 @@ export function runMachine(uid, dt, {
       /* 로트는 **개수로** 센다. 한 판이 로트를 넘겨도 전환은 **한 번만**
          문다 — 넘긴 만큼 여러 번 물리면 굽지도 않은 판의 전환을 세게 된다.
          (그래서 배치 설비의 로트는 판 크기의 배수로 잡는 것이 자연스럽다) */
-      const n = (lots.get(uid) ?? 0) + made;
+      const n = (lots.get(uid) ?? 0) + (wasRedo ? 0 : made);
       if (n >= lot) {
         lots.set(uid, 0);
         const many = Math.max(1, Math.round(kinds));
@@ -358,7 +403,7 @@ export function runMachine(uid, dt, {
 
   if (w == null) work.delete(uid);
   else work.set(uid, w);
-  return done;
+  return good;
 }
 
 
@@ -425,6 +470,9 @@ export function trayOf(uid, have, batch = 1, waitSec = 0) {
 /** 판을 채우며 기다린 시간(초) — 화면이 「몇 초째 모으는 중」을 말한다 */
 export const batchWaited = (uid) => waits.get(uid) ?? 0;
 
+/** 다시 만들려고 줄 서 있는 개수 — 화면이 「밀린 재작업」을 말한다 */
+export const redoWaiting = (uid) => redo.get(uid) ?? 0;
+
 /* ==========================================================================
  *  로트 전환 (셋업)
  * --------------------------------------------------------------------------
@@ -467,20 +515,47 @@ export const setupOf = (placed, item) =>
   Math.max(0, Math.round(Number(placed?.setupSec ?? item?.setupSec ?? 0) || 0));
 
 /**
- * **전환까지 셈에 넣은 한 개당 시간.**
+ * **양품 한 개를 내는 데 걸리는 시간.**
  *  천장(`balance.js`)이 이 값을 써야 한다 — 안 쓰면 「돌리기 전 계산」과
  *  「돌려 본 결과」가 갈리고, 사람은 시뮬이 틀렸다고 여긴다.
  *
  *      20개마다 300초 전환 · 공정 6초  →  6 + 300/20 = 21초/개
  *
  *  로트가 작을수록 전환이 비싸진다는 것이 이 한 줄에 그대로 들어 있다.
+ *
+ *  ── **불량과 재작업도 여기 든다** ────────────────────────────────────────
+ *  열 개 만들어 하나를 버리면 **양품 한 개에 드는 시간은 늘어난다.** 그동안
+ *  천장이 그걸 몰라서, 불량률만 올려도 「천장 600 · 실제 544」처럼 갈렸다.
+ *
+ *      버릴 때        공정 ÷ (1 − 불량률)
+ *      다시 만들 때   (공정 + 불량률 × 재작업) ÷ (1 − 불량률²)
+ *
+ *  재작업품도 같은 불량률을 다시 통과하므로 끝내 버리는 것은 불량률의 제곱이다.
+ *  잰 값과 맞는다 — 공정 6초 · 불량 10% · 재작업 30초면 9.09초/개(실측 9.3).
  */
-export const effectiveCycle = (cycleSec, lot = 0, setupSec = 0, batch = 1) => {
+export const effectiveCycle = (cycleSec, lot = 0, setupSec = 0, batch = 1, opt = {}) => {
   /* 공정 시간은 **한 판에** 드는 시간이다 — 판 크기로 나눠야 개당이 된다.
      전환은 개수로 세므로(로트 N개마다) 나누지 않는다 */
   const per = cycleSec / Math.max(1, Math.round(batch) || 1);
-  return lot > 0 && setupSec > 0 ? per + setupSec / lot : per;
+  const work = per + (lot > 0 && setupSec > 0 ? setupSec / lot : 0);
+
+  const bad = Math.min(1, Math.max(0, Number(opt.scrap) || 0));
+  if (bad <= 0) return work;
+  const redo = Math.max(0, Number(opt.reworkSec) || 0);
+  /* 다시 만들면 그 시간이 들고, 끝내 버리는 것은 두 번 연속 불량뿐이다 */
+  const spend = work + (redo > 0 ? bad * redo : 0);
+  const yield_ = redo > 0 ? 1 - bad * bad : 1 - bad;
+  return yield_ > 0 ? spend / yield_ : spend;
 };
+
+/**
+ * 불량 한 개를 다시 만드는 데 드는 시간(초) — **0 이면 버린다**(지금까지의 동작).
+ *  기본이 0 이라 이미 그린 도면은 하나도 안 바뀐다.
+ */
+export const REWORK_RANGE = [0, 600, 5];
+
+export const reworkOf = (placed, item) =>
+  Math.max(0, Math.round(Number(placed?.reworkSec ?? item?.reworkSec ?? 0) || 0));
 
 /** 지금 전환 중인가 · 이번 틱에 전환으로 쓴 시간(초) */
 export const inSetup = (uid) => (setups.get(uid) ?? 0) > 0;

@@ -37,7 +37,7 @@ import { followDistance, forgetStation, loadRoom, pickSet, stepCart } from './ca
 import { advanceBelt, beltOffset } from './belt.js';
 import { runMachine, resetWork, setupTook, slotOf } from './process.js';
 import { countKinds, needTimes, scaleNeed, slotShares } from './bom.js';
-import { resetFaults, resetQuality, stepFaults } from './faults.js';
+import { addRework, resetFaults, resetQuality, screen, screenAgain, stepFaults } from './faults.js';
 import { accumulate, accumulateCart, resetMetrics } from './metrics.js';
 import {
   addByGroup, addLots, addLotsShared, addShipped, addMade, clearStock,
@@ -125,6 +125,17 @@ export function runMachines(dt, d = {}) {
          이걸 잡았다. 새 자리를 만들었다고 옛 자리가 죽으면 안 된다. */
       batch: m.batch,
       waitSec: m.waitSec,
+      /**
+       * **불량은 만들 때 거른다.**
+       *  예전에는 벨트 끝에서 걸렀다. 그래서 카트로 나르는 설비는 불량률을
+       *  올려도 값이 안 변했고(거르는 자리가 벨트에만 있었다), 다 흘러간 뒤라
+       *  재작업으로 되돌릴 수도 없었다.
+       */
+      check: (n, again) => (again
+        ? screenAgain(n, m.scrapRate, m.uid, rand)
+        : screen(n, m.scrapRate, m.uid, rand)),
+      reworkSec: m.reworkSec,
+      onRedo: (n) => addRework(m.uid, n),
       /* 지금 재료로 **몇 개**를 만들 수 있나 — 판이 찼는지 보는 값이다 */
       avail: need ? () => needTimes(countKinds(getLots(m.uid)), need) : null,
       pay: need ? (n) => takeEach(m.uid, scaleNeed(need, n)) : null,

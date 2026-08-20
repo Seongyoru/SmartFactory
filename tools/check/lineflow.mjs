@@ -176,11 +176,16 @@ t('덩어리를 싣는 규칙이 화면과 같다 — **한 곳에** 있다', ()
   assert.ok(storeSrc.includes('const closed = run.n < getMade(uid);'), '자투리가 영영 안 빠진다');
 });
 
-t('불량은 도착할 때 거른다 — 적치대에 쌓지 않는다', () => {
+const simSrc = await readSrc('core/sim.js');
+t('불량은 **만들 때** 거른다 — 벨트에는 양품만 실린다', () => {
+  /* 예전에는 벨트 끝에서 걸렀다. 그래서 **카트로 나르는 설비는 불량이 아예
+     안 나왔고**, 다 흘러간 뒤라 재작업으로 되돌릴 수도 없었다. 도착 자리에
+     거르는 코드가 남아 있으면 같은 불량률을 두 번 문다. */
   for (const src of [repSrc, sceneSrc]) {
-    assert.ok(src.includes("scrapRate ?? 0, b.owner.uid)") || src.includes("scrapRate ?? 0, owner.uid)"),
-      '불량을 안 거르거나, 만든 설비를 안 넘긴다');
+    assert.equal(/screen\(/.test(src), false, '도착 자리에서 또 거른다');
   }
+  assert.ok(simSrc.includes('screenAgain(n, m.scrapRate, m.uid, rand)'), '재작업품을 다시 안 본다');
+  assert.ok(simSrc.includes('screen(n, m.scrapRate, m.uid, rand)'), '만들 때 안 거른다');
 });
 
 t('벨트는 화면과 **같은 값**으로 선다', () => {

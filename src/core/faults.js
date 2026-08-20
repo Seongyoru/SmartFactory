@@ -147,12 +147,35 @@ export const useFaults = () => useSyncExternalStore(subscribe, getDown, () => EM
  *  설비가 만든 것 중 일부는 쓸 수 없다. 불량품은 **쌓이지 않고 버려진다** —
  *  적치대에 넣으면 그 자리를 차지해 라인이 서게 되는데, 실제로는 라인 밖으로
  *  빠지는 것이 보통이다. 대신 몇 개가 버려졌는지를 세어 양품률로 돌려준다.
+ *
+ *  ── **판정은 만들 때 한다** ───────────────────────────────────────────────
+ *  예전에는 벨트 끝에 닿을 때 걸렀다. 두 가지가 틀렸다.
+ *
+ *    · **카트로 나르는 설비는 불량이 아예 안 나왔다.** 거르는 자리가 벨트
+ *      도착에만 있어서, 카트가 실어 가는 라인은 불량률을 올려도 값이 안 변했다
+ *    · **재작업을 붙일 자리가 없다.** 다 흘러간 뒤에 「이건 불량이었다」고
+ *      해 봐야 되돌릴 수가 없다
+ *
+ *  만들 때 판정하면 둘 다 사라지고, 「불량은 만든 설비의 문제」라는 것도 그
+ *  자리에서 드러난다. 대신 **불량품은 벨트를 안 탄다** — 실제로도 검사에서
+ *  걸러진 것을 굳이 실어 보내지 않는다.
+ *
+ *  ── 재작업 — **버리는 대신 다시 만든다** ────────────────────────────────
+ *  불량품을 다 버리는 공장은 없다. 고칠 수 있으면 고친다. 그리고 그 시간이
+ *  **설비의 능력을 갉아먹는다** — 이 도구가 답해야 하는 것이 바로 그것이다.
+ *
+ *  재작업한 것도 **같은 불량률을 다시 통과한다.** 두 번째 불량은 버린다 —
+ *  「고치면 무조건 살아난다」로 두면 불량률을 아무리 올려도 양품률이 100% 라
+ *  화면이 거짓말을 한다.
  */
 let made = 0;
 let scrapped = 0;
+/** 다시 만든 개수 — 버린 것과 **따로** 센다. 살아났지만 시간은 썼다 */
+let reworked = 0;
 /** 설비마다 따로 — 불량은 **만든 설비의** 문제다 (screen 주석 참고) */
 let madeBy = {};
 let scrappedBy = {};
+let reworkedBy = {};
 
 /**
  * 만든 것 중 쓸 수 있는 것만 골라낸다.
@@ -168,15 +191,29 @@ let scrappedBy = {};
  *  @returns 이번에 실제로 쓸 수 있는(양품) 개수
  */
 export function screen(count, scrapRate, uid = null, rand = Math.random) {
+  return sift(count, scrapRate, uid, rand, true);
+}
+
+/**
+ * **재작업한 것**을 다시 본다 — 여기서 또 불량이면 버린다.
+ * ---------------------------------------------------------------------------
+ *  만든 개수(`made`)에는 **안 더한다.** 같은 물건을 두 번 세면 양품률의
+ *  분모가 부풀어, 불량률을 올릴수록 양품률이 좋아지는 거꾸로 된 값이 나온다.
+ */
+export function screenAgain(count, scrapRate, uid = null, rand = Math.random) {
+  return sift(count, scrapRate, uid, rand, false);
+}
+
+function sift(count, scrapRate, uid, rand, first) {
   const n = Math.max(0, Math.round(count));
   if (!n) return 0;
   const rate = Math.min(1, Math.max(0, scrapRate ?? 0));
   let bad = 0;
   for (let i = 0; i < n; i++) if (rand() < rate) bad++;
-  made += n;
+  if (first) made += n;
   scrapped += bad;
   if (uid) {
-    madeBy = { ...madeBy, [uid]: (madeBy[uid] ?? 0) + n };
+    if (first) madeBy = { ...madeBy, [uid]: (madeBy[uid] ?? 0) + n };
     if (bad) scrappedBy = { ...scrappedBy, [uid]: (scrappedBy[uid] ?? 0) + bad };
   }
   if (bad) {
@@ -186,10 +223,25 @@ export function screen(count, scrapRate, uid = null, rand = Math.random) {
   return n - bad;
 }
 
+/**
+ * 재작업 줄에 들어간 개수 — **버린 것과 따로** 센다.
+ *  이 값이 이 기능의 요점이다. 살아났으니 양품률은 안 깎이지만 **시간은 썼고**,
+ *  그만큼 처리량이 준다. 두 값을 나란히 놔야 「불량을 재작업으로 덮고 있다」가
+ *  화면에 드러난다.
+ */
+export function addRework(uid, count) {
+  const n = Math.max(0, Math.round(count));
+  if (!n) return;
+  reworked += n;
+  if (uid) reworkedBy = { ...reworkedBy, [uid]: (reworkedBy[uid] ?? 0) + n };
+}
+
 export const getMade = () => made;
 export const getScrapped = () => scrapped;
+export const getReworked = () => reworked;
 export const madeOf = (uid) => madeBy[uid] ?? 0;
 export const scrappedOf = (uid) => scrappedBy[uid] ?? 0;
+export const reworkedOf = (uid) => reworkedBy[uid] ?? 0;
 
 /** 라인 전체 양품률 — 배치끼리 견줄 때 쓴다(scenarios) */
 export const quality = () => (made > 0 ? 1 - scrapped / made : 1);
@@ -207,7 +259,9 @@ export const qualityOf = (uid) => {
 export function resetQuality() {
   made = 0;
   scrapped = 0;
+  reworked = 0;
   madeBy = {};
   scrappedBy = {};
+  reworkedBy = {};
   emit();
 }

@@ -248,8 +248,9 @@ export function lineFlow(d = {}) {
         /* **종류마다 따로 쌓는다.** 같은 벨트 위에 두 품종이 앞뒤로 흐르므로
            줄에 이름표 하나만 붙이면 엉뚱한 종류로 쌓인다. */
         for (const kind of Object.keys(got.byKind)) {
-          /* 불량은 쌓지 않고 버린다. **만든 설비의** 문제로 센다 */
-          const good = screen(got.byKind[kind], b.owner.scrapRate ?? 0, b.owner.uid);
+          /* 불량은 **만들 때** 이미 걸렀다(sim 의 runMachines) — 벨트에는
+             양품만 실린다. 여기서 또 거르면 같은 불량률을 두 번 문다. */
+          const good = got.byKind[kind];
           if (good <= 0) continue;
           if (b.sink.slots) {
             addLotsShared(b.sink.uid, Array.from({ length: good }, () => kind), (k) => b.sink.slots[k] ?? 0);
