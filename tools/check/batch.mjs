@@ -291,3 +291,30 @@ t('입력 버퍼는 **한 판**을 담을 만한지 본다', () => {
   assert.ok(inspSrc.includes('const tray = batchOf(placed, item);'), '버퍼가 판을 모른다');
   assert.ok(inspSrc.includes('Math.max(Math.max(1, placed.outputCount ?? 3), tray)'), '덩어리로만 잰다');
 });
+
+/* ---------- 되돌리기 테스트가 물지 않아 뒤늦게 붙인 것 -------------------- */
+t('**낼 자리가 없으면 판을 안 건다** — 구워 놓고 못 내리면 사라진다', () => {
+  P.resetWork();
+  let paid = 0;
+  const n = P.runMachine('R', 100, {
+    cycleSec: 10, batch: 20, room: 5,          // 판 20개 · 자리는 5개뿐
+    avail: () => 99,
+    pay: (k) => { paid += k; return true; },
+  });
+  assert.equal(n, 0, `자리가 5개뿐인데 ${n}개를 냈다`);
+  assert.equal(paid, 0, '못 낼 판의 재료를 미리 먹었다');
+});
+
+t('로트는 **판이 낸 개수만큼** 찬다 — 한 판을 하나로 세지 않는다', () => {
+  /* 한 판 10개 · 로트 20개면 **두 판**에 한 번 전환이다. 판을 하나로 세면
+     스무 판(200개)마다 한 번이 되어 전환 손실이 열 배 작게 나온다 */
+  P.resetWork();
+  const fire = () => P.runMachine('L', 15, {
+    cycleSec: 10, batch: 10, lot: 20, setupSec: 100, room: 999,
+    avail: () => 99, pay: () => true,
+  });
+  fire();                                       // 10개
+  assert.equal(P.inSetup('L'), false, '첫 판에 벌써 전환에 들어갔다');
+  fire();                                       // 20개 — 로트를 채웠다
+  assert.ok(P.inSetup('L'), '두 판을 냈는데 전환을 안 문다');
+});
