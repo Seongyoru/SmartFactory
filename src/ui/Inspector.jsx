@@ -2,8 +2,8 @@
  * 우측 인스펙터 — 선택한 설비/연결의 상세, 없으면 도면 요약
  */
 
-import React, { useMemo } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, FileText, RotateCcw, RotateCw, Table2, Trash2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { AlertTriangle, ChevronDown, ChevronUp, FileText, RotateCcw, RotateCw, Table2, Trash2, Wand2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
@@ -20,6 +20,7 @@ import { resetRun } from '../core/sim.js';
 import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
 import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
 import { deltaText, improvePlan } from '../core/improve.js';
+import { gainText, searchLayout } from '../core/optimize.js';
 import { runReportCSV } from '../core/report.js';
 import { runReportHTML } from '../core/reportHtml.js';
 import {
@@ -87,7 +88,7 @@ import { footprintOf } from '../core/grid.js';
 import { shelfBBox } from '../core/shelf.js';
 import { ALIGN, AXIS, alignMoves, distributeMoves, gapOf } from '../core/align.js';
 import { MAX_CAPACITY, MIN_CAPACITY, stillageCapacity, stillageGrid } from '../core/stillage.js';
-import { PILLAR_DEFAULTS, WALL_DEFAULTS } from '../core/area.js';
+import { PILLAR_DEFAULTS, WALL_DEFAULTS, floorOf } from '../core/area.js';
 import {
   FLOOR_COLOR,
   MIN_OPENING,
@@ -3428,6 +3429,107 @@ function PlanReportButton() {
  *  커져서, 배치를 나쁘게 고쳐 놓고도(느려져서) 숫자가 줄어 보인다. 개당 거리는
  *  그 착시가 없다 — 배치가 좋아져야만 내려간다.
  */
+/**
+ * **배치 손보기** — 도구가 옮겨 보고 값을 잰다.
+ * ---------------------------------------------------------------------------
+ *  도면을 **마음대로 안 바꾼다.** 찾은 것을 말로 내놓고, 적용은 사람이 누른다.
+ *  자동으로 고쳐 놓으면 「내가 그린 것」이 아니게 되고, 그러면 값이 좋아져도
+ *  안 쓴다. 적용한 뒤에도 Ctrl+Z 로 되돌아간다(한 번의 MOVE_MANY 다).
+ *
+ *  줄이는 것은 **개당 거리** 하나다 — 배치를 바꿔서 달라지는 것이 그것이라서다.
+ *  라인의 천장은 공정 시간과 벨트 속도가 정하지, 설비가 어디 앉아 있는지가
+ *  정하지 않는다. 그 사실을 화면이 말해 준다(안 그러면 「처리량이 왜 그대로냐」).
+ */
+function Tidy({ per }) {
+  const { state, dispatch, itemOf } = useEditor();
+  const version = useModelsVersion();
+  const [plan, setPlan] = useState(null);
+
+  /* 도면을 고치면 지난 제안은 더 이상 그 도면의 것이 아니다 */
+  const key = `${state.placed.length}:${state.links.length}:${state.carts.length}:${per?.toFixed(3)}`;
+  const [keyAt, setKeyAt] = useState(key);
+  if (keyAt !== key) { setKeyAt(key); setPlan(null); }
+
+  const go = () => {
+    const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
+    setPlan(searchLayout({
+      placed: state.placed, links: state.links, carts: state.carts,
+      itemOf, specOf, beltSpeed: state.beltSpeed,
+      /* 놓을 수 있는가는 **화면과 같은 판정**이다 — 규칙이 갈리면 못 놓는
+         자리를 답으로 낸다 */
+      bboxOf: (p) => {
+        const it = itemOf(p.itemId);
+        return isShelf(it) ? shelfBBox(p, specOf(it)) : specOf(it)?.bbox ?? null;
+      },
+      floor: floorOf(state.areas), walls: state.walls, pillars: state.pillars,
+      lengthOf: (l, list) => linkPath(l, list, itemOf)?.length ?? 0,
+    }));
+  };
+
+  const apply = () => {
+    if (!plan?.ok) return;
+    /* **한 번의 MOVE_MANY** 다 — Ctrl+Z 한 번으로 통째로 되돌아간다 */
+    dispatch({ type: 'MOVE_MANY', moves: plan.placed.map((p) => ({ uid: p.uid, pos: p.pos })) });
+    setPlan(null);
+  };
+
+  return (
+    <div className="mt-2 border-t border-line pt-2">
+      <button
+        type="button" onClick={go}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md bg-raise px-2 py-1 text-[11px] text-ink2 ring-1 ring-edge hover:bg-raiseh hover:text-ink"
+      >
+        <Wand2 size={12} /> 배치 손보기
+      </button>
+
+      {plan && !plan.ok && (
+        <p className="mt-1.5 text-[10px] leading-relaxed text-ink4">
+          {plan.why === 'no-flow'
+            ? <>오가는 것이 없어 <b className="text-ink3">잴 수가 없습니다.</b> 벨트나 카트로 이어 주세요.</>
+            : plan.why === 'too-few'
+              ? <>맞바꿀 상대가 없습니다 — 설비가 <b className="text-ink3">둘 이상</b> 있어야 합니다.</>
+              : <><b className="text-ink3">맞바꿔서 줄일 것이 없습니다.</b> 후보 {plan.tried}가지를 재 봤습니다.</>}
+        </p>
+      )}
+
+      {plan?.ok && (
+        <div className="mt-1.5">
+          <Row label="손보면">
+            <b className="text-[11.5px] text-emerald-600">{gainText(plan.before, plan.after)}</b>
+          </Row>
+          <ol className="mt-1 space-y-0.5">
+            {plan.steps.map((s, k) => (
+              <li key={`${s.a}-${s.b}`} className="flex items-baseline justify-between gap-2 text-[10.5px]">
+                <span className="min-w-0 truncate text-ink3">
+                  <span className="text-ink4">{k + 1}.</span> <b className="text-ink2">{s.aName}</b>
+                  {' '}↔{' '}<b className="text-ink2">{s.bName}</b>
+                </span>
+                <span className="shrink-0 tabular-nums text-ink4">{s.to.toFixed(1)} m</span>
+              </li>
+            ))}
+          </ol>
+          <button
+            type="button" onClick={apply}
+            className="mt-1.5 w-full rounded-md bg-sky-500/15 px-2 py-1 text-[11px] font-medium text-sky-600 ring-1 ring-sky-500/40 hover:bg-sky-500/25"
+          >
+            이대로 옮기기 ({plan.steps.length}번)
+          </button>
+          <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+            자리만 맞바꿉니다 — <b className="text-ink4">방향도 설정도 그대로</b>입니다.
+            마음에 안 들면 <b className="text-ink4">Ctrl+Z</b> 한 번으로 돌아갑니다.
+          </p>
+        </div>
+      )}
+
+      <p className="mt-1.5 text-[9.5px] leading-snug text-ink4">
+        <b className="text-ink4">처리량은 안 바뀝니다.</b> 라인의 천장은 공정 시간과 벨트 속도가
+        정하지 설비가 어디 앉아 있는지가 정하지 않습니다 — 줄어드는 것은 <b className="text-ink4">거리</b>입니다.
+        언덕을 내려가다 멈추는 방식이라 <b className="text-ink4">최선이라는 보장은 없습니다.</b>
+      </p>
+    </div>
+  );
+}
+
 function FlowSection() {
   const { state, itemOf } = useEditor();
   const version = useModelsVersion();
@@ -3490,6 +3592,7 @@ function FlowSection() {
         라인이 <b className="text-ink4">천장까지 돈다고 볼 때</b>의 값입니다. 빈 차로 돌아오는
         구간은 물건이 안 실려 있어 안 셉니다.
       </p>
+      <Tidy per={per} />
     </Section>
   );
 }

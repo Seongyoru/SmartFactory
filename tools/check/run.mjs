@@ -38,6 +38,7 @@ await import('./planreport.mjs');
 await import('./measure.mjs');
 await import('./zone.mjs');
 await import('./flow.mjs');
+await import('./optimize.mjs');
 await import('./guides.mjs');
 await import('./shelfrows.mjs');
 await import('./cartline.mjs');
