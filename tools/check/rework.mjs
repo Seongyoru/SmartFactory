@@ -183,7 +183,10 @@ const at = (scrap, reworkSec, sec, seed) => {
   const w = Lu.worldOf({
     placed, links, carts: [], areas, walls: [], openings: [], shifts: [], beltSpeed: 0.6, itemOf, specOf,
   });
-  R.runOnce({ seconds: sec, world: w.world, flow: w.flow, pick: () => 0, seed });
+  /* **난수를 직접 먹인다.** `seed` 만 넘기면 `runOnce` 는 그것을 안 보고
+     `Math.random` 으로 떨어진다 — 불량이 매번 달라져 검사가 흔들린다.
+     실제로 이 검사가 그렇게 한 번 무작위로 깨졌다. */
+  R.runOnce({ seconds: sec, world: w.world, flow: w.flow, pick: () => 0, rand: R.seeded(seed) });
   return { n: St.getLots('S1').length + St.getMade('P1'), ceil: w.capacity * 60 };
 };
 /**
@@ -273,4 +276,38 @@ t('화면이 재작업을 받고, **그 설비 것으로** 보여 준다', () =>
   assert.ok(inspSrc.includes('const scrapped = scrappedOf(uid);'), '설비별 불량을 안 본다');
   assert.ok(inspSrc.includes('const redone = reworkedOf(uid);'), '설비별 재작업을 안 본다');
   assert.equal(/\{getScrapped\(\)\}개 불량/.test(inspSrc), false, '라인 전체 합을 설비 줄에 적는다');
+});
+
+/* ---------- 되돌리기가 물지 않아 다시 쓴 것 ------------------------------ */
+t('재작업은 **로트를 안 채운다** — 같은 물건을 다시 만드는 것이다', () => {
+  /* 앞의 검사는 첫 통과 개수만 봐서, 재작업이 로트를 채워도 안 물렸다.
+     이번 로트에 몇 개 찼는지를 **직접** 본다(`lotMade`). */
+  P.resetWork();
+  let first = 0;
+  for (let i = 0; i < 30; i++) {
+    P.runMachine('LOT', 1, {
+      cycleSec: 5, room: 9999, reworkSec: 1, lot: 999, setupSec: 60,
+      pay: () => true,
+      check: (n, again) => { if (!again) first += n; return again ? n : 0; },
+      onRedo: () => {},
+    });
+  }
+  assert.ok(first > 0, '아무것도 안 만들었다');
+  assert.equal(P.lotMade('LOT'), first,
+    `로트에 ${P.lotMade('LOT')}개가 찼는데 새로 만든 것은 ${first}개다 — 재작업이 로트를 채웠다`);
+});
+
+t('**불량품은 출력 자리를 안 먹는다** — 나가지도 않는데 자리를 잡으면 안 된다', () => {
+  /* 자리를 두 개만 주고 전부 불량으로 만든다. 불량이 자리를 먹으면 설비가
+     두 개 만들고 멈추고, 안 먹으면 시간이 다할 때까지 계속 돈다. */
+  P.resetWork();
+  let paid = 0;
+  const n = P.runMachine('ROOM', 10, {
+    cycleSec: 1, room: 2, reworkSec: 0,
+    pay: () => { paid += 1; return true; },
+    check: () => 0,                                  // 전부 불량
+    onRedo: () => {},
+  });
+  assert.equal(n, 0, '전부 불량인데 양품이 나왔다');
+  assert.ok(paid >= 9, `자리 2개에 막혀 ${paid}개에서 멈췄다 — 불량이 자리를 먹고 있다`);
 });
