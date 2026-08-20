@@ -36,7 +36,25 @@
  *
  *  분은 **정수로 딱 떨어지고** 실제 교대(480분 = 8시간)도 그대로 적힌다.
  */
-export const DEFAULT_SHIFT = { name: '상시', minutes: 1440, headcount: 0 };
+export const DEFAULT_SHIFT = { name: '상시', minutes: 1440, headcount: 0, closed: false };
+
+/* ==========================================================================
+ *  달력 · 계획정지 — **원래 안 도는 시간**
+ * --------------------------------------------------------------------------
+ *  주말 · 야간 · 정기보전(PM). 공장이 안 도는 시간은 **고장이 아니다.** 그런데
+ *  지금까지는 그것을 표현할 방법이 「인원 0인 조」뿐이었고, 그러면 설비가 전부
+ *  **무인으로 서서 가동률이 바닥**을 쳤다 — 토요일에 쉬었다는 이유로 성적표가
+ *  나빠지는 셈이다.
+ *
+ *  ── 새 표를 안 만들고 **교대표에 한 칸**을 더한다 ────────────────────────
+ *  「토·일 2880분 · 쉼」 한 줄이면 주말이고, 「4시간 · 쉼」 한 줄이면 정기보전이다.
+ *  두 가지가 한 개념으로 덮이고, 저장·화면·되풀이가 이미 다 되어 있다.
+ *  달력을 따로 만들면 교대표와 두 벌이 되어 반드시 어긋난다.
+ *
+ *  ── 쉬는 시간은 **지표에서 통째로 뺀다** ─────────────────────────────────
+ *  OEE 의 분모는 「돌리기로 한 시간(부하시간)」이다. 계획정지는 거기 안 들어간다.
+ *  이 규칙을 안 지키면 **덜 돌린 공장이 더 좋은 성적**을 받는 일이 생긴다.
+ * ======================================================================== */
 
 /** 인원 0 = **제한 없음**. "사람이 없다" 가 아니라 "인력을 안 따진다" 는 뜻이다 */
 export const UNLIMITED = 0;
@@ -110,6 +128,8 @@ export function normalizeShifts(list) {
       name: typeof s?.name === 'string' && s.name.trim() ? s.name.trim() : `${i + 1}조`,
       minutes: clampShiftMinutes(Math.round(mins) || 480),
       headcount: Math.max(0, Math.round(Number(s?.headcount) || 0)),
+      /** 이 시간대는 **라인이 안 돈다** — 주말 · 야간 · 정기보전 */
+      closed: s?.closed === true,
     };
   });
   return rows.length ? rows : [{ ...DEFAULT_SHIFT }];
@@ -129,9 +149,25 @@ export const cycleSeconds = (shifts) =>
  *  얼마나 돌려야 하는지를 정할 때 이 값을 본다(cost.js 의 longEnough).
  */
 export const shiftsVary = (shifts) => {
-  const heads = normalizeShifts(shifts).map((s) => s.headcount);
-  return heads.length > 1 && heads.some((h) => h !== heads[0]);
+  const rows = normalizeShifts(shifts);
+  if (rows.length < 2) return false;
+  /* 쉬는 조가 하나라도 있으면 **한 바퀴는 돌려야** 뜻이 있다 — 주말을 안 지나고
+     성적을 내면 「쉬지 않는 공장」의 값이다 */
+  if (rows.some((s) => s.closed)) return true;
+  const heads = rows.map((s) => s.headcount);
+  return heads.some((h) => h !== heads[0]);
 };
+
+/**
+ * 지금 **쉬는 시간인가** — 라인이 안 도는 시간.
+ *  이 판정은 시계(`clock.js`)와 헤드리스(`replicate.js`)가 **같이** 본다.
+ *  두 곳이 따로 판단하면 화면과 반복 실행의 값이 갈린다.
+ */
+export const isClosedAt = (shifts, elapsed) => shiftAt(shifts, elapsed).shift?.closed === true;
+
+/** 한 바퀴 중 **실제로 도는** 시간(초) — 쉬는 조를 뺀 값 */
+export const openSeconds = (shifts) =>
+  normalizeShifts(shifts).reduce((s, r) => s + (r.closed ? 0 : r.minutes * 60), 0);
 
 /**
  * 시뮬 시간이 이만큼 흘렀을 때 **지금 몇 조인가**.

@@ -43,7 +43,7 @@ import { focusOn } from '../core/focusStore.js';
 import { formatElapsed, useElapsed } from '../core/clock.js';
 import {
   LOSS_FLOOR, getBlocked, getSeries, getStarved, getUnmanned, getRan,
-  getSetup, leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
+  getPlanned, getSetup, leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
 } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
 import { getShipped, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
@@ -285,6 +285,19 @@ function Kpis({ elapsed, overall, flow }) {
   return (
     <>
       <Line label="경과 시간">{formatElapsed(elapsed)}</Line>
+      {/**
+        * 계획정지 — **부하시간 밖의 시간.**
+        * ---------------------------------------------------------------------
+        *  쉬는 조(주말 · 정기보전)가 있으면 시계는 8시간인데 지표의 분모는
+        *  6시간이다. 그 차이를 안 적으면 「경과 시간과 성적표가 안 맞는다」가
+        *  되어, 도구를 못 믿게 된다.
+        */}
+      {getPlanned() > 1 && (
+        <Line label="계획정지" title="주말 · 정기보전 — OEE 의 분모(부하시간)에서 뺀 시간">
+          <span className="text-amber-600">{formatElapsed(getPlanned())}</span>
+          <span className="ml-1 text-[10px] text-ink4">부하 {formatElapsed(getRan())}</span>
+        </Line>
+      )}
       {/**
         * 리드타임 — **셋 중 하나가 비어 있었다.**
         * ---------------------------------------------------------------------

@@ -30,6 +30,7 @@
  * ---------------------------------------------------------------------------
  */
 
+import { isClosedAt } from './crew.js';
 import { newCartUnit, resetRun, runBelt, runCart, runMachines } from './sim.js';
 import { beltCount, makeBelt } from './belt.js';
 import { addLotsShared, addStock, takeBundles } from './simStore.js';
@@ -327,6 +328,7 @@ export function lineWorld(d = {}) {
  *                   **틱마다 다시 만들어야 하면** 함수로 준다
  *  @param d.pick    (…) => 값 — 이 판에서 무엇을 볼지. 없으면 처리량
  *  @param d.rand    난수
+ *  @param d.shifts  교대표 — **쉬는 조**(주말·정기보전)가 있으면 그때는 안 돈다
  */
 export function runOnce(d = {}) {
   const seconds = Math.max(0, d.seconds ?? 600);
@@ -338,7 +340,14 @@ export function runOnce(d = {}) {
   const n = Math.round(seconds / step);
   for (let i = 0; i < n; i++) {
     const w = typeof d.world === 'function' ? d.world(i * step) : (d.world ?? {});
-    runMachines(step, { ...w, rand });
+    /**
+     * **쉬는 시간이면 이 걸음은 통째로 넘긴다** — 주말 · 야간 · 정기보전.
+     *  화면 쪽은 시계(`clock.js`)가 같은 판정을 해서 벨트·카트까지 세운다.
+     *  여기서 안 보면 반복 실행만 주말에도 돌아, 화면과 표가 갈린다.
+     */
+    const closed = isClosedAt(d.shifts ?? [], i * step);
+    runMachines(step, { ...w, rand, closed });
+    if (closed) continue;
     /* 만든 것을 **옮긴다** — 이것이 없으면 출력 자리가 차서 전부 막히고,
        밖으로 나간 것이 없어 처리량이 구조적으로 0 이 된다 */
     d.flow?.move(step, w);

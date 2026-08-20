@@ -91,11 +91,11 @@ import {
   useAllStock, useShipped, takeBundles,
 } from '../core/simStore.js';
 import { cycleOf, outputCapFor, runMachine, shapeOf as varShapeOf, spacingFor, varOf } from '../core/process.js';
-import { tick, useElapsed } from '../core/clock.js';
+import { isClosed, rawStep, setShifts, tick, useElapsed } from '../core/clock.js';
 import { runMachines } from '../core/sim.js';
 import { haltState } from '../core/halt.js';
 import { beltFlowsOf, machinesOf } from '../core/lineup.js';
-import { accumulate } from '../core/metrics.js';
+import { accumulate, plannedStop } from '../core/metrics.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
 import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
 import { isShelf, isStillage, isTruck, isUtility, payloadByKey } from '../data/library.js';
@@ -125,10 +125,17 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, jammed, starved, unmanned, equips, machines }) {
+function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts }) {
   const shipped = shippedTotal(useShipped());
+  /* 교대표를 시계에 물린다 — **쉬는 시간 판정이 시계 안에 있어야** 벨트·카트·
+     설비가 한 번에 선다(clock.js 의 simStep). 소비자마다 따로 물으면 하나를
+     반드시 빠뜨린다. */
+  useEffect(() => { setShifts(shifts); }, [shifts]);
   useFrame((_, real) => {
     const dt = tick(real, running);
+    /* **쉬는 시간에도 프레임은 돈다** — 그 시간을 계획정지로 세어야 한다.
+       `tick` 은 시계만 흘리고 0 을 돌려준다(달력이 멎으면 영영 못 깬다). */
+    if (running && isClosed()) { plannedStop(rawStep(real)); return; }
     if (!(dt > 0)) return;
     /* 굴리는 일은 core/sim.js 가 한다 — 화면 없이도 같은 함수가 돈다.
        고장 판정 · 설비 공정 · 「선 이유를 하나만 세기」가 전부 거기 있다. */
@@ -2008,6 +2015,7 @@ function SceneContent() {
         unmanned={halted.unmanned}
         equips={faultParams}
         machines={machines}
+        shifts={state.shifts}
       />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />

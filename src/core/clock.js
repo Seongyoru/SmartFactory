@@ -22,6 +22,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { isClosedAt, normalizeShifts } from './crew.js';
 
 /** 고를 수 있는 배속 */
 export const SPEEDS = [1, 2, 5, 20];
@@ -65,22 +66,48 @@ export function resetClock() {
  * 이 프레임에 흘릴 시뮬 시간(초).
  *  소비자(벨트·카트)가 각자 부른다. 순수 함수라 몇 번을 불러도 같은 값이다.
  */
-export const simStep = (dt) => Math.min(dt, MAX_REAL_STEP) * speed;
+/** 쉬는 시간을 안 따진 순수한 시간 걸음 — 계획정지를 세는 쪽이 쓴다 */
+export const rawStep = (dt) => Math.min(dt, MAX_REAL_STEP) * speed;
+
+/* ==========================================================================
+ *  쉬는 시간 — **여기가 한 곳**이다
+ * --------------------------------------------------------------------------
+ *  주말 · 야간 · 정기보전이면 벨트도 카트도 설비도 다 멈춰야 한다. 움직이는
+ *  것들이 전부 `simStep` 에서 시간을 받아 가므로, **여기서 0 을 주면 한 번에**
+ *  선다 — 소비자마다 「쉬는 중인가」를 따로 물으면 반드시 하나를 빠뜨린다.
+ *
+ *  **달력은 쉬는 동안에도 흐른다**(`tick` 은 `rawStep` 을 쓴다). 안 그러면
+ *  주말에 들어간 순간 시계가 멎어 영영 못 깬다.
+ * ======================================================================== */
+let shifts = normalizeShifts([]);
+
+/** 교대표를 시계에 물린다 — 도면이 바뀔 때 부른다 */
+export function setShifts(list) {
+  shifts = normalizeShifts(list);
+  emit();
+}
+
+/** 지금 라인이 쉬는 시간인가 */
+export const isClosed = () => isClosedAt(shifts, elapsed);
+
+export const simStep = (dt) => (isClosed() ? 0 : rawStep(dt));
 
 /** 프레임마다 **한 번만** — 씬의 SimClock 이 부른다 */
 export function tick(dt, running) {
   if (!running) return 0;
-  const d = simStep(dt);
+  const d = rawStep(dt);
   elapsed += d;
   const now = performance.now();
   if (now - lastNotify >= NOTIFY_MS) {
     lastNotify = now;
     emit();
   }
-  return d;
+  /* 쉬는 시간에는 **일이 0초** 흐른다 — 시계만 갔다 */
+  return isClosed() ? 0 : d;
 }
 
 export const useSimSpeed = () => useSyncExternalStore(subscribe, getSpeed, () => 1);
+export const useClosed = () => useSyncExternalStore(subscribe, isClosed, () => false);
 export const useElapsed = () => useSyncExternalStore(subscribe, getElapsed, () => 0);
 
 /** 초 → "1시간 23분" · "2분 05초" 처럼 읽히는 문자열 */

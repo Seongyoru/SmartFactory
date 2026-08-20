@@ -38,8 +38,8 @@ import {
 } from '../core/process.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
-  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts, shiftsVary,
-  totalCrewNeed,
+  assignCrew, crewOf, crewRows, cycleSeconds, isWorkable, joinHM, normalizeShifts, openSeconds,
+  shiftsVary, totalCrewNeed,
   shiftAt, shiftLabel, splitHM,
 } from '../core/crew.js';
 import {
@@ -3410,6 +3410,7 @@ function CrewPanel() {
         <>
           <Row label="지금 조">
             {shift.name}
+            {shift.closed && <b className="ml-1 text-[10px] text-amber-600">계획정지</b>}
             <span className="ml-1 text-[10px] font-normal text-ink4">
               {shiftLabel(shift.minutes)} 중{' '}
               {Number.isFinite(endsIn) ? `${formatElapsed(endsIn)} 남음` : '계속'}
@@ -3430,6 +3431,9 @@ function CrewPanel() {
         교대조
         <span className="tabular-nums">
           한 바퀴 {formatElapsed(cycleSeconds(shifts))}
+          {openSeconds(shifts) < cycleSeconds(shifts) && (
+            <span className="ml-1 text-amber-600">· 도는 시간 {formatElapsed(openSeconds(shifts))}</span>
+          )}
           <span className="ml-1 text-ink4/70">· {speed}× 로 {formatElapsed(cycleSeconds(shifts) / speed)}</span>
         </span>
       </p>
@@ -3474,6 +3478,28 @@ function CrewPanel() {
                 className={NUM_FIELD}
               />
               <span className="text-ink4">명</span>
+              {/**
+                * **쉬는 조** — 주말 · 야간 · 정기보전.
+                * ---------------------------------------------------------------
+                *  달력을 따로 만들지 않고 교대표에 한 칸을 더했다. 「토·일
+                *  2880분 · 쉼」 한 줄이면 주말이고, 「4시간 · 쉼」이면 정기보전
+                *  이다. 표를 둘로 나누면 반드시 어긋난다.
+                *
+                *  쉬는 동안은 **지표를 안 센다** — OEE 의 분모는 「돌리기로 한
+                *  시간」이라 계획정지는 거기 안 들어간다. 안 그러면 토요일에
+                *  쉬었다는 이유로 성적표가 나빠진다.
+                */}
+              <button
+                onClick={() => set(i, { closed: !s.closed })}
+                title={s.closed
+                  ? '지금은 쉬는 시간입니다 — 눌러서 돌게 합니다'
+                  : '이 시간대는 라인이 안 돕니다 (주말 · 정기보전) — 지표에서 뺍니다'}
+                className={`rounded px-1 py-0.5 text-[10px] ring-1 ${s.closed
+                  ? 'bg-amber-500/15 text-amber-600 ring-amber-500/40'
+                  : 'bg-raise text-ink4 ring-edge hover:text-ink2'}`}
+              >
+                {s.closed ? '쉼' : '돎'}
+              </button>
               <button
                 onClick={() => drop(i)}
                 disabled={shifts.length <= 1}
@@ -3493,6 +3519,14 @@ function CrewPanel() {
           사람이 없어 선 설비 {unmanned.size}대 — {[...unmanned].slice(0, 3).map(nameOf).join(' · ')}
           {unmanned.size > 3 ? ` 외 ${unmanned.size - 3}대` : ''}.
           {' '}{need - (shift.headcount - idle)}명이 더 있으면 전부 돕니다.
+        </p>
+      )}
+
+      {shifts.some((s) => s.closed) && (
+        <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+          <b>쉬는 조</b>가 있습니다 — 그 시간에는 설비도 벨트도 카트도 안 돌고,
+          <b> 지표에서 통째로 뺍니다</b>(OEE 의 분모는 「돌리기로 한 시간」입니다).
+          안 빼면 <b>덜 돌린 공장이 더 좋은 성적</b>을 받게 됩니다.
         </p>
       )}
 

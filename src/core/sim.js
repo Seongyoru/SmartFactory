@@ -38,7 +38,7 @@ import { advanceBelt, beltOffset } from './belt.js';
 import { runMachine, resetWork, setupTook, slotOf } from './process.js';
 import { countKinds, needTimes, scaleNeed, slotShares } from './bom.js';
 import { addRework, resetFaults, resetQuality, screen, screenAgain, stepFaults } from './faults.js';
-import { accumulate, accumulateCart, resetMetrics } from './metrics.js';
+import { accumulate, accumulateCart, plannedStop, resetMetrics } from './metrics.js';
 import {
   addByGroup, addLots, addLotsShared, addShipped, addMade, clearStock,
   getLots, getMade, takeEach, takeLots, takeMade,
@@ -82,6 +82,12 @@ export function resetRun() {
  *  @returns 이번 틱에 고장으로 서 있는 설비 Set
  */
 export function runMachines(dt, d = {}) {
+  /**
+   * **쉬는 시간이면 아무것도 안 한다** — 주말 · 야간 · 정기보전.
+   *  서 있는 이유를 세지도 않는다. 라인이 안 도는 것이 정상인 시간에
+   *  「막혔다 · 굶었다」를 세면 그게 곧 거짓말이다.
+   */
+  if (d.closed) { plannedStop(dt); return; }
   const rand = d.rand ?? Math.random;
   /**
    * 이번 틱에 **전환에 시간을 쓴** 설비들.

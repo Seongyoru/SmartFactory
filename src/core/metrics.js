@@ -36,7 +36,18 @@ const MAX_SAMPLES = 360;
  */
 export const LOSS_FLOOR = 0.5;
 
-let ran = 0;                 // 시뮬레이션이 실제로 돈 시간(초)
+let ran = 0;                 // 시뮬레이션이 실제로 돈 시간(초) = **부하시간**
+/**
+ * 계획정지 — 주말 · 야간 · 정기보전으로 **원래 안 돈** 시간(초).
+ * ---------------------------------------------------------------------------
+ *  `ran` 에 **안 들어간다.** OEE 의 분모는 「돌리기로 한 시간」이고 계획정지는
+ *  거기 안 들어간다. 넣으면 토요일에 쉬었다는 이유로 성적표가 나빠지고,
+ *  거꾸로 **덜 돌린 공장이 더 좋은 성적**을 받는 일이 생긴다.
+ *
+ *  대신 따로 세어 화면에 적는다 — 안 적으면 「시계는 8시간인데 부하시간이
+ *  6시간」인 이유를 어디에서도 못 찾는다.
+ */
+let planned = 0;
 let blocked = {};            // 설비 uid → 막혀서 서 있던 누적 시간(초)
 /**
  * 설비 uid → **굶어서** 서 있던 누적 시간(초).
@@ -205,6 +216,7 @@ export const cartBlockRatio = (uid) => {
 
 export function resetMetrics() {
   ran = 0;
+  planned = 0;
   blocked = {};
   starved = {};
   unmanned = {};
@@ -219,6 +231,20 @@ export function resetMetrics() {
 }
 
 export const getRan = () => ran;
+/** 계획정지로 쉰 시간(초) — 부하시간(`ran`) 밖의 시간이다 */
+export const getPlanned = () => planned;
+
+/**
+ * 쉬는 시간을 흘린다 — **부하시간에는 안 넣는다.**
+ *  막힘 · 굶음 · 무인도 안 센다. 라인이 안 도는 것이 정상인 시간이라,
+ *  거기서 「서 있었다」를 세면 그게 곧 거짓말이다.
+ */
+export function plannedStop(dt) {
+  if (!(dt > 0)) return;
+  planned += dt;
+  const now = performance.now();
+  if (now - lastNotify >= NOTIFY_MS) { lastNotify = now; emit(); }
+}
 export const getBlocked = () => blocked;
 export const getStarved = () => starved;
 export const getUnmanned = () => unmanned;
