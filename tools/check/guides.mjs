@@ -375,3 +375,53 @@ t('가리킬 곳이 없는 걸음에는 「먼저 …」 를 안 붙인다', () 
   const track = cut(tut, 'function Track(', '\nfunction ', 'Track');
   assert.match(track, /step\?\.spot\?\.length \?\? 0\) > 0/, 'spot 없는 걸음에도 띄운다');
 });
+
+/* ==========================================================================
+ *  다섯 갈래를 **글로** 읽고 나온 것들
+ * --------------------------------------------------------------------------
+ *  앞선 확인은 「가리키는 칸이 그때 화면에 있는가」였다. 이번에는 문장을 순서대로
+ *  읽었다 — 「그 순서로 따라갔을 때 말이 되는가」. 넷이 나왔고 넷 다 고쳤다.
+ * ======================================================================== */
+
+t('셀 것이 없는 갈래를 열어도 「다 했습니다」가 아니다', () => {
+  /* 「나눠 쓰기」는 세 걸음이 다 「해 보기」라 분모가 0 이다. 고르는 화면은
+     이미 「읽어 보기」로 갈라 두었는데 **갈래 안이 안 따라와 있었다** —
+     열자마자 마지막 걸음이 펼쳐지고 아래에 「이 안내를 다 했습니다」가 붙었다. */
+  const share = G.guideById('share');
+  assert.equal(G.guideProgress(share, {}).total, 0, '전제가 바뀌었다 — share 에 셀 걸음이 생겼다');
+  const track = cut(tut, 'function Track(', '\nfunction ', 'Track');
+  assert.match(track, /const readOnly = p\.total === 0;/, '갈래 안에서 안 가른다');
+  assert.match(track, /const openIdx = readOnly \? 0 :/, '읽기만 하는 갈래가 마지막 걸음을 편다');
+  assert.match(track, /\{!readOnly && current < 0 && \(/, '안 한 갈래에 「다 했습니다」를 띄운다');
+  assert.match(track, /readOnly \? '읽어 보기'/, '0\/0 단계라고 적는다');
+});
+
+t('한 갈래 안에서 **다른 것을 골라야 하는** 걸음은 각자 말한다', () => {
+  /* 「쌓는 곳」이 그랬다. 걸음 1·2 는 선반, 걸음 3 은 적치대인데 문구가 갈래에
+     하나뿐이라, 적치대만 골라 둔 사람에게 「선반을 고르고」만 떴다. */
+  const store = G.guideById('store');
+  const need = (id) => store.steps.find((s) => s.id === id)?.need ?? '';
+  assert.match(need('shelfRows'), /선반/, '선반 걸음이 무엇을 고르라는지 안 말한다');
+  assert.match(need('stillage'), /적치대/, '적치대 걸음이 무엇을 고르라는지 안 말한다');
+  assert.notEqual(need('shelfRows'), need('stillage'), '다른 것을 요구하는 두 걸음이 같은 말을 한다');
+});
+
+t('한 걸음이 시킨 일을 다른 걸음이 또 시키지 않는다', () => {
+  /* 「원가 보기」 1번이 자재비까지 바꾸라고 해서, 그대로 하면 3번(자재비)이
+     **손도 안 댔는데 체크**됐다(materialSet = rates.material > 0). */
+  const rates = G.guideById('cost').steps.find((s) => s.id === 'rates');
+  assert.equal(/자재비/.test(rates.body), false, '단가 걸음이 자재비까지 시킨다');
+});
+
+t('같은 자리에서 할 일은 붙여 둔다 — 띠 → 설비 → 띠 로 튀지 않는다', () => {
+  const ids = G.guideById('cost').steps.map((s) => s.id);
+  assert.deepEqual(ids, ['rates', 'material', 'power'], '원가 갈래가 화면을 오간다');
+});
+
+t('보고서 걸음은 **실제로 필요한 것**을 말한다', () => {
+  /* done 은 `shipped > 0` 인데 문구는 「조금 돌려 주세요」였다. 트럭도 개구부도
+     없으면 아무리 돌려도 안 넘어가는데 이유를 안 알려 준다 —
+     「0 ± 0 개/시」와 같은 종류의 거짓말이다. */
+  const rep = G.guideById('plan').steps.find((s) => s.id === 'report');
+  assert.match(rep.need, /밖으로 나가야|트럭/, '돌리기만 하면 되는 것처럼 말한다');
+});

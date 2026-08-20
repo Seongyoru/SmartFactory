@@ -135,7 +135,7 @@ export const GUIDES = [
   {
     id: 'store',
     title: '쌓는 곳 다루기',
-    blurb: '적치대 자리 나누기 · 선반 줄 늘리기와 종류별로 받기',
+    blurb: '선반을 줄로 늘리고 종류별로 받기 · 적치대 수용량 정하기',
     need: '적치대나 선반을 놓고 **골라** 주세요',
     steps: [
       {
@@ -143,6 +143,7 @@ export const GUIDES = [
         title: '선반을 줄로 늘리기',
         body: '선반을 고르고 **줄** 칸에서 줄 수를 올려 보세요. 같은 랙이 뒤로 덧붙습니다.\n**앞면은 안 움직입니다** — 이미 그려 둔 카트 경로가 그대로 삽니다.',
         spot: ['[data-guide="panel-shelfrows"]'],
+        need: '**선반**을 하나 골라 주세요 — 줄은 선반의 칸입니다',
         done: (f) => f.shelfRows,
       },
       {
@@ -150,6 +151,7 @@ export const GUIDES = [
         title: '줄마다 받는 것 나누기',
         body: '줄마다 **받을 종류**를 정하면 그 줄에는 그것만 쌓입니다. 안 정하면 지금처럼 섞어 받습니다.\n종류를 갈라 두면 찾으러 가는 거리가 짧아집니다.',
         spot: ['[data-guide="panel-shelfrows"]'],
+        need: '**선반**을 하나 골라 주세요 — 앞 걸음에서 줄을 늘려 두면 나뉩니다',
         done: (f) => f.shelfSplit,
       },
       {
@@ -157,6 +159,7 @@ export const GUIDES = [
         title: '적치대 수용량 정하기',
         body: '적치대를 고르고 **적재** 칸의 **최대 적재량**을 바꿔 보세요. 아래 **반출**에서 빈 차에 실어 보낼 수량도 정합니다.\n적치대는 **완충**이지 속도가 아닙니다 — 가득 찬다는 것은 「작다」가 아니라 **「비우는 쪽이 느리다」**는 뜻입니다.',
         spot: ['[data-guide="panel-stillage"]'],
+        need: '이번에는 **적치대**를 골라 주세요 — 선반과는 다른 칸입니다',
         done: (f) => f.stillageTuned,
       },
     ],
@@ -225,9 +228,16 @@ export const GUIDES = [
       {
         id: 'rates',
         title: '단가를 자기 숫자로',
-        body: '아래 띠의 **원가** 탭에서 전기·인건비·자재비를 바꾸세요. 슬라이더로도, **직접 적어서도** 됩니다.\n기본값 그대로면 그 공장의 원가가 아닙니다 — 화면이 그 사실을 밝힙니다.',
+        body: '아래 띠의 **원가** 탭에서 **전기**와 **인건비**를 바꾸세요. 슬라이더로도, **직접 적어서도** 됩니다.\n기본값 그대로면 그 공장의 원가가 아닙니다 — 화면이 그 사실을 밝힙니다.',
         spot: ['[data-guide="dock-cost"]'],
         done: (f) => f.ratesTuned,
+      },
+      {
+        id: 'material',
+        title: '자재비 넣기',
+        body: '**원가** 탭의 **자재비**에 개당 재료비를 적으세요.\n모르면 0으로 두고 **가공비만** 봐도 됩니다 — 배치끼리 견주는 데는 그걸로 충분합니다.',
+        spot: ['[data-guide="dock-cost"]'],
+        done: (f) => f.materialSet,
       },
       {
         id: 'power',
@@ -236,13 +246,6 @@ export const GUIDES = [
         spot: ['[data-guide="panel-power"]'],
         need: '설비를 하나 **골라** 주세요 — 고른 설비의 칸입니다',
         done: (f) => f.powerTuned,
-      },
-      {
-        id: 'material',
-        title: '자재비 넣기',
-        body: '**원가** 탭의 **자재비**에 개당 재료비를 적으세요.\n모르면 0으로 두고 **가공비만** 봐도 됩니다 — 배치끼리 견주는 데는 그걸로 충분합니다.',
-        spot: ['[data-guide="dock-cost"]'],
-        done: (f) => f.materialSet,
       },
     ],
   },
@@ -273,7 +276,7 @@ export const GUIDES = [
         spot: ['[data-guide="dock-report"]'],
         /* 안 돌렸으면 버튼이 아예 없다(ReportButtons 의 ran<=0 조기 반환) —
            가리킬 것이 없는 이유를 말해 주지 않으면 고장으로 읽힌다 */
-        need: '먼저 ▶ 로 조금 **돌려** 주세요 — 꺼낼 것이 있어야 보고서가 나옵니다',
+        need: '먼저 ▶ 로 돌려 **물건이 밖으로 나가야** 합니다 — 트럭과 개구부가 있어야 보고서에 적을 것이 생깁니다',
         /* 버튼을 눌렀는지는 도면으로 알 수 없다. 대신 **꺼낼 것이 생겼는지**를 본다 —
            물건이 하나라도 나가야 보고서에 적을 것이 있다 */
         done: (f) => f.shipped > 0,

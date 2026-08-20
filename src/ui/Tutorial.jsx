@@ -211,8 +211,15 @@ function Picker({ facts, onPick, onClose }) {
 function Track({ guide, facts, onBack, onClose }) {
   const p = guideProgress(guide, facts);
   const current = nextStep(guide, facts);
+  /**
+   * 셀 것이 없는 갈래(전부 「해 보기」)는 **아직 아무것도 안 한 것**이다.
+   *  분모가 0이라 `nextStep` 이 곧바로 −1 을 주는데, 그대로 두면 「나눠 쓰기」를
+   *  열자마자 마지막 걸음이 펼쳐지고 아래에 「다 했습니다」가 붙는다. 고르는
+   *  화면은 이미 「읽어 보기」로 갈라 두었는데(위) 갈래 안이 안 따라와 있었다.
+   */
+  const readOnly = p.total === 0;
   /* 다 끝났으면 마지막을 펴 둔다 — 아무것도 안 펴져 있으면 빈 창처럼 보인다 */
-  const openIdx = current >= 0 ? current : guide.steps.length - 1;
+  const openIdx = readOnly ? 0 : current >= 0 ? current : guide.steps.length - 1;
   const step = guide.steps[openIdx] ?? null;
   const spotBox = useSpotBox(step?.spot);
 
@@ -241,19 +248,21 @@ function Track({ guide, facts, onBack, onClose }) {
           </button>
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-[12px] font-semibold text-ink">{guide.title}</h3>
-            <p className="text-[10px] tabular-nums text-ink4">{p.done}/{p.total} 단계</p>
+            <p className="text-[10px] tabular-nums text-ink4">{readOnly ? '읽어 보기' : `${p.done}/${p.total} 단계`}</p>
           </div>
           <button type="button" onClick={onClose} className="rounded p-1 text-ink4 hover:bg-raiseh hover:text-ink2" title="닫기">
             <X size={14} />
           </button>
         </div>
 
-        <div className="h-1 w-full bg-kbd">
-          <div
-            className={`h-full transition-all ${p.done === p.total ? 'bg-emerald-500' : 'bg-sky-500'}`}
-            style={{ width: `${p.ratio * 100}%` }}
-          />
-        </div>
+        {!readOnly && (
+          <div className="h-1 w-full bg-kbd">
+            <div
+              className={`h-full transition-all ${p.done === p.total ? 'bg-emerald-500' : 'bg-sky-500'}`}
+              style={{ width: `${p.ratio * 100}%` }}
+            />
+          </div>
+        )}
 
         {/* 먼저 갖춰야 할 것이 있으면 말해 준다 — 아직 안 갖췄을 때만 */}
         {needShown && (
@@ -294,7 +303,7 @@ function Track({ guide, facts, onBack, onClose }) {
           })}
         </ul>
 
-        {current < 0 && (
+        {!readOnly && current < 0 && (
           <div className="flex items-center justify-between gap-2 border-t border-line px-3 py-2">
             <span className="text-[10.5px] text-emerald-600">이 안내를 다 했습니다</span>
             <Btn onClick={onBack}>다른 안내 보기</Btn>
