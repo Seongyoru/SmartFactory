@@ -83,6 +83,13 @@ export function resetRun() {
  */
 export function runMachines(dt, d = {}) {
   const rand = d.rand ?? Math.random;
+  /**
+   * 이번 틱에 **전환에 시간을 쓴** 설비들.
+   *  **설비 반복문보다 위에서 만든다.** 아래에 두었더니 TDZ 로, 전환이 실제로
+   *  도는 순간에만 터졌다 — 두 커밋 동안 숨어 있었다. 검사는 `runMachine`
+   *  (process) 을 직접 불렀지 `runMachines`(sim) 를 안 거쳤고, 브라우저 확인은
+   *  지표를 손으로 넣어 화면만 봤다. **둘 다 그 길을 안 밟은 것이다.** */
+  const setupNow = new Set();
   const nowDown = stepFaults(dt, d.equips ?? [], rand);
 
   /**
@@ -124,7 +131,6 @@ export function runMachines(dt, d = {}) {
    *  고장·무인은 **애초에 못 돈** 시간이라 가동률(A)에서, 막힘·굶음은 **돌 수
    *  있었는데 못 돈** 시간이라 성능(P)에서 빠진다(metrics 의 oeeOf).
    */
-  const setupNow = new Set();
   const downOnly = new Set();
   const blockedOnly = new Set();
   const starvedOnly = new Set();

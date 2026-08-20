@@ -14,7 +14,7 @@
 import { useSyncExternalStore } from 'react';
 /* 종류 이름을 문자열로 박아 두지 않는다 — 목록에서 사라진 이름이 재고에만 남으면
    그리는 쪽이 아무것도 못 그린다. 기준은 라이브러리 한 곳에 있다. */
-import { DEFAULT_KIND } from '../data/library.js';
+import { DEFAULT_KIND, canonKind } from '../data/library.js';
 
 let stock = {};            // { [선반 uid]: 적재 수량 }
 
@@ -327,27 +327,61 @@ export function clearStock(uid) {
  *  자리가 차면 설비가 선다 — 그게 "만들어 놨는데 아무도 안 가져간다" 는 막힘이다.
  *  다만 **상류로는 안 번진다.** 못 내보낼 뿐 재료는 계속 받을 수 있다(무인과 같다).
  */
-let made = {};             // { [설비 uid]: 완성 개수 }
+let made = {};             // { [설비 uid]: [종류, …] } — 앞이 먼저 나간다
 
-export const getMade = (uid) => made[uid] ?? 0;
+/**
+ * =============================================================================
+ *  출력 자리 — **무엇을 만들어 놓았는가**
+ * =============================================================================
+ *  예전에는 개수 하나였다(`made[uid] = 12`). 설비 하나가 한 가지만 만들었으니
+ *  종류를 적어 둘 이유가 없었다.
+ *
+ *  **품종 전환이 생기면서 달라졌다.** 같은 설비가 제작품 1을 스무 개 만들고
+ *  제작품 2로 바꾸면, 출력 자리에는 두 종류가 앞뒤로 서 있다. 개수만 세면
+ *  벨트가 「무엇을 실어야 하는지」를 모른다.
+ *
+ *  그래서 **적치대·선반과 같은 꼴**로 바꿨다 — 종류를 늘어놓은 줄(`lots`).
+ *  앞에서부터 나간다(FIFO): 먼저 만든 것이 먼저 실린다.
+ */
+export const getMade = (uid) => (made[uid] ?? EMPTY).length;
+export const getMadeLots = (uid) => made[uid] ?? EMPTY;
 export const getAllMade = () => made;
 
+/**
+ * 출력 자리 맨 앞에서 **같은 종류가 몇 개나 이어져 있는가.**
+ *  벨트 한 덩어리는 같은 종류라야 한다 — 한 덩어리에 두 종류를 섞으면 화면에
+ *  섞여 쌓인 것이 그려지고, 도착해서 나누는 규칙도 두 벌이 된다.
+ *  품종이 바뀌는 자리에서는 이 값이 잠깐 작아지고, 벨트는 그만큼 기다린다.
+ */
+export function madeRun(uid) {
+  const list = made[uid] ?? EMPTY;
+  if (!list.length) return { kind: null, n: 0 };
+  const kind = list[0];
+  let n = 1;
+  while (n < list.length && list[n] === kind) n++;
+  return { kind, n };
+}
+
 /** 완성 — 넣은 만큼 쌓인다 (자리 확인은 부르는 쪽이 한다) */
-export function addMade(uid, n) {
+export function addMade(uid, n, kind = DEFAULT_KIND) {
   const add = Math.max(0, Math.round(n));
   if (!add) return 0;
-  made = { ...made, [uid]: (made[uid] ?? 0) + add };
+  const k = canonKind(kind) ?? DEFAULT_KIND;
+  made = { ...made, [uid]: [...(made[uid] ?? EMPTY), ...Array.from({ length: add }, () => k)] };
   emit();
   return add;
 }
 
-/** 가져가기 — 있는 만큼만 내주고 실제로 가져간 수를 돌려준다 */
+/**
+ * 앞에서부터 꺼낸다.
+ *  @returns 실제로 꺼낸 개수 (종류가 궁금하면 꺼내기 **전에** `madeRun` 을 볼 것)
+ */
 export function takeMade(uid, n) {
-  const have = made[uid] ?? 0;
-  const take = Math.min(have, Math.max(0, Math.round(n)));
+  const list = made[uid] ?? EMPTY;
+  const take = Math.min(list.length, Math.max(0, Math.round(n)));
   if (!take) return 0;
   const next = { ...made };
-  if (have - take > 0) next[uid] = have - take;
+  if (list.length - take > 0) next[uid] = list.slice(take);
   else delete next[uid];
   made = next;
   emit();

@@ -83,7 +83,43 @@ export function normalizeRecipe(raw) {
 }
 
 /** 이 설비의 레시피 (없으면 null) */
-export const recipeOf = (placed) => normalizeRecipe(placed?.recipe);
+export const recipeOf = (placed) => recipesOf(placed)[0] ?? null;
+
+/**
+ * 이 설비가 만드는 것들 — **여럿일 수 있다.**
+ * ---------------------------------------------------------------------------
+ *  예전에는 `placed.recipe` 하나였다. 한 설비가 한 가지만 만들었으니 「품종
+ *  전환」이라는 말 자체가 성립하지 않았다(그래서 셋업을 「로트 전환」이라
+ *  불렀다). 이제 `placed.recipes` 에 여러 개를 둘 수 있다.
+ *
+ *  **옛 도면이 그대로 돈다.** `recipes` 가 없으면 `recipe` 하나를 담은 줄로
+ *  본다 — 이미 그린 도면은 한 가지만 만드는 설비고, 그건 여전히 맞는 말이다.
+ *
+ *  @returns 정규화된 레시피 배열 (없으면 빈 배열 = 원자재 공급원)
+ */
+export function recipesOf(placed) {
+  const many = Array.isArray(placed?.recipes) ? placed.recipes : null;
+  if (many?.length) {
+    const list = many.map(normalizeRecipe).filter(Boolean);
+    if (list.length) return list;
+  }
+  const one = normalizeRecipe(placed?.recipe);
+  return one ? [one] : [];
+}
+
+/**
+ * 지금 만들고 있는 것 (`slot` 번째).
+ *  줄을 벗어난 번호는 처음으로 돌린다 — 레시피를 지웠는데 굴리는 쪽이 옛
+ *  번호를 들고 있으면 아무것도 못 만들게 된다.
+ */
+export const recipeAt = (placed, slot = 0) => {
+  const list = recipesOf(placed);
+  if (!list.length) return null;
+  return list[((Math.round(slot) % list.length) + list.length) % list.length];
+};
+
+/** 품종을 바꿔 가며 만드는 설비인가 */
+export const isMulti = (placed) => recipesOf(placed).length > 1;
 
 /**
  * 원자재 공급원인가 — 아무것도 안 먹고 계속 만드는 설비.

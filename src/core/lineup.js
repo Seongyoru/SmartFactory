@@ -18,7 +18,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import { inputCapOf, isSource, needFor, outputKindOf, recipeOf, slotShares } from './bom.js';
+import { inputCapOf, isSource, needFor, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
 import { cycleOf, lotOf, outputCapFor, setupOf, shapeOf, spacingFor, varOf } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
@@ -120,6 +120,12 @@ export function machinesOf(d = {}) {
           const item = itemOf(p.itemId);
           if (!item || isShelf(item) || isStillage(item) || isUtility(item)) return null;
           const recipe = recipeOf(p);
+          /**
+           * **품종마다 한 벌씩** 싣는다 — 굴리는 쪽이 지금 몇 번째를 만드는지
+           *  보고 골라 쓴다(`slotOf`). 여기서 고르지 않는 이유는, 이 목록이
+           *  도면에서 한 번 만들어지고 매 틱 다시 안 만들어지기 때문이다.
+           */
+          const list = recipesOf(p);
           return {
             uid: p.uid,
             at: p,
@@ -139,6 +145,13 @@ export function machinesOf(d = {}) {
                예전처럼 한 덩어리치를 한꺼번에 내면, 두 개분 재료로 세 개짜리
                덩어리를 못 만들어 멀쩡한 재료가 놀게 된다. */
             need: isSource(recipe) ? null : needFor(recipe, 1),
+            /** 품종마다 [재료, 산출종류] — 굴리는 쪽이 slot 으로 고른다 */
+            kinds: list.map((r) => ({
+              need: isSource(r) ? null : needFor(r, 1),
+              /* **`recipes` 를 비워서** 넘긴다 — 안 그러면 `recipeOf` 가 배열을
+                 먼저 보고 늘 첫째를 돌려줘서, 품종이 둘인데 산출이 하나가 된다 */
+              out: outputKindOf({ ...p, recipes: null, recipe: r }, item),
+            })),
           };
         })
         .filter(Boolean)

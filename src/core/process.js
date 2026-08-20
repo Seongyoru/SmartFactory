@@ -178,6 +178,8 @@ const work = new Map();
 const setups = new Map();
 const lots = new Map();
 const took = new Map();
+/** 지금 몇 번째 레시피를 만들고 있나 (품종 전환) */
+const slots = new Map();
 
 /**
  * 이보다 적게 남았으면 끝난 것으로 본다 (1 나노초).
@@ -216,8 +218,8 @@ export function bundleProgress(uid, per, made) {
 }
 
 export function resetWork(uid = null) {
-  if (uid == null) { work.clear(); setups.clear(); lots.clear(); took.clear(); } else {
-    work.delete(uid); setups.delete(uid); lots.delete(uid); took.delete(uid);
+  if (uid == null) { work.clear(); setups.clear(); lots.clear(); took.clear(); slots.clear(); } else {
+    work.delete(uid); setups.delete(uid); lots.delete(uid); took.delete(uid); slots.delete(uid);
   }
 }
 
@@ -238,7 +240,7 @@ export function resetWork(uid = null) {
  */
 export function runMachine(uid, dt, {
   cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
-  lot = 0, setupSec = 0, shape = DEFAULT_SHAPE,
+  lot = 0, setupSec = 0, shape = DEFAULT_SHAPE, kinds = 1,
 }) {
   took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
@@ -278,15 +280,23 @@ export function runMachine(uid, dt, {
     w = null;
     done++;
 
-    /* 로트를 채웠으면 전환에 들어간다 — 남은 시간이 있으면 그만큼 미리 쓴다 */
-    if (lot > 0 && setupSec > 0) {
+    /**
+     * 로트를 채웠으면 **다음 품종으로 넘어간다.**
+     *  품종이 하나뿐이면 넘어갈 데가 없다 — 그때도 시간을 물리는 것은 날 갈기·
+     *  청소라서 맞다(로트 전환). 품종이 여럿이면 **바뀌는 그 순간**이 셋업이다.
+     */
+    if (lot > 0) {
       const n = (lots.get(uid) ?? 0) + 1;
       if (n >= lot) {
         lots.set(uid, 0);
-        const use = Math.min(t, setupSec);
-        t -= use;
-        took.set(uid, (took.get(uid) ?? 0) + use);
-        if (setupSec - use > EPS) { setups.set(uid, setupSec - use); break; }
+        const many = Math.max(1, Math.round(kinds));
+        if (many > 1) slots.set(uid, (slotOf(uid) + 1) % many);
+        if (setupSec > 0) {
+          const use = Math.min(t, setupSec);
+          t -= use;
+          took.set(uid, (took.get(uid) ?? 0) + use);
+          if (setupSec - use > EPS) { setups.set(uid, setupSec - use); break; }
+        }
       } else {
         lots.set(uid, n);
       }
@@ -358,3 +368,31 @@ export const inSetup = (uid) => (setups.get(uid) ?? 0) > 0;
 export const setupTook = (uid) => took.get(uid) ?? 0;
 /** 이번 로트에서 몇 개나 만들었나 (화면이 「다음 전환까지」를 말한다) */
 export const lotMade = (uid) => lots.get(uid) ?? 0;
+
+
+/* ==========================================================================
+ *  품종 전환 — **여러 가지를 번갈아 만든다**
+ * --------------------------------------------------------------------------
+ *  로트 전환은 「N개마다 T초 쉰다」였다. 바꿀 품종이 없었기 때문이다. 이제
+ *  설비가 레시피를 여럿 가질 수 있으니(`recipesOf`) **진짜 품종 전환**이 된다.
+ *
+ *  ── 언제 바꾸나 — **로트를 채우면** ──────────────────────────────────────
+ *  「N개 만들고 다음 품종으로」. 규칙을 하나만 두는 이유가 있다.
+ *
+ *    · 실제로 많은 공장이 그렇게 돈다 — 품종별 로트를 정해 놓고 순환
+ *    · **도면만 보고 읽힌다.** 「20개씩 번갈아」는 한 줄로 설명되지만,
+ *      「하류가 모자란 것을 만든다」는 왜 그 순서인지 화면에서 알 수가 없다
+ *    · 순서가 정해져 있어 **되풀이할 수 있다** — 반복 실행이 이것에 기댄다
+ *
+ *  로트를 안 정하면(0) 안 바꾼다 — 첫 레시피만 계속 만든다. 이미 그린 도면이
+ *  안 바뀐다.
+ *
+ *  ── **바뀔 때만** 전환 시간을 문다 ────────────────────────────────────────
+ *  품종이 하나뿐이면 로트를 채워도 바꿀 것이 없다. 그때도 시간을 물리면
+ *  「전환할 것이 없는데 전환한다」가 된다 — 그래서 `next !== now` 일 때만 문다.
+ *  (품종이 하나인 설비는 예전처럼 「N개마다 쉰다」로 남는다. 날 갈기·청소가
+ *  그것이고, 그건 품종과 상관없이 든다.)
+ * ======================================================================== */
+
+/** 지금 몇 번째 레시피를 만들고 있나 */
+export const slotOf = (uid) => slots.get(uid) ?? 0;

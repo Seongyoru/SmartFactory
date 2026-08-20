@@ -23,6 +23,7 @@ group('로트 전환');
 const P = await import(SRC + 'core/process.js');
 const M = await import(SRC + 'core/metrics.js');
 const B = await import(SRC + 'core/balance.js');
+const Sim = await import(SRC + 'core/sim.js');
 
 const near = (a, b, eps = 0.02) => assert.ok(Math.abs(a - b) < eps, `${a} ≠ ${b}`);
 
@@ -233,4 +234,25 @@ t('전환이 제일 크면 **배치 이야기를 안 한다** — 처방이 다�
   /* 사람이 없는 것이 여전히 맨 위다 — 그건 배치로도 로트로도 안 풀린다 */
   assert.ok(dockSrc.indexOf('사람이 없어 선 시간이') < dockSrc.indexOf('split.change > split.block'),
     '무인보다 전환을 먼저 말한다');
+});
+
+t('**전환이 실제로 도는 길**을 한 번은 밟는다', () => {
+  /* 두 커밋 동안 `runMachines` 안에 TDZ 가 숨어 있었다 — `setupNow` 를 설비
+     반복문 **아래**에서 선언해 놓고 위에서 썼다. 전환이 실제로 일어나는
+     순간에만 터지는데, 검사도 브라우저도 그 길을 안 밟았다:
+       · 검사는 `runMachine`(process) 을 직접 불렀지 `runMachines`(sim) 를 안 거쳤다
+       · 브라우저는 지표를 손으로 넣어 화면만 봤다
+     그래서 **sim 을 통째로 돌려 전환이 실제로 걸리는** 검사를 둔다. */
+  const S = Sim;
+  S.resetRun();
+  const machines = [{
+    uid: 'T', cycleSec: 1, cycleVar: 0, cap: 99, lot: 3, setupSec: 30,
+    kinds: [{ need: null, out: 'PART_R' }],
+  }];
+  let setupSec = 0;
+  for (let i = 0; i < 2000; i++) {
+    S.runMachines(0.1, { machines });          // 여기서 터졌다
+    setupSec += P.setupTook('T');
+  }
+  assert.ok(setupSec > 0, '전환이 한 번도 안 걸렸다 — 이 검사가 아무것도 안 본다');
 });
