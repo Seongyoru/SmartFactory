@@ -32,8 +32,8 @@ import {
   DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
 } from '../core/orders.js';
 import {
-  CYCLE_RANGE, MIN_GAP, VAR_MAX, beltPerMinute, cycleOf, outputCapFor, perMinute,
-  spacingClamped, spacingFor, varOf,
+  CYCLE_RANGE, LOT_RANGE, MIN_GAP, SETUP_RANGE, VAR_MAX, beltPerMinute, cycleOf, effectiveCycle,
+  lotOf, outputCapFor, perMinute, setupOf, spacingClamped, spacingFor, varOf,
 } from '../core/process.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
@@ -594,6 +594,9 @@ function EquipmentPanel({ placed }) {
    * ---------------------------------------------------------------------- */
   const cycleSec = cycleOf(placed, item);
   const cycleVar = varOf(placed, item);
+  const lot = lotOf(placed, item);
+  const setupSec = setupOf(placed, item);
+  const effCycle = effectiveCycle(cycleSec, lot, setupSec);
   const bundle = Math.max(1, Math.round(placed.outputCount ?? 3));
   const machineRate = perMinute(cycleSec);
 
@@ -680,6 +683,50 @@ function EquipmentPanel({ placed }) {
             step={0.05}
             onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { cycleVar: v } })}
           />
+          {/**
+            * **로트 전환 (셋업).**
+            * -----------------------------------------------------------------
+            *  몇 개 만들고 나면 날을 갈고, 금형을 바꾸고, 청소를 한다. 그동안은
+            *  아무것도 안 나온다 — 상용 시뮬레이터가 다 갖고 있는 것이고,
+            *  다품종 공장에서는 **이것이 진짜 병목인 경우가 흔하다.**
+            *
+            *  「품종 전환」이 아니라 **「로트 전환」**이라고 부른다. 이 도구는
+            *  아직 한 설비가 한 가지만 만들어서(레시피가 하나) 바꿀 품종 자체가
+            *  없다. 품종이 하나뿐인데 「품종 전환」이라 부르면 화면이 거짓말을
+            *  하는 것이다.
+            */}
+          <Slider
+            label="로트 크기"
+            text={lot > 0 ? `${lot} 개마다` : '전환 없음'}
+            hint={lot > 0
+              ? '이만큼 만들고 나면 전환에 들어갑니다 — 날 갈기 · 금형 교체 · 청소'
+              : '0 이면 쉬지 않고 계속 만듭니다'}
+            value={lot}
+            min={LOT_RANGE[0]}
+            max={LOT_RANGE[1]}
+            step={LOT_RANGE[2]}
+            onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { lotSize: v } })}
+          />
+          {lot > 0 && (
+            <Slider
+              label="전환 시간"
+              text={`${setupSec} 초`}
+              hint={setupSec > 0
+                ? `실질 ${effCycle.toFixed(1)} 초/개 — 혼자서 ${(60 / effCycle).toFixed(1)} 개/분`
+                : '0 이면 로트를 나눠도 시간이 안 듭니다'}
+              value={setupSec}
+              min={SETUP_RANGE[0]}
+              max={SETUP_RANGE[1]}
+              step={SETUP_RANGE[2]}
+              onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { setupSec: v } })}
+            />
+          )}
+          {lot > 0 && setupSec > 0 && (
+            <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+              전환 시간은 <b className="text-ink3">가동률(A)</b> 에서 빠집니다 — 고장·무인과 같은 자리입니다.
+              푸는 방법이 <b className="text-ink3">로트를 키우거나 빠르게 바꾸는 것</b>(SMED)이라 따로 셉니다.
+            </p>
+          )}
         </div>
 
         {/* ── 벨트가 정하는 것 ── */}

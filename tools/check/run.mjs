@@ -44,6 +44,7 @@ await import('./shelfrows.mjs');
 await import('./cartline.mjs');
 await import('./lineflow.mjs');
 await import('./process.mjs');
+await import('./setup.mjs');
 
 /* 소스에서 떼어 내는 것 — JSX 라 import 는 안 되지만 계산 자체는 순수하다.
    손으로 옮겨 적으면 옮겨 적은 것을 검증하게 되므로 파일에서 잘라 실행한다. */

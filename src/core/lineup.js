@@ -19,7 +19,7 @@
  */
 
 import { inputCapOf, isSource, needFor, outputKindOf, recipeOf, slotShares } from './bom.js';
-import { cycleOf, outputCapFor, spacingFor, varOf } from './process.js';
+import { cycleOf, lotOf, outputCapFor, setupOf, spacingFor, varOf } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { linkPath } from './link.js';
@@ -125,6 +125,9 @@ export function machinesOf(d = {}) {
             at: p,
             cycleSec: cycleOf(p, item),
             cycleVar: varOf(p, item),
+            /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
+            lot: lotOf(p, item),
+            setupSec: setupOf(p, item),
             /** 한 덩어리 개수 — 벨트가 한 번에 실어 가는 단위 */
             per: Math.max(1, Math.round(p.outputCount ?? 3)),
             /* 출력 자리는 **한 덩어리 + 한 개**다. 딱 한 덩어리치면 다 만든

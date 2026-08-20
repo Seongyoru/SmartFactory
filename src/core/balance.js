@@ -26,7 +26,7 @@
  */
 
 import { flowEdges, isSource, outputKindOf, recipeOf } from './bom.js';
-import { beltPerMinute, bundleOf, cycleOf, perMinute, spacingFor } from './process.js';
+import { beltPerMinute, bundleOf, cycleOf, effectiveCycle, lotOf, perMinute, setupOf, spacingFor } from './process.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
 
@@ -79,7 +79,15 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     const item = itemOf(p.itemId);
     if (!makes(item)) continue;
     const cyc = cycleOf(p, item);
-    const own = perMinute(cyc);
+    /**
+     * **전환까지 셈에 넣는다.** 안 넣으면 「돌리기 전 계산」과 「돌려 본 결과」가
+     * 갈리고, 사람은 시뮬이 틀렸다고 여긴다. 20개마다 300초면 6초짜리 공정이
+     * 실질 21초가 된다 — 로트가 작을수록 전환이 비싸다는 것이 이 한 줄에 있다.
+     */
+    const lot = lotOf(p, item);
+    const setupSec = setupOf(p, item);
+    const eff = effectiveCycle(cyc, lot, setupSec);
+    const own = perMinute(eff);
     const m = mult.get(p.uid) ?? 1;
     rows.push({
       kind: 'equip',
@@ -88,7 +96,7 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own,
       mult: m,
       capacity: own / m,
-      why: `공정 ${cyc}초/개`,
+      why: eff > cyc ? `공정 ${cyc}초 + 전환 ${setupSec}초/${lot}개 = ${eff.toFixed(1)}초/개` : `공정 ${cyc}초/개`,
     });
   }
 

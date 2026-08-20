@@ -176,18 +176,19 @@ t('층수를 빠뜨리지 않는다 — 덩어리가 아니라 **개**를 센다
 const panel = new Function(
   'placed', 'item', 'state', 'itemOf', 'beltSpeed', 'useMemo',
   'isUtility', 'cycleOf', 'varOf', 'perMinute', 'beltPerMinute', 'spacingFor', 'spacingClamped',
+  'lotOf', 'setupOf', 'effectiveCycle',
   `${cut(
     inspector,
     'const cycleSec = cycleOf(placed, item);',
     'const beltIsLimit = !!outLink && spacingClamped(cycleSec, bundle, beltV);',
-  )}\nreturn { cycleSec, cycleVar, bundle, gap, machineRate, beltV, beltRate, rate, beltIsLimit };`,
+  )}\nreturn { cycleSec, cycleVar, bundle, gap, machineRate, beltV, beltRate, rate, beltIsLimit, lot, setupSec, effCycle };`,
 );
 
 const show = (placed, links = [], items = {}) =>
   panel(
     placed, items[placed.itemId] ?? {}, { links }, (id) => items[id] ?? {}, 0.6,
     (fn) => fn(), isUtility, P.cycleOf, P.varOf, P.perMinute, P.beltPerMinute,
-    P.spacingFor, P.spacingClamped,
+    P.spacingFor, P.spacingClamped, P.lotOf, P.setupOf, P.effectiveCycle,
   );
 
 const BELT = { CONV: { id: 'CONV' } };

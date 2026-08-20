@@ -35,7 +35,7 @@
 
 import { followDistance, forgetStation, loadRoom, pickSet, stepCart } from './cart.js';
 import { advanceBelt, beltOffset } from './belt.js';
-import { runMachine, resetWork } from './process.js';
+import { runMachine, resetWork, setupTook } from './process.js';
 import { slotShares } from './bom.js';
 import { resetFaults, resetQuality, stepFaults } from './faults.js';
 import { accumulate, accumulateCart, resetMetrics } from './metrics.js';
@@ -97,11 +97,17 @@ export function runMachines(dt, d = {}) {
     const n = runMachine(m.uid, dt, {
       cycleSec: m.cycleSec,
       cycleVar: m.cycleVar,
+      /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
+      lot: m.lot,
+      setupSec: m.setupSec,
       room,
       pay: m.need ? () => takeEach(m.uid, m.need) : null,
       rand,
     });
     if (n > 0) addMade(m.uid, n);
+    /* **전환에 쓴 시간은 서는 이유 중 하나다.** 고장·무인과 같은 자리에 두는
+       이유는 푸는 방법이 달라서다 — 로트를 키우거나 빠르게 바꾼다(SMED). */
+    if (setupTook(m.uid) > 0) setupNow.add(m.uid);
   }
 
   /**
@@ -117,17 +123,19 @@ export function runMachines(dt, d = {}) {
    *  고장·무인은 **애초에 못 돈** 시간이라 가동률(A)에서, 막힘·굶음은 **돌 수
    *  있었는데 못 돈** 시간이라 성능(P)에서 빠진다(metrics 의 oeeOf).
    */
+  const setupNow = new Set();
   const downOnly = new Set();
   const blockedOnly = new Set();
   const starvedOnly = new Set();
   for (const uid of d.halted ?? []) {
     if (nowDown.has(uid)) continue;
     if (d.unmanned?.has(uid)) downOnly.add(uid);
+    else if (setupNow.has(uid)) continue;         // 전환은 따로 센다 (아래)
     else if (d.jammed?.has(uid)) blockedOnly.add(uid);
     else if (d.starved?.has(uid)) starvedOnly.add(uid);
     else blockedOnly.add(uid);
   }
-  accumulate(dt, blockedOnly, d.shipped ?? 0, starvedOnly, downOnly);
+  accumulate(dt, blockedOnly, d.shipped ?? 0, starvedOnly, downOnly, setupNow);
   return nowDown;
 }
 

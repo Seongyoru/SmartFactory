@@ -170,6 +170,10 @@ export function drawCycle(sec, ratio = 0, rand = Math.random) {
  *  **같은 비율만큼** 줄어 바로 반영되고, 게이지는 언제나 0~1 이라 멀쩡히 흐른다.
  */
 const work = new Map();
+/** 로트 전환 상태 — 남은 전환 시간 · 이번 로트에서 만든 개수 · 이번 틱에 쓴 시간 */
+const setups = new Map();
+const lots = new Map();
+const took = new Map();
 
 /**
  * 이보다 적게 남았으면 끝난 것으로 본다 (1 나노초).
@@ -208,8 +212,9 @@ export function bundleProgress(uid, per, made) {
 }
 
 export function resetWork(uid = null) {
-  if (uid == null) work.clear();
-  else work.delete(uid);
+  if (uid == null) { work.clear(); setups.clear(); lots.clear(); took.clear(); } else {
+    work.delete(uid); setups.delete(uid); lots.delete(uid); took.delete(uid);
+  }
 }
 
 /**
@@ -227,11 +232,31 @@ export function resetWork(uid = null) {
  *  않고 다음 개로 이어 넣어야 배속을 올려도 처리량이 같다 — 배속마다 결과가
  *  달라지면 그 숫자는 아무 뜻이 없다.
  */
-export function runMachine(uid, dt, { cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random }) {
+export function runMachine(uid, dt, {
+  cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
+  lot = 0, setupSec = 0,
+}) {
+  took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
 
-  let w = work.get(uid) ?? null;
   let t = dt;
+
+  /**
+   * **전환 중이면 아무것도 안 나온다.**
+   *  자리가 없으면(`room <= 0`) 여기까지 오지도 않는다 — 막힌 설비가 「전환
+   *  중」으로 보이면 정작 막힌 것이 화면에서 사라진다. 어차피 자리가 나야
+   *  다음 로트를 시작하므로 미뤄도 값이 안 달라진다.
+   */
+  const left = setups.get(uid) ?? 0;
+  if (left > 0) {
+    const used = Math.min(t, left);
+    t -= used;
+    took.set(uid, used);
+    if (left - used > EPS) { setups.set(uid, left - used); return 0; }
+    setups.delete(uid);
+  }
+
+  let w = work.get(uid) ?? null;
   let done = 0;
 
   while (t > EPS && done < room) {
@@ -243,14 +268,89 @@ export function runMachine(uid, dt, { cycleSec, cycleVar = 0, room = 0, pay = nu
     /* 이번 개에 걸리는 시간을 **매 프레임 다시 잰다** — 그래서 공정 시간을
        바꾸면 걸려 있던 것에도 바로 반영된다 */
     const dur = Math.max(0.05, (cycleSec > 0 ? cycleSec : DEFAULT_CYCLE) * w.mult);
-    const left = (1 - w.done) * dur;
-    if (left > t + EPS) { w.done = Math.min(1, w.done + t / dur); t = 0; break; }
-    t -= left;
+    const rest = (1 - w.done) * dur;
+    if (rest > t + EPS) { w.done = Math.min(1, w.done + t / dur); t = 0; break; }
+    t -= rest;
     w = null;
     done++;
+
+    /* 로트를 채웠으면 전환에 들어간다 — 남은 시간이 있으면 그만큼 미리 쓴다 */
+    if (lot > 0 && setupSec > 0) {
+      const n = (lots.get(uid) ?? 0) + 1;
+      if (n >= lot) {
+        lots.set(uid, 0);
+        const use = Math.min(t, setupSec);
+        t -= use;
+        took.set(uid, (took.get(uid) ?? 0) + use);
+        if (setupSec - use > EPS) { setups.set(uid, setupSec - use); break; }
+      } else {
+        lots.set(uid, n);
+      }
+    }
   }
 
   if (w == null) work.delete(uid);
   else work.set(uid, w);
   return done;
 }
+
+
+/* ==========================================================================
+ *  로트 전환 (셋업)
+ * --------------------------------------------------------------------------
+ *  설비는 계속 같은 것만 뽑지 않는다. 몇 개 만들고 나면 **날을 갈고, 금형을
+ *  바꾸고, 청소를 한다.** 그동안은 아무것도 안 나온다. 상용 시뮬레이터가
+ *  전부 갖고 있는 것이고, 다품종 공장에서는 **이것이 진짜 병목인 경우가 흔하다.**
+ *
+ *  ── 왜 「품종 전환」이 아니라 「로트 전환」인가 ────────────────────────────
+ *  이 도구는 아직 **한 설비 = 한 레시피**다(`recipeOf` 가 `placed.recipe` 하나를
+ *  본다). 바꿀 품종 자체가 없으므로 「품종이 바뀔 때」를 표현할 수가 없다.
+ *  그래서 **「N개마다 T초」**로 둔다 — 실제 공장의 셋업 손실을 이 한 줄로 꽤
+ *  정확히 근사할 수 있고, 나중에 설비가 다품종이 되면 「N개마다」를 「종류가
+ *  바뀔 때」로 바꾸기만 하면 된다.
+ *
+ *  **이름을 정직하게 붙이는 것이 중요하다.** 품종이 하나뿐인 모델에서
+ *  「품종 전환」이라고 부르면 화면이 거짓말을 하는 것이다.
+ *
+ *  ── 이 시간은 어디로 가나 — **가동률(A)** ─────────────────────────────────
+ *  서는 이유를 가르는 잣대는 늘 같았다: **푸는 방법이 다른가.**
+ *
+ *      고장   정비로 푼다          → 가동률 A
+ *      무인   인력으로 푼다        → 가동률 A
+ *      전환   로트를 키우거나      → 가동률 A   ← 새로 생긴 것
+ *             빠르게 바꿔서(SMED)
+ *      막힘   배치로 푼다          → 성능 P
+ *      굶음   상류로 푼다          → 성능 P
+ *
+ *  셋업은 「돌 수 있었는데 못 돈」 시간이 아니라 **애초에 못 도는** 시간이라
+ *  고장·무인과 같은 자리에 선다.
+ * ======================================================================== */
+
+/** 몇 개마다 전환하나 — 0 이면 전환 없음 (이미 그린 도면이 안 바뀐다) */
+export const LOT_RANGE = [0, 500, 1];
+/** 전환 한 번에 몇 초 */
+export const SETUP_RANGE = [0, 3600, 10];
+
+export const lotOf = (placed, item) =>
+  Math.max(0, Math.round(Number(placed?.lotSize ?? item?.lotSize ?? 0) || 0));
+
+export const setupOf = (placed, item) =>
+  Math.max(0, Math.round(Number(placed?.setupSec ?? item?.setupSec ?? 0) || 0));
+
+/**
+ * **전환까지 셈에 넣은 한 개당 시간.**
+ *  천장(`balance.js`)이 이 값을 써야 한다 — 안 쓰면 「돌리기 전 계산」과
+ *  「돌려 본 결과」가 갈리고, 사람은 시뮬이 틀렸다고 여긴다.
+ *
+ *      20개마다 300초 전환 · 공정 6초  →  6 + 300/20 = 21초/개
+ *
+ *  로트가 작을수록 전환이 비싸진다는 것이 이 한 줄에 그대로 들어 있다.
+ */
+export const effectiveCycle = (cycleSec, lot = 0, setupSec = 0) =>
+  (lot > 0 && setupSec > 0 ? cycleSec + setupSec / lot : cycleSec);
+
+/** 지금 전환 중인가 · 이번 틱에 전환으로 쓴 시간(초) */
+export const inSetup = (uid) => (setups.get(uid) ?? 0) > 0;
+export const setupTook = (uid) => took.get(uid) ?? 0;
+/** 이번 로트에서 몇 개나 만들었나 (화면이 「다음 전환까지」를 말한다) */
+export const lotMade = (uid) => lots.get(uid) ?? 0;

@@ -43,7 +43,7 @@ import { focusOn } from '../core/focusStore.js';
 import { formatElapsed, useElapsed } from '../core/clock.js';
 import {
   LOSS_FLOOR, getBlocked, getSeries, getStarved, getUnmanned, getRan,
-  leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
+  getSetup, leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
 } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
 import { getShipped, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
@@ -368,17 +368,19 @@ function lossRows(placed) {
   const blocked = getBlocked();
   const starved = getStarved();
   const unmanned = getUnmanned();
+  const setup = getSetup();
   const ran = getRan();
   return placed
     .map((p) => {
       const sec = blocked[p.uid] ?? 0;
       const starve = starved[p.uid] ?? 0;
       const crew = unmanned[p.uid] ?? 0;
+      const change = setup[p.uid] ?? 0;
       return {
         uid: p.uid,
         name: p.name ?? p.uid,
-        sec, starve, crew,
-        run: ran > 0 ? Math.max(0, 1 - Math.min(1, (sec + starve + crew) / ran)) : 1,
+        sec, starve, crew, change,
+        run: ran > 0 ? Math.max(0, 1 - Math.min(1, (sec + starve + crew + change) / ran)) : 1,
       };
     })
     .filter((r) => r.sec > LOSS_FLOOR || r.starve > LOSS_FLOOR || r.crew > LOSS_FLOOR)
@@ -441,6 +443,7 @@ function LossRank({ rows, empty, onPick }) {
 /** 정지 이유 셋 — 색과 처방이 이 표 하나에서만 나온다 */
 const REASONS = [
   { key: 'crew', label: '무인', bg: 'bg-violet-500', chip: 'bg-violet-500/15 text-violet-600', why: '돌릴 사람이 없다' },
+  { key: 'change', label: '전환', bg: 'bg-sky-500', chip: 'bg-sky-500/15 text-sky-600', why: '로트를 바꾸는 중이다 — 로트를 키우거나 빠르게(SMED)' },
   { key: 'sec', label: '막힘', bg: 'bg-rose-500', chip: 'bg-rose-500/15 text-rose-600', why: '보낼 곳이 없다' },
   { key: 'starve', label: '굶음', bg: 'bg-amber-500', chip: 'bg-amber-500/15 text-amber-600', why: '받을 것이 없다' },
 ];
@@ -461,8 +464,8 @@ function Bottleneck({ rows, onPick }) {
   if (!rows.length || !split) {
     return <p className="text-[10.5px] leading-snug text-ink4">서 있는 설비가 없습니다 — 라인이 흐르고 있습니다.</p>;
   }
-  const total = split.block + split.starve + split.crew;
-  const sum = { crew: split.crew, sec: split.block, starve: split.starve };
+  const total = split.block + split.starve + split.crew + split.change;
+  const sum = { crew: split.crew, change: split.change, sec: split.block, starve: split.starve };
 
   /* 설비마다 **가장 크게 잃은 이유 하나**로 줄을 세운다. 한 대가 세 줄을
      차지하면 목록이 금세 길어져 정작 다른 설비가 안 보인다. */

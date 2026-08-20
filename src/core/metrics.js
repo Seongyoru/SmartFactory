@@ -60,6 +60,12 @@ let starved = {};
  */
 let unmanned = {};
 /**
+ * 로트 전환에 쓴 시간. **고장·무인과 같은 자리**다 — 「돌 수 있었는데 못 돈」
+ * 것이 아니라 애초에 못 도는 시간이라 가동률(A)에서 빠진다.
+ * 푸는 방법도 다르다: 정비 · 인력 · **로트를 키우거나 빠르게 바꾸기(SMED)**.
+ */
+let setup = {};
+/**
  * 카트 경로 uid → 앞차에 막혀 **못 간** 시간(초) · 그리고 달린 시간.
  * ---------------------------------------------------------------------------
  *  차간 간격을 넣고 나니 "카트를 몇 대 올려야 하는가" 를 물을 수 있게 됐는데,
@@ -132,7 +138,7 @@ const subscribe = (f) => {
  *                      고장과 겹치지 않게 갈라서 넘긴다(EditorScene 의 SimClock)
  *  @param unmannedUids Set<uid> · 사람이 없어 서 있는 설비
  */
-export function accumulate(dt, haltedUids, shipped, starvedUids = null, unmannedUids = null) {
+export function accumulate(dt, haltedUids, shipped, starvedUids = null, unmannedUids = null, setupUids = null) {
   if (!(dt > 0)) return;
   /* 이번 실행의 기준점 — 분자와 분모가 같은 순간에서 출발해야 한다 */
   if (shippedStart === null) shippedStart = shipped ?? 0;
@@ -151,6 +157,11 @@ export function accumulate(dt, haltedUids, shipped, starvedUids = null, unmanned
     const next = { ...unmanned };
     for (const uid of unmannedUids) next[uid] = (next[uid] ?? 0) + dt;
     unmanned = next;
+  }
+  if (setupUids?.size) {
+    const next = { ...setup };
+    for (const uid of setupUids) next[uid] = (next[uid] ?? 0) + dt;
+    setup = next;
   }
 
   /* 추이는 촘촘히 남길 필요가 없다 — 10 시뮬초에 하나면 그래프로 충분하고,
@@ -201,6 +212,7 @@ export function resetMetrics() {
   cartRan = {};
   series = [];
   lastSample = 0;
+  setup = {};
   shippedStart = null;
   lastNotify = 0;
   emit();
@@ -210,6 +222,11 @@ export const getRan = () => ran;
 export const getBlocked = () => blocked;
 export const getStarved = () => starved;
 export const getUnmanned = () => unmanned;
+export const getSetup = () => setup;
+/** 이 설비가 로트 전환에 쓴 시간(초) */
+export const setupTimeOf = (uid) => setup[uid] ?? 0;
+/** 라인 전체가 전환에 쓴 시간 — 「얼마나 자주 바꾸고 있나」 */
+export const setupTotal = () => Object.values(setup).reduce((s, n) => s + n, 0);
 export const getSeries = () => series;
 
 /**
@@ -221,8 +238,9 @@ export function lossSplit() {
   const block = sum(blocked);
   const starve = sum(starved);
   const crew = sum(unmanned);
-  if (!block && !starve && !crew) return null;
-  return { block, starve, crew, starvedMore: starve > block };
+  const change = sum(setup);
+  if (!block && !starve && !crew && !change) return null;
+  return { block, starve, crew, change, starvedMore: starve > block };
 }
 
 /**
@@ -338,11 +356,13 @@ export function oeeOf(uid) {
   if (ran <= 0) return null;
   const downSec = downTimeOf(uid);
   const crewSec = Math.min(Math.max(0, ran - downSec), unmanned[uid] ?? 0);
-  const able = Math.max(0, ran - downSec - crewSec);   // 돌 수 있었던 시간
+  /* 전환도 가동률 손실이다 — 남은 시간 안에서만 센다(같은 시간을 두 번 빼지 않는다) */
+  const setupSec = Math.min(Math.max(0, ran - downSec - crewSec), setup[uid] ?? 0);
+  const able = Math.max(0, ran - downSec - crewSec - setupSec);   // 돌 수 있었던 시간
   const blockSec = Math.min(able, blocked[uid] ?? 0);
   const starveSec = Math.min(Math.max(0, able - blockSec), starved[uid] ?? 0);
 
-  const availability = Math.max(0, 1 - (downSec + crewSec) / ran);
+  const availability = Math.max(0, 1 - (downSec + crewSec + setupSec) / ran);
   const performance = able > 0 ? Math.max(0, 1 - (blockSec + starveSec) / able) : 1;
   /* **그 설비의** 양품률이다. 라인 합계를 쓰면 설비 하나의 불량률을 올렸을 때
      아무 상관 없는 설비의 OEE 까지 같이 떨어진다 — 실제로 그랬다. */
@@ -350,7 +370,7 @@ export function oeeOf(uid) {
   return {
     availability, performance, quality: q,
     oee: availability * performance * q,
-    downSec, crewSec, blockSec, starveSec,
+    downSec, crewSec, setupSec, blockSec, starveSec,
   };
 }
 
