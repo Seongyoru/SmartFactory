@@ -32,9 +32,9 @@ import {
   DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
 } from '../core/orders.js';
 import {
-  BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, SETUP_RANGE, VAR_MAX,
+  BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, REWORK_RANGE, SETUP_RANGE, VAR_MAX,
   batchOf, batchWaitOf, beltPerMinute, cycleOf, effectiveCycle,
-  lotOf, outputCapFor, perMinute, setupOf, shapeOf, spacingClamped, spacingFor, varOf,
+  lotOf, outputCapFor, perMinute, reworkOf, setupOf, shapeOf, spacingClamped, spacingFor, varOf,
 } from '../core/process.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
@@ -54,7 +54,7 @@ import {
 } from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, REPAIR_VAR_MAX, SCRAP_RANGE,
-  getMade, getScrapped, repairsOf, useFaults,
+  getMade, getScrapped, repairsOf, reworkedOf, scrappedOf, useFaults,
 } from '../core/faults.js';
 import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, unitWon, won } from '../core/cost.js';
 import {
@@ -211,6 +211,8 @@ function EquipUptime({ uid }) {
   const o = oeeOf(uid);
   if (!o) return null;
   const fixes = repairsOf(uid);
+  const scrapped = scrappedOf(uid);
+  const redone = reworkedOf(uid);
 
   return (
     <>
@@ -245,9 +247,23 @@ function EquipUptime({ uid }) {
           </span>
         )}
       </Row>
+      {/* **그 설비가** 버린 것과 다시 만든 것. 라인 전체 합을 여기 적으면
+          옆 설비의 불량을 이 설비가 뒤집어쓴 것처럼 보여, 어디를 손볼지가
+          통째로 어긋난다 (faults.js 가 같은 이유로 설비마다 따로 센다).
+
+          **재작업은 양품률을 안 깎는다** — 살아났으니까. 대신 시간을 썼고,
+          그래서 두 값을 나란히 적는다. 「불량을 재작업으로 덮고 있다」가
+          한 줄로 읽혀야 한다. */}
       <Row label="· 양품률">
         <span className={tone(o.quality)}>{pct(o.quality)}</span>
-        {getScrapped() > 0 && <span className="ml-1 text-[10px] text-ink4">({getScrapped()}개 불량)</span>}
+        {(scrapped > 0 || redone > 0) && (
+          <span className="ml-1 text-[10px] text-ink4">
+            ({[
+              scrapped > 0 ? `${scrapped}개 버림` : null,
+              redone > 0 ? `${redone}개 재작업` : null,
+            ].filter(Boolean).join(' · ')})
+          </span>
+        )}
       </Row>
     </>
   );
@@ -313,10 +329,16 @@ function CrewFields({ placed }) {
  *  MTBF 를 0 으로 두면 고장 나지 않는다 — 기본값이다. 이미 그린 도면이 갑자기
  *  서면 안 되므로, 고장은 **켜겠다고 말한 설비에만** 일어난다.
  */
-function FaultFields({ placed }) {
+function FaultFields({ placed, item }) {
   const { dispatch } = useEditor();
   const set = (patch) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch });
   const mtbf = placed.mtbf ?? 0;
+  const scrap = Math.min(1, Math.max(0, placed.scrapRate ?? 0));
+  const reworkSec = reworkOf(placed, item);
+  /** 양품 한 개에 드는 시간 — 버리든 다시 만들든 여기 든다 */
+  const goodCycle = effectiveCycle(
+    cycleOf(placed, item), 0, 0, batchOf(placed, item), { scrap, reworkSec },
+  );
 
   return (
     <Section title="고장 · 불량" data-guide="panel-fault">
@@ -356,16 +378,57 @@ function FaultFields({ placed }) {
       )}
       <Slider
         label="불량률"
-        min={SCRAP_RANGE[0]} max={SCRAP_RANGE[1]} step={SCRAP_RANGE[2]}
+        min={SCRAP_RANGE[0]}
+        max={SCRAP_RANGE[1]}
+        step={SCRAP_RANGE[2]}
         value={placed.scrapRate ?? 0}
         text={`${((placed.scrapRate ?? 0) * 100).toFixed(1)} %`}
         onChange={(v) => set({ scrapRate: v })}
       />
+      {/**
+        * 재작업 — **버리는 대신 다시 만든다.**
+        * -------------------------------------------------------------------
+        *  불량품을 다 버리는 공장은 없다. 고칠 수 있으면 고치고, 그 시간이
+        *  설비의 능력을 갉아먹는다 — 이 도구가 답해야 하는 것이 그것이다.
+        *  불량률이 0 이면 고칠 것이 없으므로 이 칸은 안 뜬다.
+        */}
+      {scrap > 0 && (
+        <>
+          <Slider
+            label="재작업 시간"
+            min={REWORK_RANGE[0]}
+            max={REWORK_RANGE[1]}
+            step={REWORK_RANGE[2]}
+            value={reworkSec}
+            text={reworkSec > 0 ? `${reworkSec} 초/개` : '버립니다'}
+            hint={reworkSec > 0
+              ? `불량 한 개를 이만큼 들여 고칩니다 — 양품 개당 ${goodCycle.toFixed(1)}초`
+              : '0 이면 고치지 않고 버립니다 (지금까지의 동작)'}
+            onChange={(v) => set({ reworkSec: v })}
+          />
+          <p className="mt-1 rounded bg-raise px-2 py-1.5 text-[10.5px] leading-relaxed text-ink4 ring-1 ring-edge">
+            {reworkSec > 0 ? (
+              <>
+                다시 만든 것도 <b className="text-ink2">같은 불량률을 한 번 더</b> 지납니다 —
+                두 번째 불량은 버립니다. 그래서 끝내 버리는 것은 불량률의 제곱
+                (<b className="text-ink2">{((scrap * scrap) * 100).toFixed(1)}%</b>)입니다.
+                <br />재작업은 <b className="text-ink2">양품률을 안 깎지만 시간을 씁니다.</b>
+                {' '}두 값을 나란히 봐야 「불량을 재작업으로 덮고 있다」가 보입니다.
+              </>
+            ) : (
+              <>
+                버리면 <b className="text-ink2">양품 개당 {goodCycle.toFixed(1)}초</b>가 됩니다 —
+                열 개 만들어 하나를 버리면 그만큼 더 걸리는 셈입니다.
+              </>
+            )}
+          </p>
+        </>
+      )}
       <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
         고장 시점은 <b className="text-ink2">지수분포</b>로 뽑습니다 — 주기로 두면 여러 대가
         박자를 맞춰 서서 실제와 다른 그림이 됩니다.
-        <br />불량품은 쌓이지 않고 버려집니다. 적치대에 넣으면 자리를 차지해 멀쩡한 라인을
-        세우게 되니까요.
+        <br />불량은 <b className="text-ink2">만들 때</b> 판정합니다 — 그래야 카트로 나르는
+        설비도 불량이 나오고, 재작업으로 되돌릴 수도 있습니다. 걸러진 것은 벨트를 안 탑니다.
       </p>
     </Section>
   );
@@ -726,7 +789,14 @@ function EquipmentPanel({ placed }) {
   const batch = batchOf(placed, item);
   const waitSec = batchWaitOf(placed, item);
   const unitCycle = cycleSec / batch;
-  const effCycle = effectiveCycle(cycleSec, lot, setupSec, batch);
+  /**
+   * **실질은 양품 기준이다.** 열 개 만들어 하나를 버리면 양품 한 개에 드는
+   *  시간이 그만큼 늘고, 다시 만들면 그 시간도 든다 — 천장(`balance.js`)이
+   *  쓰는 값과 같아야 화면 두 곳이 안 어긋난다.
+   */
+  const scrap = Math.min(1, Math.max(0, placed.scrapRate ?? 0));
+  const reworkSec = reworkOf(placed, item);
+  const effCycle = effectiveCycle(cycleSec, lot, setupSec, batch, { scrap, reworkSec });
   const shape = shapeOf(placed, item);
   const bundle = Math.max(1, Math.round(placed.outputCount ?? 3));
   const machineRate = perMinute(unitCycle);
@@ -797,7 +867,7 @@ function EquipmentPanel({ placed }) {
             label={batch > 1 ? '만드는 시간 (한 판)' : '만드는 시간'}
             text={batch > 1 ? `${cycleSec.toFixed(1)} 초/판` : `${cycleSec.toFixed(1)} 초/개`}
             hint={effCycle > unitCycle
-              ? `설비 혼자서는 ${machineRate.toFixed(1)} 개/분 — 전환까지 치면 ${(60 / effCycle).toFixed(1)} 개/분`
+              ? `설비 혼자서는 ${machineRate.toFixed(1)} 개/분 — ${scrap > 0 ? '불량까지 치면 양품' : '전환까지 치면'} ${(60 / effCycle).toFixed(1)} 개/분`
               : `설비 혼자서는 ${machineRate.toFixed(1)} 개/분`}
             value={cycleSec}
             min={CYCLE_RANGE[0]}
@@ -999,7 +1069,7 @@ function EquipmentPanel({ placed }) {
 
       <CrewFields placed={placed} />
 
-      <FaultFields placed={placed} />
+      <FaultFields placed={placed} item={item} />
 
       <PowerFields placed={placed} />
 
