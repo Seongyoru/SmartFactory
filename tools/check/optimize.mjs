@@ -153,18 +153,65 @@ t('여유(margin)는 **0 이 기본**이다 — 두면 정차역이 사라진다
   assert.ok(optSrc.includes('STATION_DIST'), '왜 0 인지가 코드에 안 적혀 있다');
 });
 
-t('탐색이 설비를 경로 위로 안 옮긴다', () => {
-  /* 조립기를 제작기 쪽으로 당기면 경로(z=4)를 밟는 자리가 나온다.
-     통로를 안 보면 거기로 간다. */
-  const d = ctx({ carts: AISLE_CART });
+/* ---------- 통로를 가로지르고 싶어 하는 도면 ----------------------------
+     앞 검사(「탐색이 설비를 경로 위로 안 옮긴다」)는 **아무 도면에서나** 하면
+     저절로 통과한다 — 탐색이 애초에 그리로 갈 이유가 없으면 가드가 있으나
+     없으나 같다. 되돌리기 테스트로 그걸 확인했다(안 물었다).
+
+     그래서 **길이 라인을 가로지르는** 도면을 세운다.
+
+         제작기 A (z=16)
+         ────────── 카트 길 (z=4~6) ──────────   ← 적치대·선반이 이 길에 붙어 있다
+         제작기 B (z=0) · 조립기 (z=−8)
+
+     조립기를 제작기 A 쪽으로 당기면 길을 밟는 자리가 나오고, 그 자리가 실제로
+     점수가 좋다. 통로를 안 보면 설비 셋이 길 위에 올라앉는다.
+   ------------------------------------------------------------------------ */
+const CROSS = () => {
+  const list = mk();
+  list.push({ uid: 'S1', name: '적치대', itemId: 'STILLAGE', pos: [-12, 5], rot: 0, dispatchCount: 3 });
+  list.push({ uid: 'H1', name: '선반', itemId: 'SHELF', pos: [12, 5], rot: 0, bays: 2, levels: 2, rows: 1 });
+  return list;
+};
+const CROSS_CART = [{
+  uid: 'C1', name: '카트', itemId: 'CART', speed: 2, dwell: 1, closed: true,
+  points: [[-16, 4], [16, 4], [16, 6], [-16, 6]],
+}];
+const onAisle = (list, pts) => list.filter((p) => {
+  const bb = bboxOf(p);
+  return bb && O.blocksAisle(G.footprintOf({ ...p, bboxOverride: bb }, null), pts);
+});
+
+t('길이 라인을 가로지르면 **당기기가 길을 밟고 싶어 한다**', () => {
+  /* 이 검사가 통로 판정의 존재 이유다. 안 보고 돌리면 실제로 셋이 올라앉는다.
+     여기서 「길 위에 놓는 쪽이 점수가 좋다」가 확인돼야, 가드를 빼면 그리로
+     간다는 말이 된다. */
+  const d = ctx({ placed: CROSS(), carts: CROSS_CART });
+  const pts = O.aislePoints(CROSS_CART);
+  assert.equal(onAisle(CROSS(), pts).length, 0, '전제가 무너졌다 — 처음부터 길 위에 있다');
+
+  const free = O.searchLayout({ ...d, aisle: [] });            // 통로를 안 볼 때
+  assert.ok(free.ok, '전제가 무너졌다 — 줄일 것이 없다');
+  const parked = onAisle(free.placed, pts);
+  assert.ok(parked.length >= 2, `길 위에 안 올라앉는다 (${parked.length}대) — 도면을 다시 세울 것`);
+  assert.ok(free.after < 40, `길을 밟는 쪽이 안 좋다 (${free.after.toFixed(1)} m) — 유혹이 없다`);
+});
+
+t('통로를 보면 **하나도 안 올라앉는다**', () => {
+  const d = ctx({ placed: CROSS(), carts: CROSS_CART });
+  const pts = O.aislePoints(CROSS_CART);
   const r = O.searchLayout(d);
-  const pts = O.aislePoints(AISLE_CART);
-  for (const p of r.placed) {
-    const bbox = bboxOf(p);
-    if (!bbox) continue;
-    const f = G.footprintOf({ ...p, bboxOverride: bbox }, null);
-    assert.equal(O.blocksAisle(f, pts), false, `${p.name} 이 경로 위에 있다`);
-  }
+  assert.ok(r.ok, '통로를 지키면 아무것도 못 한다 — 너무 빡빡하다');
+  assert.deepEqual(onAisle(r.placed, pts).map((p) => p.name), [], '설비가 길 위에 있다');
+});
+
+t('통로를 지키는 값은 **점수로 치른다** — 그 사실을 숨기지 않는다', () => {
+  /* 길을 밟으면 29.6 m 까지 가지만 그 도면은 카트가 못 다닌다. 63.1 m 가
+     「쓸 수 있는 배치」의 값이다. 이 차이가 사라지면 위 검사도 뜻이 없어진다. */
+  const d = ctx({ placed: CROSS(), carts: CROSS_CART });
+  const kept = O.searchLayout(d);
+  const free = O.searchLayout({ ...d, aisle: [] });
+  assert.ok(free.after < kept.after, '통로를 지켜도 점수가 같다 — 판정이 안 물고 있다');
 });
 
 /* ---------- 구역 --------------------------------------------------------- */
