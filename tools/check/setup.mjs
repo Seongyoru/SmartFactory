@@ -228,7 +228,7 @@ t('실행 탭이 전환을 **따로** 보여 준다', () => {
 });
 
 t('화면이 **실질 공정**을 말해 준다', () => {
-  assert.ok(inspSrc.includes('effectiveCycle(cycleSec, lot, setupSec)'), '실질 공정을 안 낸다');
+  assert.ok(inspSrc.includes('effectiveCycle(cycleSec, lot, setupSec, batch)'), '실질 공정을 안 낸다');
   assert.ok(inspSrc.includes('가동률(A)'), '어디서 빠지는 시간인지 안 말한다');
 });
 

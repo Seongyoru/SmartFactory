@@ -32,7 +32,8 @@ import {
   DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
 } from '../core/orders.js';
 import {
-  CYCLE_RANGE, LOT_RANGE, MIN_GAP, SETUP_RANGE, VAR_MAX, beltPerMinute, cycleOf, effectiveCycle,
+  BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, SETUP_RANGE, VAR_MAX,
+  batchOf, batchWaitOf, beltPerMinute, cycleOf, effectiveCycle,
   lotOf, outputCapFor, perMinute, setupOf, shapeOf, spacingClamped, spacingFor, varOf,
 } from '../core/process.js';
 import {
@@ -469,7 +470,14 @@ function RecipeSection({ placed, item }) {
   const out = outKindOf(recipe, item);
   const source = isSource(recipe);
   const cap = inputCapOf(placed);
-  const per = Math.max(1, placed.outputCount ?? 3);
+  /**
+   * 이 설비가 **한 번에 집는 단위** — 버퍼가 이만큼은 담아야 한다.
+   *  배치 설비는 한 판(20개)을 한꺼번에 먹으므로, 덩어리(3개)로 재면 버퍼가
+   *  한참 모자란데도 화면이 아무 말을 안 한다. 판이 1이면 예전과 같은 값이다.
+   */
+  const tray = batchOf(placed, item);
+  const per = Math.max(Math.max(1, placed.outputCount ?? 3), tray);
+  const unitWord = tray > 1 ? '한 판' : '한 덩어리';
   const lot = lotOf(placed, item);
 
   /* 도면에는 **줄로** 적는다. 첫 줄은 옛 이름(`recipe`)에도 같이 남긴다 —
@@ -665,14 +673,14 @@ function RecipeSection({ placed, item }) {
             <p className="mt-2 rounded bg-rose-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-rose-500 ring-1 ring-rose-500/25">
               <b>입력 버퍼가 작습니다.</b>{' '}
               {tight.map((t) => `${PAYLOAD_ITEMS[t.kind]?.name ?? t.kind} 자리 ${t.slots}개 < 필요 ${t.need}개`).join(' · ')}.
-              한 덩어리({per}개)를 만들 재료가 **들어올 자리조차** 없어 영원히 굶습니다 —
+              {unitWord}({per}개)를 만들 재료가 **들어올 자리조차** 없어 영원히 굶습니다 —
               버퍼를 최소 <b>{minCap}</b>개로 올리세요.
             </p>
           )}
 
           {tight.length === 0 && short.length > 0 && (
             <p className="mt-2 rounded bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
-              한 덩어리({per}개)를 만들 재료가 모자랍니다 —{' '}
+              {unitWord}({per}개)를 만들 재료가 모자랍니다 —{' '}
               {short.map(([k, n]) => `${PAYLOAD_ITEMS[k]?.name ?? k} ${n}개`).join(' · ')} 부족.
               이 설비는 <b>굶어서</b> 서 있습니다.
             </p>
@@ -710,10 +718,18 @@ function EquipmentPanel({ placed }) {
   const setupSec = setupOf(placed, item);
   /** 이 설비가 든 품종 수 — 슬라이더의 **이름이 여기에 달려 있다** */
   const kinds = recipesOf(placed).length;
-  const effCycle = effectiveCycle(cycleSec, lot, setupSec);
+  /**
+   * 배치 공정 — **공정 시간은 한 판에 드는 시간이다.**
+   *  20개를 600초에 굽는 오븐은 600초짜리 설비가 아니라 30초/개다. 개당으로
+   *  안 고치면 이 판의 숫자가 전부 판 크기만큼 틀린다 — 처리량도, 벨트 간격도.
+   */
+  const batch = batchOf(placed, item);
+  const waitSec = batchWaitOf(placed, item);
+  const unitCycle = cycleSec / batch;
+  const effCycle = effectiveCycle(cycleSec, lot, setupSec, batch);
   const shape = shapeOf(placed, item);
   const bundle = Math.max(1, Math.round(placed.outputCount ?? 3));
-  const machineRate = perMinute(cycleSec);
+  const machineRate = perMinute(unitCycle);
 
   /* 벨트 속도는 **실제로 물린 벨트**의 것을 쓴다. 전역 기본값을 쓰면 링크마다
      속도를 따로 준 도면에서 여기 숫자만 조용히 틀린다. */
@@ -727,12 +743,12 @@ function EquipmentPanel({ placed }) {
   );
   const beltV = outLink?.speed ?? beltSpeed;
   /* 간격은 **정하는 값이 아니라 따라 나오는 값이다** (process.js 의 spacingFor) */
-  const gap = spacingFor(cycleSec, bundle, beltV);
+  const gap = spacingFor(unitCycle, bundle, beltV);
   const beltRate = beltPerMinute(gap, beltV, bundle);
   /* 벨트가 안 물려 있으면 카트가 실어 간다 — 그때는 설비 능력이 그대로 한계다 */
   const rate = outLink ? Math.min(machineRate, beltRate) : machineRate;
   /* 간격이 최소치에 걸렸을 때만 벨트가 진짜 한계다 — 더 붙여 실을 수가 없다 */
-  const beltIsLimit = !!outLink && spacingClamped(cycleSec, bundle, beltV);
+  const beltIsLimit = !!outLink && spacingClamped(unitCycle, bundle, beltV);
 
   return (
     <>
@@ -778,9 +794,9 @@ function EquipmentPanel({ placed }) {
               실제로는 21초/개로 도는 설비를 「10 개/분」이라고 적는 셈이다.
               (JSX 주석은 속성 사이에 못 둔다 — 여기, 태그 앞이 자리다) */}
           <Slider
-            label="만드는 시간"
-            text={`${cycleSec.toFixed(1)} 초/개`}
-            hint={effCycle > cycleSec
+            label={batch > 1 ? '만드는 시간 (한 판)' : '만드는 시간'}
+            text={batch > 1 ? `${cycleSec.toFixed(1)} 초/판` : `${cycleSec.toFixed(1)} 초/개`}
+            hint={effCycle > unitCycle
               ? `설비 혼자서는 ${machineRate.toFixed(1)} 개/분 — 전환까지 치면 ${(60 / effCycle).toFixed(1)} 개/분`
               : `설비 혼자서는 ${machineRate.toFixed(1)} 개/분`}
             value={cycleSec}
@@ -789,6 +805,48 @@ function EquipmentPanel({ placed }) {
             step={CYCLE_RANGE[2]}
             onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { cycleSec: v } })}
           />
+          {/**
+            * 배치 공정 — **오븐 · 도장 부스 · 열처리로 · 세척기.**
+            * -----------------------------------------------------------------
+            *  한 개씩 흘려보내지 않고 **한 판을 모아 한 번에** 처리한다. 판이
+            *  20개든 1개든 굽는 시간은 같아서, 판이 클수록 개당이 싸진다.
+            *
+            *  판 크기 1 이 기본이라 이미 그린 도면은 하나도 안 바뀐다.
+            */}
+          <Slider
+            label="한 판에"
+            text={batch > 1 ? `${batch} 개씩` : '한 개씩'}
+            hint={batch > 1
+              ? `공정 ${cycleSec.toFixed(0)}초를 ${batch}개가 나눠 씁니다 — 개당 ${unitCycle.toFixed(1)}초`
+              : '오븐 · 도장 · 열처리처럼 모아서 한 번에 처리하는 설비면 올리세요'}
+            value={batch}
+            min={BATCH_RANGE[0]}
+            max={BATCH_RANGE[1]}
+            step={BATCH_RANGE[2]}
+            onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { batchSize: v } })}
+          />
+          {batch > 1 && (
+            <>
+              <Slider
+                label="덜 차면 기다리기"
+                text={waitSec > 0 ? `${waitSec} 초까지` : '안 기다림'}
+                hint={waitSec > 0
+                  ? `${batch}개가 안 모여도 ${waitSec}초가 지나면 있는 것만 굽습니다`
+                  : '모자라도 바로 굽습니다 — 앞이 밀리면 다음 판은 저절로 찹니다'}
+                value={waitSec}
+                min={BATCH_WAIT_RANGE[0]}
+                max={BATCH_WAIT_RANGE[1]}
+                step={BATCH_WAIT_RANGE[2]}
+                onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { batchWaitSec: v } })}
+              />
+              <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+                판을 채우며 기다리는 시간은 <b className="text-ink3">굶음</b>으로 셉니다 — 앞 공정을
+                빠르게 하거나 판을 줄여서 푸는 것이라 재료가 없는 것과 처방이 같습니다.
+                <br />출력 자리는 <b className="text-ink3">판 두 개분 + 한 덩어리</b>로 잡힙니다.
+                한 판이 나가는 동안 다음 판을 구워야 하기 때문입니다.
+              </p>
+            </>
+          )}
           <Slider
             label="시간 편차"
             text={`±${Math.round(cycleVar * 100)} %`}

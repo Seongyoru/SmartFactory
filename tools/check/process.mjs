@@ -165,7 +165,9 @@ t('인스펙터가 개/분 을 손으로 계산하지 않는다', () => {
   const hand = inspector.match(/60\s*\/\s*\(\(?placed\.|\*\s*60\s*\)?\s*\)?\s*개\/분/g) ?? [];
   assert.deepEqual(hand, [], `손으로 계산한 자리가 남았다: ${hand.join(' · ')}`);
   assert.ok(inspector.includes('beltPerMinute('), 'beltPerMinute 을 안 쓴다');
-  assert.ok(inspector.includes('perMinute(cycleSec)'), 'perMinute 을 안 쓴다');
+  /* 배치 설비는 공정 시간이 **한 판에** 드는 시간이라 개당으로 고쳐서 넘긴다 */
+  assert.ok(inspector.includes('perMinute(unitCycle)'), 'perMinute 을 안 쓴다');
+  assert.ok(inspector.includes('const unitCycle = cycleSec / batch;'), '개당 시간을 안 낸다');
 });
 t('층수를 빠뜨리지 않는다 — 덩어리가 아니라 **개**를 센다', () => {
   const bundlesPerMin = 60 / (3 / 0.6);          // 12 덩어리/분
@@ -177,12 +179,12 @@ t('층수를 빠뜨리지 않는다 — 덩어리가 아니라 **개**를 센다
 const panel = new Function(
   'placed', 'item', 'state', 'itemOf', 'beltSpeed', 'useMemo',
   'isUtility', 'cycleOf', 'varOf', 'perMinute', 'beltPerMinute', 'spacingFor', 'spacingClamped',
-  'lotOf', 'setupOf', 'effectiveCycle', 'shapeOf', 'recipesOf',
+  'lotOf', 'setupOf', 'effectiveCycle', 'shapeOf', 'recipesOf', 'batchOf', 'batchWaitOf',
   `${cut(
     inspector,
     'const cycleSec = cycleOf(placed, item);',
-    'const beltIsLimit = !!outLink && spacingClamped(cycleSec, bundle, beltV);',
-  )}\nreturn { cycleSec, cycleVar, bundle, gap, machineRate, beltV, beltRate, rate, beltIsLimit, lot, setupSec, effCycle, shape, kinds };`,
+    'const beltIsLimit = !!outLink && spacingClamped(unitCycle, bundle, beltV);',
+  )}\nreturn { cycleSec, cycleVar, bundle, gap, machineRate, beltV, beltRate, rate, beltIsLimit, lot, setupSec, effCycle, shape, kinds, batch, waitSec, unitCycle };`,
 );
 
 const show = (placed, links = [], items = {}) =>
@@ -190,6 +192,7 @@ const show = (placed, links = [], items = {}) =>
     placed, items[placed.itemId] ?? {}, { links }, (id) => items[id] ?? {}, 0.6,
     (fn) => fn(), isUtility, P.cycleOf, P.varOf, P.perMinute, P.beltPerMinute,
     P.spacingFor, P.spacingClamped, P.lotOf, P.setupOf, P.effectiveCycle, P.shapeOf, B.recipesOf,
+    P.batchOf, P.batchWaitOf,
   );
 
 const BELT = { CONV: { id: 'CONV' } };

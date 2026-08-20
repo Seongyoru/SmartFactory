@@ -246,7 +246,7 @@ const inspSrc = await readSrc('ui/Inspector.jsx');
 /* 「만드는 것」 칸의 머리를 **소스에서 떼어** 실제로 눌러 본다 */
 const panel = new Function(
   'placed', 'item', 'outKeys', 'useState', 'dispatch',
-  'recipesOf', 'outKindOf', 'isSource', 'inputCapOf', 'lotOf', 'normalizeRecipe',
+  'recipesOf', 'outKindOf', 'isSource', 'inputCapOf', 'lotOf', 'normalizeRecipe', 'batchOf',
   `${cut(inspSrc, 'const list = recipesOf(placed);', "setPick(Math.max(0, at - 1));\n  };", '만드는 것 칸')}
   return { list, at, recipe, out, source, cap, per, lot, patch, addKind, dropKind };`,
 );
@@ -257,7 +257,7 @@ const open = (placed, pick = 0) => {
   const view = panel(
     placed, { makes: 'part' }, OUT_KEYS, () => [pick, (n) => saved.push(n)],
     (a) => saved.push(a), Bom.recipesOf, Bom.outKindOf, Bom.isSource, Bom.inputCapOf,
-    P.lotOf, Bom.normalizeRecipe,
+    P.lotOf, Bom.normalizeRecipe, P.batchOf,
   );
   return { ...view, saved };
 };
