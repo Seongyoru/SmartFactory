@@ -498,3 +498,44 @@ t('적용이 당기기까지 옮긴다 — 결과 배치를 통째로 쓴다', (
   const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
   assert.ok(tidy.includes('plan.placed.map((p) => ({ uid: p.uid, pos: p.pos }))'), '결과 배치를 안 쓴다');
 });
+
+/* ==========================================================================
+ *  「다 줄였다」와 「여기서 끊었다」는 다른 말이다
+ * ======================================================================== */
+t('걸음 천장에 걸렸으면 **그렇게 말한다**', () => {
+  /* 설비가 대여섯 대만 넘어도 매번 천장에 걸린다. 안 갈라 말하면 사람이
+     다 된 줄 알고 그만둔다 — 아직 줄어드는 중인데. */
+  const one = O.searchLayout(ctx({ maxSteps: 1 }));
+  assert.equal(one.capped, true, '끊었는데 안 끊었다고 한다');
+
+  /* 끝까지 간 뒤 다시 돌리면 더 줄일 것이 없다 → 끊은 것이 아니다 */
+  let cur = ctx().placed;
+  for (let k = 0; k < 6; k++) cur = O.searchLayout(ctx({ placed: cur })).placed;
+  const done = O.searchLayout(ctx({ placed: cur }));
+  assert.equal(done.capped, false, '다 줄였는데 끊었다고 한다');
+});
+
+t('천장에서 끊긴 답은 **이어서 더 줄일 수 있다**', () => {
+  /* 「다시 눌러 보세요」가 빈말이 아닌지 — 실제로 더 줄어야 한다 */
+  const first = O.searchLayout(ctx({ maxSteps: 2 }));
+  assert.ok(first.capped);
+  const next = O.searchLayout(ctx({ placed: first.placed, maxSteps: 2 }));
+  assert.ok(next.ok && next.after < first.after, '다시 눌러도 더 안 줄어든다');
+});
+
+t('아무것도 못 찾았을 때는 끊은 것이 아니다', () => {
+  for (const why of [ctx({ links: [] }), ctx({ movable: () => false })]) {
+    assert.equal(O.searchLayout(why).capped, false, '못 찾은 것을 끊었다고 한다');
+  }
+});
+
+t('화면이 천장을 말한다 · 찾는 동안 말이 있다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes('{plan.capped && ('), '천장에 걸린 것을 안 알린다');
+  assert.ok(tidy.includes('여기까지만 찾았습니다'), '문구가 없다');
+  assert.ok(tidy.includes('옮기고 나서 다시 눌러'), '무엇을 하라는지 안 말한다');
+  /* 큰 도면에서 반 초 넘게 멈춘다 — 아무 말이 없으면 눌린 줄도 모른다 */
+  assert.ok(tidy.includes("busy ? '찾는 중…'"), '찾는 동안 아무 말이 없다');
+  assert.ok(tidy.includes('setBusy(true)') && tidy.includes('setBusy(false)'), '상태를 안 되돌린다');
+  assert.ok(/setTimeout\(\(\) => \{/.test(tidy), '한 틱을 안 쉬어 「찾는 중」이 안 그려진다');
+});

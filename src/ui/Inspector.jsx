@@ -3444,29 +3444,45 @@ function Tidy({ per }) {
   const { state, dispatch, itemOf } = useEditor();
   const version = useModelsVersion();
   const [plan, setPlan] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   /* 도면을 고치면 지난 제안은 더 이상 그 도면의 것이 아니다 */
   const key = `${state.placed.length}:${state.links.length}:${state.carts.length}:${per?.toFixed(3)}`;
   const [keyAt, setKeyAt] = useState(key);
   if (keyAt !== key) { setKeyAt(key); setPlan(null); }
 
+  /**
+   * 큰 도면에서는 반 초 넘게 걸린다(설비 스물한 대에 0.6초). 그동안 화면이
+   * 통째로 멈추는데 아무 말이 없으면 **눌린 줄도 모른다.** 여러 판 탭이
+   * 쓰는 것과 같은 수를 쓴다 — 한 틱 쉬어 「찾는 중…」이 실제로 그려지게 한다.
+   */
   const go = () => {
-    const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
-    setPlan(searchLayout({
-      placed: state.placed, links: state.links, carts: state.carts,
-      itemOf, specOf, beltSpeed: state.beltSpeed,
-      /* 놓을 수 있는가는 **화면과 같은 판정**이다 — 규칙이 갈리면 못 놓는
-         자리를 답으로 낸다 */
-      bboxOf: (p) => {
-        const it = itemOf(p.itemId);
-        return isShelf(it) ? shelfBBox(p, specOf(it)) : specOf(it)?.bbox ?? null;
-      },
-      floor: floorOf(state.areas), walls: state.walls, pillars: state.pillars,
-      /* 통로 — 카트가 다니는 길 위에는 안 놓는다. 구역 — 사용자가 그어 둔 선을
-         넘지 않는다. 격자 — 옮긴 자리가 손으로 놓은 것과 같은 눈금에 앉는다. */
-      zones: state.zones, grid: state.gridSize,
-      lengthOf: (l, list) => linkPath(l, list, itemOf)?.length ?? 0,
-    }));
+    setBusy(true);
+    setTimeout(() => {
+      try {
+        const specOf = (it) => (it?.modelKey ? getSpec(it.modelKey) : null);
+        setPlan(searchLayout({
+          placed: state.placed, links: state.links, carts: state.carts,
+          itemOf, specOf, beltSpeed: state.beltSpeed,
+          /* 놓을 수 있는가는 **화면과 같은 판정**이다 — 규칙이 갈리면 못 놓는
+             자리를 답으로 낸다 */
+          bboxOf: (p) => {
+            const it = itemOf(p.itemId);
+            return isShelf(it) ? shelfBBox(p, specOf(it)) : specOf(it)?.bbox ?? null;
+          },
+          floor: floorOf(state.areas), walls: state.walls, pillars: state.pillars,
+          /* 통로 — 카트가 다니는 길 위에는 안 놓는다. 구역 — 사용자가 그어 둔 선을
+             넘지 않는다. 격자 — 옮긴 자리가 손으로 놓은 것과 같은 눈금에 앉는다. */
+          zones: state.zones, grid: state.gridSize,
+          lengthOf: (l, list) => linkPath(l, list, itemOf)?.length ?? 0,
+        }));
+      } catch (e) {
+        console.error('[배치 손보기] 실패', e);
+        setPlan(null);
+      } finally {
+        setBusy(false);
+      }
+    }, 30);
   };
 
   const apply = () => {
@@ -3479,10 +3495,10 @@ function Tidy({ per }) {
   return (
     <div className="mt-2 border-t border-line pt-2">
       <button
-        type="button" onClick={go}
-        className="flex w-full items-center justify-center gap-1.5 rounded-md bg-raise px-2 py-1 text-[11px] text-ink2 ring-1 ring-edge hover:bg-raiseh hover:text-ink"
+        type="button" onClick={go} disabled={busy}
+        className="flex w-full items-center justify-center gap-1.5 rounded-md bg-raise px-2 py-1 text-[11px] text-ink2 ring-1 ring-edge hover:bg-raiseh hover:text-ink disabled:opacity-50"
       >
-        <Wand2 size={12} /> 배치 손보기
+        <Wand2 size={12} /> {busy ? '찾는 중…' : '배치 손보기'}
       </button>
 
       {plan && !plan.ok && (
@@ -3524,6 +3540,19 @@ function Tidy({ per }) {
           >
             이대로 옮기기 ({plan.steps.length}번)
           </button>
+          {/**
+            * **「다 줄였다」와 「여기서 끊었다」는 다른 말이다.**
+            *  걸음 천장(MAX_STEPS)에 걸리면 아직 줄어드는 중이었다는 뜻이다 —
+            *  설비가 대여섯 대만 넘어도 매번 걸린다. 안 갈라 말하면 사람이
+            *  다 된 줄 알고 그만둔다. 이 도구가 오늘 하루 종일 잡은 것과
+            *  같은 종류의 거짓말이라 여기서도 못 박는다.
+            */}
+          {plan.capped && (
+            <p className="mt-1 text-[9.5px] leading-snug text-amber-600">
+              <b>여기까지만 찾았습니다</b> — {plan.steps.length}번이 한 번에 보는 최대입니다.
+              아직 더 줄어드는 중이었으니, <b>옮기고 나서 다시 눌러</b> 보세요.
+            </p>
+          )}
           <p className="mt-1 text-[9.5px] leading-snug text-ink4">
             <b className="text-ink4">방향도 설정도 그대로</b>입니다. 카트가 다니는 길 위에는 안 놓고,
             구역을 그렸으면 그 안에 머뭅니다.
