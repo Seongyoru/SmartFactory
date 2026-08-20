@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { SRC, group, readSrc, t } from './_harness.mjs';
+import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 import { itemOf, loadModels, specOf as specById } from './_models.mjs';
 
 group('품종 전환');
@@ -232,4 +232,115 @@ t('도착 처리도 **종류마다** 한다', () => {
   for (const src of [repSrc, sceneSrc]) {
     assert.ok(/for \(const kind of Object\.keys\(/.test(src), '종류를 안 가른다');
   }
+});
+
+
+/* ==========================================================================
+ *  화면 — **품종을 여기서 만든다**
+ * --------------------------------------------------------------------------
+ *  이 칸이 없으면 기능이 아예 닿지 않는다. 도면에 `recipes` 를 적는 곳은
+ *  인스펙터의 「만드는 것」 하나뿐이다.
+ * ======================================================================== */
+const inspSrc = await readSrc('ui/Inspector.jsx');
+
+/* 「만드는 것」 칸의 머리를 **소스에서 떼어** 실제로 눌러 본다 */
+const panel = new Function(
+  'placed', 'item', 'outKeys', 'useState', 'dispatch',
+  'recipesOf', 'outKindOf', 'isSource', 'inputCapOf', 'lotOf', 'normalizeRecipe',
+  `${cut(inspSrc, 'const list = recipesOf(placed);', "setPick(Math.max(0, at - 1));\n  };", '만드는 것 칸')}
+  return { list, at, recipe, out, source, cap, per, lot, patch, addKind, dropKind };`,
+);
+
+const OUT_KEYS = ['PART_R', 'PART_G', 'PART_B'];
+const open = (placed, pick = 0) => {
+  const saved = [];
+  const view = panel(
+    placed, { makes: 'part' }, OUT_KEYS, () => [pick, (n) => saved.push(n)],
+    (a) => saved.push(a), Bom.recipesOf, Bom.outKindOf, Bom.isSource, Bom.inputCapOf,
+    P.lotOf, Bom.normalizeRecipe,
+  );
+  return { ...view, saved };
+};
+/** 눌러서 저장된 도면 조각 */
+const patched = (saved) => saved.find((x) => x?.type === 'UPDATE_PLACED')?.patch;
+
+const ONE_KIND = { uid: 'M', recipe: { in: [{ kind: 'ASM_C', qty: 2 }], out: 'PART_R' } };
+const TWO_KINDS = {
+  uid: 'M',
+  recipes: [
+    { in: [{ kind: 'ASM_C', qty: 2 }], out: 'PART_R' },
+    { in: [{ kind: 'ASM_C', qty: 1 }], out: 'PART_G' },
+  ],
+};
+
+t('한 품종짜리 도면도 그대로 열린다 — 칩이 하나 뜬다', () => {
+  const v = open(ONE_KIND);
+  assert.equal(v.list.length, 1);
+  assert.equal(v.at, 0);
+  assert.equal(v.out, 'PART_R');
+  assert.equal(v.source, false);
+});
+
+t('고른 칩만 고친다 — **옆 품종은 안 건드린다**', () => {
+  const v = open(TWO_KINDS, 1);
+  assert.equal(v.out, 'PART_G', '고른 칩의 산출물을 안 보여 준다');
+  v.patch({ ...v.recipe, out: 'PART_B' });
+  const p = patched(v.saved);
+  assert.deepEqual(p.recipes.map((r) => r.out), ['PART_R', 'PART_B'], '엉뚱한 자리를 고쳤다');
+});
+
+t('도면에는 **줄로** 적고, 첫 줄은 옛 이름에도 남긴다', () => {
+  /* 한 품종짜리 도면을 읽는 자리가 아직 많다. `recipe` 를 안 남기면 저장하고
+     다시 연 도면이 조용히 원자재 공급원이 된다 */
+  const v = open(TWO_KINDS, 0);
+  v.patch({ ...v.recipe, out: 'PART_B' });
+  const p = patched(v.saved);
+  assert.deepEqual(p.recipe, p.recipes[0], '첫 줄과 옛 이름이 어긋난다');
+});
+
+t('품종을 더하면 **아직 안 쓴 산출물**을 고른다', () => {
+  const v = open(ONE_KIND);
+  v.addKind();
+  const p = patched(v.saved);
+  assert.equal(p.recipes.length, 2);
+  assert.equal(p.recipes[1].out, 'PART_G', '같은 것을 두 번 만든다');
+  /* 재료는 지금 것을 베껴 준다 — 빈 레시피로 두면 그 자리가 조용히
+     「원자재 공급원」이 되어 천장이 부푸는데 화면에는 아무 표시가 안 뜬다 */
+  assert.deepEqual(p.recipes[1].in, p.recipes[0].in, '재료를 안 베꼈다');
+  assert.ok(v.saved.includes(1), '새로 만든 칩으로 안 옮겨 간다');
+});
+
+t('품종을 빼면 **고른 자리가 앞으로** 물러난다', () => {
+  const v = open(TWO_KINDS, 1);
+  v.dropKind();
+  const p = patched(v.saved);
+  assert.deepEqual(p.recipes.map((r) => r.out), ['PART_R']);
+  assert.ok(v.saved.includes(0), '없어진 자리를 계속 고르고 있다');
+});
+
+t('고른 자리는 **목록 밖으로 안 나간다**', () => {
+  /* 셋째를 고른 채로 품종을 지우면 `list[2]` 가 사라진다. 안 잡아 두면
+     그 다음 렌더에서 빈 레시피를 고친 것이 저장된다 */
+  assert.equal(open(TWO_KINDS, 5).at, 1);
+  assert.equal(open(ONE_KIND, 3).at, 0);
+  assert.equal(open({ uid: 'M' }, 2).at, 0, '레시피가 아예 없는 자리에서 터진다');
+});
+
+t('빈 자리에 처음 적어도 줄이 생긴다', () => {
+  const v = open({ uid: 'M' });
+  assert.deepEqual(v.list, []);
+  v.patch({ in: [], out: 'PART_R' });
+  assert.equal(patched(v.saved).recipes.length, 1, '첫 레시피가 안 적힌다');
+});
+
+t('품종 수에 **뚜껑**이 있다', () => {
+  assert.equal(Bom.MAX_KINDS, 4);
+  assert.ok(inspSrc.includes('list.length < MAX_KINDS'), '한없이 더할 수 있다');
+});
+
+t('로트가 0이면 **안 바뀐다고 말해 준다**', () => {
+  /* 품종을 둘 그려 놓고 로트를 안 정하면 첫 품종만 계속 나온다 — 도면에는
+     둘이 적혀 있는데 라인에는 하나만 흐르니, 안 짚으면 못 찾는다 */
+  assert.ok(inspSrc.includes('로트 크기가 0이라 품종이 안 바뀝니다'), '안 짚는다');
+  assert.ok(inspSrc.includes('다음 품종으로 넘어갑니다'), '언제 바뀌는지 안 말한다');
 });

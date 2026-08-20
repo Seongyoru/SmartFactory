@@ -18,7 +18,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import { inputCapOf, isSource, needFor, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
+import { inputCapOf, isSource, needFor, outKindOf, outputKindOf, recipeOf, recipesOf, slotShares } from './bom.js';
 import { cycleOf, lotOf, outputCapFor, setupOf, shapeOf, spacingFor, varOf } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
@@ -148,9 +148,7 @@ export function machinesOf(d = {}) {
             /** 품종마다 [재료, 산출종류] — 굴리는 쪽이 slot 으로 고른다 */
             kinds: list.map((r) => ({
               need: isSource(r) ? null : needFor(r, 1),
-              /* **`recipes` 를 비워서** 넘긴다 — 안 그러면 `recipeOf` 가 배열을
-                 먼저 보고 늘 첫째를 돌려줘서, 품종이 둘인데 산출이 하나가 된다 */
-              out: outputKindOf({ ...p, recipes: null, recipe: r }, item),
+              out: outKindOf(r, item),
             })),
           };
         })

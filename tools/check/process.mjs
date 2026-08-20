@@ -9,6 +9,7 @@ import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 group('공정 시간');
 
 const P = await import(SRC + 'core/process.js');
+const B = await import(SRC + 'core/bom.js');
 const { isUtility } = await import(SRC + 'data/library.js');
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps, `${a} ≠ ${b}`);
@@ -176,19 +177,19 @@ t('층수를 빠뜨리지 않는다 — 덩어리가 아니라 **개**를 센다
 const panel = new Function(
   'placed', 'item', 'state', 'itemOf', 'beltSpeed', 'useMemo',
   'isUtility', 'cycleOf', 'varOf', 'perMinute', 'beltPerMinute', 'spacingFor', 'spacingClamped',
-  'lotOf', 'setupOf', 'effectiveCycle', 'shapeOf',
+  'lotOf', 'setupOf', 'effectiveCycle', 'shapeOf', 'recipesOf',
   `${cut(
     inspector,
     'const cycleSec = cycleOf(placed, item);',
     'const beltIsLimit = !!outLink && spacingClamped(cycleSec, bundle, beltV);',
-  )}\nreturn { cycleSec, cycleVar, bundle, gap, machineRate, beltV, beltRate, rate, beltIsLimit, lot, setupSec, effCycle, shape };`,
+  )}\nreturn { cycleSec, cycleVar, bundle, gap, machineRate, beltV, beltRate, rate, beltIsLimit, lot, setupSec, effCycle, shape, kinds };`,
 );
 
 const show = (placed, links = [], items = {}) =>
   panel(
     placed, items[placed.itemId] ?? {}, { links }, (id) => items[id] ?? {}, 0.6,
     (fn) => fn(), isUtility, P.cycleOf, P.varOf, P.perMinute, P.beltPerMinute,
-    P.spacingFor, P.spacingClamped, P.lotOf, P.setupOf, P.effectiveCycle, P.shapeOf,
+    P.spacingFor, P.spacingClamped, P.lotOf, P.setupOf, P.effectiveCycle, P.shapeOf, B.recipesOf,
   );
 
 const BELT = { CONV: { id: 'CONV' } };

@@ -47,9 +47,9 @@ import {
   resetMetrics, useMetrics,
 } from '../core/metrics.js';
 import {
-  DEFAULT_INPUT_CAP, MAX_QTY, auditRecipes, countKinds, explode, flowEdges,
-  inputCapOf, isSource, missingOf, needFor, normalizeRecipe, outputKindOf, recipeOf,
-  slotShares, tooSmallFor,
+  DEFAULT_INPUT_CAP, MAX_KINDS, MAX_QTY, auditRecipes, countKinds, explode, flowEdges,
+  inputCapOf, isSource, missingOf, needFor, normalizeRecipe, outKindOf, outputKindOf, recipeOf,
+  recipesOf, slotShares, tooSmallFor,
 } from '../core/bom.js';
 import {
   FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, REPAIR_VAR_MAX, SCRAP_RANGE,
@@ -448,17 +448,54 @@ function RecipeSection({ placed, item }) {
   const lots = useLots(placed.uid);
   const stock = useStock(placed.uid);
 
-  const recipe = recipeOf(placed) ?? { in: [], out: null };
   /* 산출물은 **이 기계의 갈래 안에서만** 고른다 — 제작기는 제작품, 조립기는
      조립품. 갈래는 그 기계가 하는 일 자체라 자리마다 달라질 값이 아니다. */
   const outKeys = allowedOutOf(item);
-  const out = outputKindOf(placed, item);
+
+  /**
+   * 한 설비가 **여러 품종**을 번갈아 만들 수 있다(`recipes`).
+   * -------------------------------------------------------------------------
+   *  화면은 **한 번에 한 품종만** 보여 준다. 재료 · 버퍼 자리 나눔 · 부족분이
+   *  모두 품종마다 다른데, 그것을 한 판에 펼치면 어느 줄이 어디 것인지 읽을 수
+   *  없다. 위의 칩으로 고르고 아래는 **고른 것만** 고친다.
+   *
+   *  칩의 **차례가 곧 만드는 차례**다 — 로트를 채우면 다음 칩으로 넘어간다.
+   */
+  const list = recipesOf(placed);
+  const [pick, setPick] = useState(0);
+  const at = Math.min(pick, Math.max(0, list.length - 1));   // 품종을 지우면 고른 자리가 사라진다
+
+  const recipe = list[at] ?? { in: [], out: null };
+  const out = outKindOf(recipe, item);
   const source = isSource(recipe);
   const cap = inputCapOf(placed);
   const per = Math.max(1, placed.outputCount ?? 3);
+  const lot = lotOf(placed, item);
 
-  const patch = (next) =>
-    dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { recipe: normalizeRecipe(next) } });
+  /* 도면에는 **줄로** 적는다. 첫 줄은 옛 이름(`recipe`)에도 같이 남긴다 —
+     한 품종짜리 도면을 읽는 자리가 아직 많고, 내보낸 파일도 그것을 본다 */
+  const write = (rows) => {
+    const clean = rows.map(normalizeRecipe).filter(Boolean);
+    dispatch({
+      type: 'UPDATE_PLACED',
+      uid: placed.uid,
+      patch: { recipes: clean, recipe: clean[0] ?? null },
+    });
+  };
+  const patch = (next) => write(list.length ? list.map((r, i) => (i === at ? next : r)) : [next]);
+
+  /* 품종을 하나 더 — 재료는 **지금 것을 베껴** 준다. 빈 레시피로 시작하면 그
+     자리가 조용히 「원자재 공급원」(아무것도 안 먹고 계속 만드는 설비)이 되어,
+     천장이 부풀어도 화면에는 아무 표시가 안 뜬다 */
+  const addKind = () => {
+    const taken = new Set(list.map((r) => outKindOf(r, item)));
+    write([...list, { in: recipe.in, out: outKeys.find((k) => !taken.has(k)) ?? outKeys[0] }]);
+    setPick(list.length);
+  };
+  const dropKind = () => {
+    write(list.filter((_, i) => i !== at));
+    setPick(Math.max(0, at - 1));
+  };
 
   const used = new Set(recipe.in.map((r) => r.kind));
   const addable = KIND_KEYS.filter((k) => !used.has(k));
@@ -480,6 +517,62 @@ function RecipeSection({ placed, item }) {
 
   return (
     <Section title="만드는 것" data-guide="panel-recipe">
+      {/* 품종 고르개 — 왼쪽부터 만드는 차례다 */}
+      <div className="mb-2 flex flex-wrap items-center gap-1">
+        {list.map((r, i) => (
+          <button
+            key={i}
+            onClick={() => setPick(i)}
+            title={`${i + 1}번째로 만듭니다`}
+            className={`rounded px-1.5 py-0.5 text-[10.5px] ring-1 ${i === at
+              ? 'bg-sky-500/15 text-sky-400 ring-sky-500/40'
+              : 'bg-raise text-ink4 ring-edge hover:text-ink2'}`}
+          >
+            <span className="tabular-nums">{i + 1}.</span>{' '}
+            {PAYLOAD_ITEMS[outKindOf(r, item)]?.name ?? '?'}
+          </button>
+        ))}
+        {list.length < MAX_KINDS && (
+          <button
+            onClick={addKind}
+            title="이 설비가 번갈아 만들 품종을 하나 더"
+            className="rounded border border-dashed border-edge px-1.5 py-0.5 text-[10.5px] text-ink4 hover:border-sky-500/60 hover:text-sky-400"
+          >
+            + 품종
+          </button>
+        )}
+        {list.length > 1 && (
+          <button
+            onClick={dropKind}
+            title="고른 품종을 뺀다"
+            className="ml-auto rounded px-1 text-ink4 hover:text-rose-500"
+          >
+            <Trash2 size={11} />
+          </button>
+        )}
+      </div>
+
+      {/* 품종을 여럿 두고 **로트를 안 정하면** 첫 품종만 계속 만든다 — 도면에는
+          둘이 적혀 있는데 라인에는 하나만 흐르니, 안 짚으면 못 찾는다 */}
+      {list.length > 1 && (
+        <p className={`mb-2 rounded px-2 py-1.5 text-[10.5px] leading-relaxed ring-1 ${lot > 0
+          ? 'bg-raise text-ink4 ring-edge'
+          : 'bg-amber-500/10 text-amber-600 ring-amber-500/25'}`}
+        >
+          {lot > 0 ? (
+            <>
+              <b className="text-ink2">{lot}개</b>를 만들면 다음 품종으로 넘어갑니다 —
+              한 품종을 기다리는 시간은 <b className="text-ink2">{list.length}배</b>가 됩니다.
+            </>
+          ) : (
+            <>
+              <b>로트 크기가 0이라 품종이 안 바뀝니다</b> — 첫 품종만 계속 만듭니다.
+              아래 <b>로트 크기</b>를 올려야 번갈아 돕니다.
+            </>
+          )}
+        </p>
+      )}
+
       {/* 무엇을 만드는지는 **도면에만** 적힌다 — 라이브러리로 되돌아가는
           「기본값」 같은 선택지는 없다. 라이브러리가 정하는 것은 갈래뿐이다 */}
       <label className="block py-1">
@@ -615,6 +708,8 @@ function EquipmentPanel({ placed }) {
   const cycleVar = varOf(placed, item);
   const lot = lotOf(placed, item);
   const setupSec = setupOf(placed, item);
+  /** 이 설비가 든 품종 수 — 슬라이더의 **이름이 여기에 달려 있다** */
+  const kinds = recipesOf(placed).length;
   const effCycle = effectiveCycle(cycleSec, lot, setupSec);
   const shape = shapeOf(placed, item);
   const bundle = Math.max(1, Math.round(placed.outputCount ?? 3));
@@ -761,17 +856,24 @@ function EquipmentPanel({ placed }) {
             *  아무것도 안 나온다 — 상용 시뮬레이터가 다 갖고 있는 것이고,
             *  다품종 공장에서는 **이것이 진짜 병목인 경우가 흔하다.**
             *
-            *  「품종 전환」이 아니라 **「로트 전환」**이라고 부른다. 이 도구는
-            *  아직 한 설비가 한 가지만 만들어서(레시피가 하나) 바꿀 품종 자체가
-            *  없다. 품종이 하나뿐인데 「품종 전환」이라 부르면 화면이 거짓말을
-            *  하는 것이다.
+            *  ── 이름은 **설비가 든 품종 수를 따라간다** ──────────────────────
+            *  품종이 하나면 「로트 전환」이다. 바꿀 품종이 없으니 드는 것은 날
+            *  갈기 · 청소이고, 그건 품종과 상관없이 든다. 품종이 여럿이면 그때
+            *  비로소 「품종 전환」이 되고, 로트를 채울 때마다 **다음 품종으로
+            *  넘어간다**(만드는 것 칸의 칩 차례대로).
+            *
+            *  품종이 하나뿐인데 「품종 전환」이라 부르면 화면이 거짓말을 한다.
             */}
           <Slider
-            label="로트 크기"
+            label={kinds > 1 ? '로트 크기 (품종당)' : '로트 크기'}
             text={lot > 0 ? `${lot} 개마다` : '전환 없음'}
             hint={lot > 0
-              ? '이만큼 만들고 나면 전환에 들어갑니다 — 날 갈기 · 금형 교체 · 청소'
-              : '0 이면 쉬지 않고 계속 만듭니다'}
+              ? (kinds > 1
+                ? `이만큼 만들면 다음 품종으로 넘어갑니다 — ${kinds}가지를 돌아 제자리`
+                : '이만큼 만들고 나면 전환에 들어갑니다 — 날 갈기 · 금형 교체 · 청소')
+              : (kinds > 1
+                ? '0 이면 안 바꿉니다 — 첫 품종만 계속 만듭니다'
+                : '0 이면 쉬지 않고 계속 만듭니다')}
             value={lot}
             min={LOT_RANGE[0]}
             max={LOT_RANGE[1]}
@@ -780,7 +882,7 @@ function EquipmentPanel({ placed }) {
           />
           {lot > 0 && (
             <Slider
-              label="전환 시간"
+              label={kinds > 1 ? '품종 전환 시간' : '전환 시간'}
               text={`${setupSec} 초`}
               hint={setupSec > 0
                 ? `실질 ${effCycle.toFixed(1)} 초/개 — 혼자서 ${(60 / effCycle).toFixed(1)} 개/분`

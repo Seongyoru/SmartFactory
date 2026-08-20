@@ -45,6 +45,13 @@ const DEFAULT_KIND = Object.keys(PAYLOAD_ITEMS)[0];
 /** 한 종류당 소요량의 상한 — 슬라이더 범위이자 정규화 한계 */
 export const MAX_QTY = 20;
 
+/**
+ * 한 설비가 들 수 있는 품종의 수.
+ *  넷을 넘기면 전환에 드는 시간이 만드는 시간을 넘어서 라인이 사실상 서고,
+ *  칩 줄도 접혀 순서를 못 읽는다. 실제 공장도 한 설비에 이만큼을 안 문다.
+ */
+export const MAX_KINDS = 4;
+
 /* --------------------------------------------------------------------------
  * 레시피 읽기
  * ------------------------------------------------------------------------ */
@@ -141,11 +148,17 @@ export const isSource = (recipe) => !recipe?.in?.length;
  *  나누기 전에 그린 도면이 그럴 수 있다 — 그대로 두면 조립기가 제작품을 뱉는
  *  도면이 조용히 살아남는다.
  */
-export function outputKindOf(placed, item) {
-  const out = canonKind(recipeOf(placed)?.out);
+export function outKindOf(recipe, item) {
+  const out = canonKind(recipe?.out);
   const allowed = allowedOutOf(item);
   return out && allowed.includes(out) ? out : allowed[0] ?? DEFAULT_KIND;
 }
+
+/**
+ * 이 설비가 내보내는 종류 — 품종이 여럿이면 **첫 품종**의 것.
+ *  지금 무엇을 만드는 중인지 알아야 하면 `outKindOf(recipeAt(p, slot), item)`.
+ */
+export const outputKindOf = (placed, item) => outKindOf(recipeOf(placed), item);
 
 /** 입력 버퍼 크기 */
 export const inputCapOf = (placed) =>

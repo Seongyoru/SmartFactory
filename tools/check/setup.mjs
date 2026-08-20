@@ -16,7 +16,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { SRC, group, readSrc, t } from './_harness.mjs';
+import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 
 group('로트 전환');
 
@@ -200,16 +200,25 @@ t('전환을 **서는 이유로** 센다 — 한 틱에 하나만', () => {
   }
 });
 
-t('화면이 로트와 전환을 받는다 — 그리고 **품종 전환이라 부르지 않는다**', () => {
-  assert.ok(inspSrc.includes('label="로트 크기"'), '로트 칸이 없다');
-  assert.ok(inspSrc.includes('label="전환 시간"'), '전환 시간 칸이 없다');
+t('화면이 로트와 전환을 받는다 — 이름이 **품종 수를 따라간다**', () => {
+  assert.ok(inspSrc.includes('const kinds = recipesOf(placed).length;'), '품종 수를 안 센다');
   assert.ok(inspSrc.includes("patch: { lotSize: v }"), '로트를 저장 안 한다');
   assert.ok(inspSrc.includes("patch: { setupSec: v }"), '전환 시간을 저장 안 한다');
-  /* 한 설비가 한 가지만 만드는 모델에서 「품종 전환」은 거짓말이다.
-     **주석은 빼고 본다** — 왜 그렇게 안 부르는지 적어 둔 자리까지 걸리면
-     설명을 지워야 검사가 통과하는 꼴이 된다. */
-  const shown = inspSrc.replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.equal(/품종 전환/.test(shown), false, '있지도 않은 품종을 바꾼다고 화면이 말한다');
+
+  /* 품종이 하나뿐인데 「품종 전환」이라 부르면 화면이 거짓말이다 — 바꿀 품종이
+     없으니 드는 것은 날 갈기·청소이고, 그건 품종과 상관없이 든다. 이름을 짓는
+     식을 **소스에서 떼어** 두 경우로 돌려 본다. */
+  const name = (attr, kinds) => {
+    const expr = cut(inspSrc, attr, '}', '이름 짓는 식')
+      .replace(/^label=\{/, '').replace(/\}$/, '');
+    return new Function('kinds', `return (${expr});`)(kinds);
+  };
+  const LOT = "label={kinds > 1 ? '로트 크기 (품종당)'";
+  const SET = "label={kinds > 1 ? '품종 전환 시간'";
+  assert.equal(name(LOT, 1), '로트 크기');
+  assert.equal(name(LOT, 2), '로트 크기 (품종당)');
+  assert.equal(name(SET, 1), '전환 시간');
+  assert.equal(name(SET, 2), '품종 전환 시간');
 });
 
 t('실행 탭이 전환을 **따로** 보여 준다', () => {
