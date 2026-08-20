@@ -130,54 +130,82 @@ t('기둥 자리는 안 고른다', () => {
   assert.equal(O.placeOk(next, ['P1', 'P2'], ctx({ pillars })), false, '기둥 위에 놓는다');
 });
 
-/* ---------- 경로를 부수면서 점수를 올리는 함정 --------------------------- */
+/* ---------- 경로를 갉아먹으면서 점수를 올리는 함정 ----------------------
+     **여기가 이 모듈에서 가장 위험한 자리다.** 개당 거리는 오가는 구간의 평균이라,
+     먼 역 하나가 사라지면 라인이 조금도 나아지지 않았는데 값이 뚝 떨어진다.
+
+     경로가 **통째로** 죽는 경우는 사실 저절로 걸러진다 — 못 도는 카트는
+     `lineBalance` 에서 능력 0 이 되고, 그게 라인 천장이 되어 점수가 null 이 된다.
+     그래서 진짜 위험한 것은 **일부만 갉아먹는** 맞바꾸기다. 아래 도면이 그것이다.
+
+         적치대 S1(싣기) · 선반 H1(내리기) · 선반 H2(내리기)  ← 카트 한 대가 다 돈다
+         제작기 A 를 H1 자리와 맞바꾸면 H1 이 역에서 빠진다 →
+         남은 경로는 **여전히 돌지만** 개당 거리가 117.9 → 83.8 로 「좋아진다」
+   ------------------------------------------------------------------------ */
 const cartLayout = () => {
   const list = mk();
   list.push({ uid: 'S1', name: '적치대', itemId: 'STILLAGE', pos: [10, 0], rot: 0, dispatchCount: 3 });
   list.push({ uid: 'H1', name: '선반', itemId: 'SHELF', pos: [10, -6], rot: 0, bays: 2, levels: 2, rows: 1 });
+  list.push({ uid: 'H2', name: '선반 2', itemId: 'SHELF', pos: [10, 6], rot: 0, bays: 2, levels: 2, rows: 1 });
   return list;
 };
 const CARTS = [{
   uid: 'C1', name: '카트', itemId: 'CART', speed: 2, dwell: 1, closed: true,
-  points: [[8, 1], [8, -7.4], [13, -7.4], [13, 1]],
+  points: [[8, 6.6], [8, -7.4], [13, -7.4], [13, 6.6]],
 }];
-const brokenSwap = (list) => O.swapped(list,
-  list.findIndex((p) => p.uid === 'S1'), list.findIndex((p) => p.uid === 'P1'));
+const gnaw = (list) => O.swapped(list,
+  list.findIndex((p) => p.uid === 'P1'), list.findIndex((p) => p.uid === 'H1'));
 
-t('**카트 경로를 부수는 맞바꾸기는 안 고른다**', () => {
-  /* 이 모듈에서 가장 위험한 자리다. 역이 사라지면 나르는 양이 0 이고,
-     나르는 양이 0 이면 **거리도 0** 이라 점수가 「좋아진다.」 */
+t('경로를 **갉아먹는** 맞바꾸기를 가드가 잡는다', () => {
   const withCart = cartLayout();
   const d = ctx({ placed: withCart, carts: CARTS });
   const base = O.baseRoutesOf(d);
   assert.ok(base.routes.has('C1'), '전제가 무너졌다 — 카트가 원래도 안 돈다');
-  assert.equal(base.routes.get('C1').stations, 2, '싣는 곳과 내리는 곳이 둘 다 안 잡혔다');
+  assert.equal(base.routes.get('C1').stations, 3, '싣기 하나 · 내리기 둘이 안 잡혔다');
 
   const guard = { ...d, baseRoutes: base.routes, baseLinks: base.links };
-  assert.equal(O.routesOk(brokenSwap(withCart), guard), false, '역이 사라진 배치를 통과시킨다');
+  assert.equal(O.routesOk(gnaw(withCart), guard), false, '역이 줄어든 배치를 통과시킨다');
 });
 
-t('그 함정은 **점수만 보면 좋아 보인다** — 가드가 일하는 이유', () => {
+t('그 함정은 **점수만 보면 제일 좋다** — 가드가 없으면 이걸 고른다', () => {
+  /* 이 검사가 가드의 존재 이유다. 갉아먹은 쪽이 「허용되는 모든 맞바꾸기」보다
+     점수가 좋아야, 가드를 빼면 탐색이 그리로 간다는 말이 된다. */
   const withCart = cartLayout();
   const d = ctx({ placed: withCart, carts: CARTS });
-  const now = O.scoreOf(withCart, d);
-  const after = O.scoreOf(brokenSwap(withCart), d);
-  assert.ok(now > 0, '전제를 못 세웠다');
-  assert.ok(after == null || after < now,
-    `부쉈는데 점수가 안 좋아진다 (${now} → ${after}) — 전제가 바뀌었다`);
+  const base = O.baseRoutesOf(d);
+  const guard = { ...d, baseRoutes: base.routes, baseLinks: base.links };
+
+  const cheated = O.scoreOf(gnaw(withCart), d);
+  assert.ok(cheated > 0, '갉아먹었더니 아예 못 재게 됐다 — 전제가 다르다');
+  assert.ok(cheated < O.scoreOf(withCart, d), '갉아먹어도 점수가 안 좋아진다');
+
+  let bestFair = Infinity;
+  for (let i = 0; i < withCart.length; i++) {
+    for (let j = i + 1; j < withCart.length; j++) {
+      const next = O.swapped(withCart, i, j);
+      if (!O.placeOk(next, [withCart[i].uid, withCart[j].uid], d)) continue;
+      if (!O.routesOk(next, guard)) continue;
+      const per = O.scoreOf(next, d);
+      if (per != null && per < bestFair) bestFair = per;
+    }
+  }
+  assert.ok(cheated < bestFair,
+    `함정이 정직한 최선(${bestFair.toFixed(1)})보다 안 좋다 — 가드가 없어도 안 고른다`);
 });
 
 t('탐색이 실제로 그 맞바꾸기를 안 내놓는다', () => {
-  const r = O.searchLayout(ctx({ placed: cartLayout(), carts: CARTS }));
+  const d = ctx({ placed: cartLayout(), carts: CARTS });
+  const r = O.searchLayout(d);
+  assert.ok(r.ok, '이 도면에서는 줄일 것이 있어야 한다');
   for (const s of r.steps) {
-    assert.equal([s.a, s.b].includes('S1') && [s.a, s.b].includes('P1'), false,
-      '경로를 부수는 맞바꾸기를 내놓았다');
+    assert.equal([s.a, s.b].includes('P1') && [s.a, s.b].includes('H1'), false,
+      '경로를 갉아먹는 맞바꾸기를 내놓았다');
   }
-  if (r.ok) {
-    const still = O.baseRoutesOf(ctx({ placed: r.placed, carts: CARTS })).routes;
-    assert.ok(still.has('C1'), '내놓은 배치에서 카트가 안 돈다');
-  }
+  /* 내놓은 배치에서도 역이 그대로여야 한다 */
+  const after = O.baseRoutesOf(ctx({ placed: r.placed, carts: CARTS })).routes;
+  assert.equal(after.get('C1')?.stations, 3, '내놓은 배치에서 역이 줄었다');
 });
+
 
 t('벨트가 끊기는 맞바꾸기는 안 고른다', () => {
   const d = ctx();

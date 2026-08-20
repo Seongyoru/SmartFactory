@@ -50,7 +50,7 @@ import { footprintOf, outOfBounds, rectsOverlap } from './grid.js';
 import { hitsObstacle, rectInFloor } from './area.js';
 import { lineBalance } from './balance.js';
 import { flowMatrix, metersPerUnit } from './flow.js';
-import { cartPath, cartStations, haulPerMinute, isLoadStation } from './cart.js';
+import { cartPath, cartStations, haulPerMinute } from './cart.js';
 import { isTruck } from '../data/library.js';
 
 /** 몇 번까지 손볼 것인가 — 이보다 길면 사람이 따라 하다 만다 */
@@ -142,9 +142,12 @@ export function routesOk(next, d = {}) {
     const st = cartStations(path, next, itemOf, { loadOnly: truck, roles: c.roles });
     if (st.length < before.stations) return false;
     const h = haulPerMinute(c, path, st, { truck });
+    /* 「아직도 나르는가」 — 한쪽만 남은 경로(싣기만 · 내리기만)도 여기서 걸린다.
+       `haulPerMinute` 가 그 경우를 0 으로 두기 때문이다. **되돌리기 테스트로
+       이 줄만 무는 경우를 못 만들었다** — 위의 역 수 검사가 먼저 잡는다.
+       그래도 남겨 둔다: 역 수가 같은 채로 역할만 뒤집히는 도면이 논리적으로
+       가능하고, 그때 이 줄이 유일한 그물이다. */
     if (!(h?.perMinute > 0)) return false;
-    /* 트럭은 싣기만 한다 — 내리는 곳을 요구하면 늘 실패한다 */
-    if (!truck && !st.some((s) => !isLoadStation(s.kind))) return false;
   }
   /* 벨트는 경로를 못 뽑으면 거리가 0 이 된다 — 이어져 있어야 한다 */
   for (const l of d.links ?? []) {
