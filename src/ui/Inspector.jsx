@@ -9,7 +9,7 @@ import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
   CART_MARGIN, STATION_ROLE, cartPath, cartStations, fleetFits, haulPerMinute, isLoadStation,
-  pickSet, roleOfStation, stationStyle,
+  idleLoads, pickSet, roleOfStation, stationStyle,
 } from '../core/cart.js';
 import {
   arrivedAt, arrivedOf, clearStock, dropKind, getAllStock, getShipped, setStock, shippedTotal,
@@ -1610,6 +1610,32 @@ function CartPanel({ cart }) {
             </p>
           );
         })()}
+{/**
+          * **잡히기는 했는데 한 번도 안 서는 싣는 역.**
+          * ---------------------------------------------------------------------
+          *  카트는 비어 있을 때만 싣는다. 그래서 싣는 역이 여럿이면 **내린 뒤
+          *  먼저 만나는 하나**만 계속 쓰이고 나머지는 짐을 진 채 지나친다.
+          *  화면에는 「역이 넷이고 다 잡혔다」로 보이는데, 한쪽 적치대만 비고
+          *  다른 쪽은 차서 그 위 벨트와 설비가 줄줄이 선다 — 카트를 아무리
+          *  들여다봐도 원인이 안 보이는 자리다. 값으로 확인하고 넣었다.
+          */}
+        {(() => {
+          if (truck) return null;                 // 트럭은 여러 역에서 나눠 담는다
+          const idle = idleLoads(stations, { closed: !!cart.closed });
+          if (!idle.length) return null;
+          return (
+            <p className="mt-2 flex gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[10.5px] leading-relaxed text-amber-200 ring-1 ring-amber-500/30">
+              <AlertTriangle size={12} className="mt-[3px] shrink-0" />
+              <span>
+                <b>{idle.map((st) => st.name).join(' · ')}</b> 에는 <b>한 번도 안 섭니다.</b>{' '}
+                카트는 비어 있을 때만 싣는데, 내려놓고 나서 <b>먼저 만나는 싣는 곳</b>에서 이미
+                차 버리기 때문입니다. 경로를 나눠 카트를 따로 두거나, 내리는 곳이 두 싣는 곳
+                <b> 사이에</b> 오도록 순서를 바꾸세요.
+              </span>
+            </p>
+          );
+        })()}
+        
         {stations.some((st) => st.canRole) && !truck && (
           <p className="mt-2 text-[10.5px] leading-relaxed text-ink4">
             선반은 <b className="text-ink2">싣기 / 내리기</b>를 눌러 바꿀 수 있습니다. 경로를 그릴 때

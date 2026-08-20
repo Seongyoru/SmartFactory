@@ -40,6 +40,7 @@ await import('./zone.mjs');
 await import('./flow.mjs');
 await import('./guides.mjs');
 await import('./shelfrows.mjs');
+await import('./cartline.mjs');
 await import('./process.mjs');
 
 /* 소스에서 떼어 내는 것 — JSX 라 import 는 안 되지만 계산 자체는 순수하다.

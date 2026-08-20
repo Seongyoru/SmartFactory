@@ -117,6 +117,67 @@ export function stationWant(cart, st) {
 }
 
 /**
+ * 이 경로에서 **실제로 쓰이는 싣는 역**의 자리(index).
+ * ---------------------------------------------------------------------------
+ *  카트는 **비어 있을 때만** 싣고, 내려놓아야 다시 싣는다(`loadRoom`). 그래서
+ *  싣는 역이 여럿이어도 **내린 뒤 먼저 만나는 하나**만 계속 쓰인다 — 나머지는
+ *  카트가 늘 짐을 진 채로 지나가므로 한 번도 안 선다.
+ *
+ *      적치대 A ─ 조립기(내림) ─ 적치대 B ─┐   ← 고리
+ *      └──────────────────────────────────┘
+ *      비어서 출발 → A 에서 싣고 → 조립기에 내리고 → **다시 A**
+ *                                          B 는 영영 안 쓰인다
+ *
+ *  화면에서는 「역이 넷이고 다 잡혔다」로 보이는데 한쪽 적치대만 비고 다른 쪽은
+ *  차서 상류가 선다. 값으로 확인한 것이라 코드로 못 박아 둔다 — 300초를 돌려
+ *  두 종류를 다 고른 카트가 PART_G 를 **첫 바퀴에만** 실었다.
+ *
+ *  트럭은 자리가 찰 때까지 여러 역에서 나눠 담으므로(topUp) 이 규칙 밖이다.
+ *
+ *  @param closed 고리인가 — 왕복 경로는 되돌아오는 순서까지 펴서 본다
+ */
+export function usedLoads(stations, { closed = true, topUp = false } = {}) {
+  const list = stations ?? [];
+  const n = list.length;
+  const all = () => new Set(list.map((st, i) => (isLoadStation(st.kind) ? i : -1)).filter((i) => i >= 0));
+  if (!n || topUp) return all();
+
+  /* 왕복이면 되돌아오는 길까지 한 줄로 편다 — 순서가 곧 규칙이라 방향이 중요하다 */
+  const order = [];
+  for (let i = 0; i < n; i++) order.push(i);
+  if (!closed) for (let i = n - 2; i >= 1; i--) order.push(i);
+  const m = order.length;
+
+  /* 첫 바퀴는 준비 운동이다 — **되풀이되는 구간**만 본다. 처음 한 번 쓰이고
+     마는 역을 「쓰인다」로 세면 정작 라인이 서는 배치가 멀쩡해 보인다. */
+  const seen = new Map();
+  const trail = [];
+  let carrying = false;
+  for (let step = 0, pos = 0; ; step++, pos = (pos + 1) % m) {
+    const key = pos * 2 + (carrying ? 1 : 0);
+    if (seen.has(key)) {
+      const out = new Set();
+      for (let k = seen.get(key); k < trail.length; k++) if (trail[k].loaded) out.add(trail[k].idx);
+      return out;
+    }
+    seen.set(key, step);
+    const st = list[order[pos]];
+    let loaded = false;
+    if (isLoadStation(st.kind)) {
+      if (!carrying) { carrying = true; loaded = true; }
+    } else if (carrying) carrying = false;
+    trail.push({ idx: order[pos], loaded });
+  }
+}
+
+/** 잡히기는 했는데 **한 번도 안 서는** 싣는 역 (위 참고) */
+export function idleLoads(stations, opts = {}) {
+  const used = usedLoads(stations, opts);
+  return (stations ?? []).filter((st, i) => isLoadStation(st.kind) && !used.has(i));
+}
+
+
+/**
  * 이 차량이 나를 수 있는 양 (개/분).
  * ---------------------------------------------------------------------------
  *  **설비 능력과 나란히 놓고 보라고 있는 값**이다. 만드는 속도가 나르는 속도를
@@ -146,9 +207,12 @@ export function haulPerMinute(cart, path, stations, { truck = false } = {}) {
   }
 
   const cap = cartCapacity(cart, truck);
-  const wants = loads.map((s) => stationWant(cart, s));
-  /* 카트는 한 역에서 한 번만 싣는다. 역마다 값이 다르면 가장 많이 실을 수 있는
-     쪽을 쓴다 — 어느 역에 먼저 닿는지는 위치에 달렸으므로 좋은 쪽으로 잡는다. */
+  /* **실제로 서는 역만** 센다. 싣는 역이 여럿이어도 내린 뒤 먼저 만나는 하나만
+     쓰이므로(usedLoads), 안 서는 역의 수량을 끌어다 쓰면 능력이 부풀려진다.
+     예전에는 「좋은 쪽으로 잡는다」고 두었는데, 그 좋은 쪽이 안 서는 역이면
+     화면의 나르는 능력만 크고 라인은 그대로 굶는다. */
+  const used = usedLoads(list, { closed: !!cart.closed, topUp: truck });
+  const wants = list.map((s, k) => (used.has(k) ? stationWant(cart, s) : 0));
   const perLap = truck ? cap : Math.min(cap, Math.max(0, ...wants));
 
   const speed = Math.max(0.01, cart.speed ?? 1.4);
