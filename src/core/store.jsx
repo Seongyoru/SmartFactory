@@ -945,7 +945,10 @@ function reducer(state, action) {
             uid,
             name: action.name?.trim() || `배치 ${state.scenarios.length + 1}`,
             at: Date.now(),
-            layout: layoutSnapshot(state),
+            /* **지금 도면이 기본이지만 다른 도면도 담을 수 있다.** 배치
+               손보기가 「전·후」를 한 번에 담을 때 쓴다 — 「후」는 아직
+               상태에 없는 배치라 스냅샷으로는 못 만든다. */
+            layout: action.layout ?? layoutSnapshot(state),
             run: action.run ?? null,
           },
         ],

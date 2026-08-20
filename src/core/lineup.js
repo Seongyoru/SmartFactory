@@ -21,7 +21,15 @@
 import { inputCapOf, isSource, needFor, outputKindOf, recipeOf, slotShares } from './bom.js';
 import { cycleOf, outputCapFor, spacingFor, varOf } from './process.js';
 import { stillageCapacity } from './stillage.js';
-import { isShelf, isStillage, isUtility } from '../data/library.js';
+import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
+import { linkPath } from './link.js';
+import { lineBalance } from './balance.js';
+import { lineFlow, lineWorld } from './replicate.js';
+import { cartPath, cartStations } from './cart.js';
+import { floorOf, openingGates, wallLines } from './area.js';
+import { FAULT_DEFAULTS, getDown } from './faults.js';
+import { assignCrew, crewRows, isWorkable, normalizeShifts, shiftAt } from './crew.js';
+import { getShipped, shippedTotal } from './simStore.js';
 
 /**
  * 어느 벨트가 어느 설비를 먹이나.
@@ -131,4 +139,82 @@ export function machinesOf(d = {}) {
         })
         .filter(Boolean)
   );
+}
+
+
+/**
+ * =============================================================================
+ *  도면 한 벌 → **화면 없이 굴릴 수 있는 세상**
+ * =============================================================================
+ *  원래 이 계산은 `ui/useLineWorld.js` 안에 있었다. 훅이라 **지금 상태**로만
+ *  만들 수 있었는데, 「손보기 전과 후를 나란히 돌려 보자」가 되면서 **지금이
+ *  아닌 배치**로도 만들 수 있어야 했다. 그래서 순수한 부분을 여기로 옮겼다.
+ *  훅은 이제 이것을 부르기만 한다 — 모으는 자리는 여전히 하나다.
+ *
+ *  모으는 자리가 둘이 되면 **화면이 돌리는 라인과 반복 실행이 돌리는 라인이
+ *  달라진다.** 그러면 「여러 번 돌려 봤더니 다르더라」가 배치 때문인지 모으는
+ *  방식 때문인지 알 수 없어진다 — 그 순간 이 기능은 못 쓰는 것이 된다.
+ *
+ *  @param d.specOf  모델 규격을 어디서 읽을지 (브라우저만 아는 값이라 밖에서 준다)
+ *  @returns { world, flow, machines, capacity, ready }
+ */
+export function worldOf(d = {}) {
+  const placed = d.placed ?? [];
+  const links = d.links ?? [];
+  const carts = d.carts ?? [];
+  const itemOf = d.itemOf ?? (() => null);
+  const specOf = d.specOf ?? (() => null);
+  const beltSpeed = d.beltSpeed ?? 0.6;
+
+  /* 벨트가 실제로 깔린 경로 — 모델 규격을 봐야 나온다 */
+  const linkPaths = links
+    .map((link) => ({ link, path: linkPath(link, placed, itemOf) }))
+    .filter((x) => x.path);
+
+  const machines = machinesOf({ placed, itemOf });
+  const beltFlows = beltFlowsOf({ linkPaths, placed, itemOf, beltSpeed });
+
+  /* 옮기는 쪽 — 이것이 없으면 설비만 돌고 만든 것이 아무 데도 안 간다 */
+  const cartPaths = carts
+    .map((c) => {
+      const p = cartPath(c);
+      /* 트럭은 싣기만 한다 — 방향이 처음부터 정해진 차량이다 */
+      const opt = { loadOnly: isTruck(itemOf(c.itemId)), roles: c.roles };
+      return p ? { cart: c, path: p, stations: cartStations(p, placed, itemOf, opt) } : null;
+    })
+    .filter(Boolean);
+  const floor = floorOf(d.areas ?? []);
+  const gates = openingGates(d.openings ?? [], wallLines(d.areas ?? [], d.walls ?? []));
+
+  /**
+   * 인력 — **첫 조**로 고정한다.
+   *  교대가 도는 것까지 반복 실행에 넣으면 판마다 어느 조에서 시작했는지가
+   *  결과를 흔든다. 견주려는 것은 배치지 「몇 시에 시작했나」가 아니다.
+   */
+  const shifts = normalizeShifts(d.shifts ?? []);
+  const head = shiftAt(shifts, 0).shift?.headcount ?? 0;
+  const crew = assignCrew(crewRows(placed, (p) => isWorkable(itemOf(p.itemId))), head);
+
+  /* 고장 판정에 넣을 설비들 — 화면의 SimClock 이 넘기는 것과 같은 꼴 */
+  const equips = machines.map((m) => ({
+    uid: m.uid,
+    mtbf: m.at?.mtbf ?? FAULT_DEFAULTS.mtbf,
+    mttr: m.at?.mttr ?? FAULT_DEFAULTS.mttr,
+  }));
+
+  return {
+    ready: machines.length > 0,
+    machines,
+    /** **돌리기 전에** 계산으로 나오는 천장 (개/분) — 잰 값과 나란히 놓으라고 있다 */
+    capacity: lineBalance({ placed, links, carts, itemOf, specOf, beltSpeed }).capacity,
+    world: lineWorld({
+      beltFlows, machines, placed, itemOf, crew, equips,
+      downMap: getDown,
+      shipped: () => shippedTotal(getShipped()),
+    }),
+    flow: lineFlow({
+      beltFlows, cartPaths, floor, gates,
+      isTruck: (c) => isTruck(itemOf(c.itemId)),
+    }),
+  };
 }

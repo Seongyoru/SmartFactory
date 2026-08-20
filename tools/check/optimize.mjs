@@ -471,9 +471,15 @@ t('못 찾았을 때 **이유를 말한다**', () => {
   assert.ok(tidy.includes('맞바꿔서 줄일 것이 없습니다'), '「없다」를 안 말한다');
 });
 
-t('**처리량은 안 바뀐다**는 것을 못 박아 말한다', () => {
-  /* 안 적으면 「배치를 손봤는데 왜 처리량이 그대로냐」가 된다 */
-  assert.ok(insp.includes('처리량은 안 바뀝니다.'), '기대를 안 맞춰 준다');
+t('**천장은 안 바뀐다**고 말한다 — 처리량이라고는 안 한다', () => {
+  /* 처음에는 「처리량은 안 바뀝니다」라고 단정했다. 손보기를 배치 비교에
+     이어 놓고 실제로 돌려 보니 **372 → 384 개/시로 늘었다.** 천장이 오른
+     것은 아니다 — 벨트가 짧아져 라인을 채우는 시간이 줄었을 뿐이다.
+     이 기능이 잡은 첫 번째 거짓말이 이 칸 자신의 문구였다. */
+  assert.ok(insp.includes('라인의 천장은 안 바뀝니다.'), '무엇이 안 바뀌는지 안 말한다');
+  assert.equal(insp.includes('<b className="text-ink4">처리량은 안 바뀝니다.</b>'), false,
+    '처리량이 안 바뀐다고 단정한다 — 실제로는 조금 바뀐다');
+  assert.ok(insp.includes('잰 처리량은 조금 달라질 수 있습니다'), '달라질 수 있다는 것을 안 말한다');
   assert.ok(insp.includes('최선이라는 보장은 없습니다.'), '언덕 내려가기라는 것을 안 말한다');
 });
 
@@ -538,4 +544,54 @@ t('화면이 천장을 말한다 · 찾는 동안 말이 있다', () => {
   assert.ok(tidy.includes("busy ? '찾는 중…'"), '찾는 동안 아무 말이 없다');
   assert.ok(tidy.includes('setBusy(true)') && tidy.includes('setBusy(false)'), '상태를 안 되돌린다');
   assert.ok(/setTimeout\(\(\) => \{/.test(tidy), '한 틱을 안 쉬어 「찾는 중」이 안 그려진다');
+});
+
+/* ==========================================================================
+ *  손보기 ↔ 배치 비교
+ * --------------------------------------------------------------------------
+ *  이 칸은 「처리량은 안 바뀝니다」라고 **말만** 하고 있었다. 맞는 말이지만
+ *  값으로 보여 준 적이 없다. 배치 비교가 바로 그 일을 하는 자리인데 두 기능이
+ *  서로 모르고 있었다.
+ * ======================================================================== */
+const lineupSrc = await readSrc('core/lineup.js');
+const storeSrc = await readSrc('core/store.jsx');
+
+t('**지금이 아닌 배치**로도 world 를 만들 수 있다', () => {
+  /* 훅 안에 있을 때는 지금 상태로만 만들 수 있었다. 「손보기 후」는 아직
+     상태에 없는 배치라, 그대로는 돌려 볼 수가 없었다. */
+  assert.ok(lineupSrc.includes('export function worldOf(d = {})'), 'core 에 worldOf 가 없다');
+  assert.ok(/placed = d\.placed/.test(lineupSrc), '배치를 밖에서 안 받는다');
+});
+
+t('배치 비교가 **명시한 도면**도 담는다', () => {
+  /* SCENARIO_ADD 는 layoutSnapshot(state) 만 담았다 — 「후」는 상태에 없다 */
+  assert.ok(storeSrc.includes('layout: action.layout ?? layoutSnapshot(state),'), '지금 도면만 담는다');
+});
+
+t('전·후를 **같은 씨앗·같은 판 수**로 돌린다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  assert.ok(tidy.includes('const run = (placed) => {'), '두 배치를 한 길로 안 돌린다');
+  assert.ok(tidy.includes('reps: REPS, seconds: REP_MIN * 60, seed: 1'), '씨앗이나 판 수가 다르다');
+  /* 두 번 부르는 것이 요점이다 — 전과 후 */
+  assert.ok(tidy.includes('run(state.placed)') && tidy.includes('run(plan.placed)'), '전·후를 안 나눈다');
+});
+
+t('담기만 하고 안 옮기지 않는다 — 표와 도면이 어긋난다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  const at = tidy.indexOf('const compare = () => {');
+  const body = tidy.slice(at, tidy.indexOf('const apply = () => {'));
+  assert.ok(body.includes("dispatch({ type: 'MOVE_MANY'"), '담고서 안 옮긴다');
+  assert.ok(body.includes("showScenarios: true"), '담아 놓고 안 보여 준다');
+});
+
+t('굳힌 뒤에 비운다 — 순서가 바뀌면 담은 값이 0 이 된다', () => {
+  const tidy = insp.slice(insp.indexOf('function Tidy('), insp.indexOf('function FlowSection('));
+  const cap = tidy.indexOf('captureRun(placed, getShipped(), cost, r)');
+  const reset = tidy.indexOf('resetRun();');
+  assert.ok(cap > 0 && reset > cap, 'resetRun 이 captureRun 보다 먼저다 — 담은 값이 0 이 된다');
+});
+
+t('화면이 무엇을 견주는지 말한다', () => {
+  assert.ok(insp.includes('옮기고 전·후를 견줘 보기'), '버튼이 없다');
+  assert.ok(insp.includes('돌려 배치 비교에 담습니다'), '무엇을 확인하는지 안 말한다');
 });

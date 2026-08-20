@@ -37,8 +37,8 @@ import { downloadCSV, downloadJSON, stamp } from '../core/persistence.js';
 /** 여러 판으로 담을 때의 크기 — 화면에서 고르게 하지 않는다.
     견주는 자리에서는 **판 수가 같아야** 공정하고, 매번 다르게 담으면
     나중에 왜 구간이 다른지 알 수 없다. */
-const REPS = 10;
-const REP_MIN = 30;
+export const REPS = 10;
+export const REP_MIN = 30;
 import { Btn } from './common.jsx';
 
 const pct = (v) => (typeof v === 'number' ? `${(v * 100).toFixed(0)}%` : '—');

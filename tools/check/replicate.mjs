@@ -15,6 +15,9 @@ const src = await readSrc('core/replicate.js');
 
 /* ---------- 씨앗 ------------------------------------------------------------ */
 
+const lineupSrc = await readSrc('core/lineup.js');
+const inspSrc = await readSrc('ui/Inspector.jsx');
+
 t('같은 씨앗이면 같은 수열 — 재현이 안 되면 통계가 아니다', () => {
   const a = Array.from({ length: 5 }, R.seeded(7));
   const b = Array.from({ length: 5 }, R.seeded(7));
@@ -280,12 +283,19 @@ t('도면을 **한 곳에서** 모은다 — 두 벌이면 화면과 다른 라�
     assert.equal(fn.includes(own), false, `화면이 ${own} 를 다시 부른다`);
 });
 
-t('훅은 화면 층의 값만 고른다 — 계산은 core 가 한다', () => {
-  for (const call of ['beltFlowsOf(', 'machinesOf(', 'lineWorld(', 'linkPath('])
-    assert.ok(hook.includes(call), `${call} 를 안 쓴다`);
+t('계산은 core 가 하고, 훅은 **어느 값을 넣을지**만 고른다', () => {
+  /* 원래 이 계산이 훅 안에 있었다. 훅이라 **지금 상태**로만 만들 수 있었는데,
+     「손보기 전과 후를 나란히 돌려 보자」가 되면서 지금이 아닌 배치로도
+     만들 수 있어야 했다 — 그래서 core/lineup.js 의 worldOf 로 내려갔다. */
+  for (const call of ['beltFlowsOf(', 'machinesOf(', 'lineWorld(', 'linkPath(', 'lineFlow('])
+    assert.ok(lineupSrc.includes(call), `worldOf 가 ${call} 를 안 쓴다`);
+  assert.ok(hook.includes('worldOf({'), '훅이 core 를 안 부른다');
+  /* 훅은 얇아야 한다 — 두꺼워지는 순간 모으는 자리가 둘이 된다 */
+  assert.equal(/beltFlowsOf|machinesOf|lineFlow\(/.test(hook), false,
+    '훅이 계산을 다시 들고 있다 — 모으는 자리가 둘이 됐다');
   /* 규칙을 여기서 다시 적으면 안 된다 */
   for (const rule of ['jammed', 'buildableCount', 'slotShares'])
-    assert.equal(hook.includes(rule), false, `훅이 ${rule} 를 다시 들고 있다`);
+    assert.equal(lineupSrc.includes(rule) && hook.includes(rule), false, `${rule} 를 다시 들고 있다`);
 });
 
 t('돌린 뒤 **화면 실행을 비우고 그 사실을 말한다**', () => {
@@ -334,8 +344,14 @@ t('둘 다 0 이면 **「잴 것이 없다」** 지 「차이를 모른다」가
 });
 
 t('판 수는 화면에서 못 고른다 — 견주려면 **같은 크기**여야 한다', () => {
-  assert.match(scenSrc, /^const REPS = \d+;$/m, '판 수가 상수가 아니다');
-  assert.match(scenSrc, /^const REP_MIN = \d+;$/m, '한 판 길이가 상수가 아니다');
+  assert.match(scenSrc, /^export const REPS = \d+;$/m, '판 수가 상수가 아니다');
+  assert.match(scenSrc, /^export const REP_MIN = \d+;$/m, '한 판 길이가 상수가 아니다');
+  /* 내보내는 이유는 **다른 화면도 같은 값을 쓰라고**다. 배치 손보기가 전·후를
+     담을 때 제 숫자를 따로 쓰면, 표에 나란히 선 두 줄이 다른 크기로 돌린
+     것이 되어 판정이 거짓말을 한다. */
+  assert.ok(inspSrc.includes("import { REPS, REP_MIN } from './Scenarios.jsx';"),
+    '손보기가 판 수를 따로 들고 있다 — 전·후가 다른 크기로 돌아간다');
+  assert.equal(/const REPS?\s*=\s*\d/.test(inspSrc), false, '손보기가 제 숫자를 쓴다');
 });
 
 t('훅이 **얼리 리턴보다 위**에 있다 — 창을 여는 순간 죽는다', () => {
@@ -358,10 +374,10 @@ const lwSrc = await readSrc('ui/useLineWorld.js');
 const dockSrc2 = await readSrc('ui/RunDock.jsx');
 
 t('천장도 **같은 자리**에서 낸다 — 도면이 하나여야 견줄 수 있다', () => {
-  assert.ok(lwSrc.includes("import { lineBalance } from '../core/balance.js';"), 'balance 를 안 부른다');
-  assert.ok(/capacity: lineBalance\(\{/.test(lwSrc), 'capacity 를 안 돌려준다');
+  assert.ok(lineupSrc.includes("import { lineBalance } from './balance.js';"), 'balance 를 안 부른다');
+  assert.ok(/capacity: lineBalance\(\{/.test(lineupSrc), 'capacity 를 안 돌려준다');
   /* 카트가 천장을 정할 수 있다 — 카트를 바꿨는데 천장이 안 따라오면 안 된다 */
-  const deps = lwSrc.match(/\}, \[([^\]]*)\]\);/)?.[1] ?? '';
+  const deps = lwSrc.match(/\[([\s\S]*?)\],\s*\);/)?.[1] ?? '';
   for (const k of ['state.placed', 'state.links', 'state.carts', 'state.beltSpeed']) {
     assert.ok(deps.includes(k), `천장이 ${k} 를 안 본다`);
   }

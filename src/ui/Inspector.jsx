@@ -3,7 +3,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, FileText, RotateCcw, RotateCw, Table2, Trash2, Wand2 } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, FileText, GitCompare, RotateCcw, RotateCw, Table2, Trash2, Wand2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { MAX_LAYER, layerLift, linkPath, portsOf } from '../core/link.js';
@@ -21,6 +21,11 @@ import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
 import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
 import { deltaText, improvePlan } from '../core/improve.js';
 import { gainText, searchLayout } from '../core/optimize.js';
+import { worldOf } from '../core/lineup.js';
+import { replicate } from '../core/replicate.js';
+import { captureRun } from '../core/scenarios.js';
+import { specReader } from './useLineWorld.js';
+import { REPS, REP_MIN } from './Scenarios.jsx';
 import { runReportCSV } from '../core/report.js';
 import { runReportHTML } from '../core/reportHtml.js';
 import {
@@ -3445,6 +3450,9 @@ function Tidy({ per }) {
   const version = useModelsVersion();
   const [plan, setPlan] = useState(null);
   const [busy, setBusy] = useState(false);
+  /* 원가는 화면이 이미 낸 값 그대로 굳힌다 — 여기서 다시 계산하지 않는다
+     (배치 비교가 쓰는 것과 같은 자리다) */
+  const cost = useCostInput();
 
   /* 도면을 고치면 지난 제안은 더 이상 그 도면의 것이 아니다 */
   const key = `${state.placed.length}:${state.links.length}:${state.carts.length}:${per?.toFixed(3)}`;
@@ -3484,6 +3492,74 @@ function Tidy({ per }) {
       }
     }, 30);
   };
+
+  /**
+   * **손보기 전과 후를 배치 비교에 담는다.**
+   * -------------------------------------------------------------------------
+   *  이 칸은 「처리량은 안 바뀝니다」라고 **말만** 하고 있었다. 배치 비교가 바로
+   *  그것을 값으로 답하는 자리인데 두 기능이 서로 모르고 있었다.
+   *
+   *  ── 이어 놓고 보니 그 말이 **너무 단정이었다** ──────────────────────
+   *  실제로 돌려 보니 372 → 384 개/시로 **늘었다.** 천장이 오른 것은 아니다 —
+   *  적치대가 가까워지면서 벨트가 짧아졌고, 라인을 채우는 데 드는 시간이 줄어
+   *  같은 30분에 몇 개 더 나간 것이다. 「천장은 안 바뀐다」가 맞는 말이고
+   *  「처리량은 안 바뀐다」는 틀린 말이었다. 문구를 고쳤다.
+   *
+   *  **이 기능이 잡은 첫 번째 거짓말이 이 칸 자신의 문구였다.**
+   *
+   *  전·후를 각각 여러 판 돌려 담으면 비교 창의 판정이 답한다 —
+   *  「처리량은 아직 다르다고 못 합니다」(맞는 말이었다는 뜻) 와
+   *  「개당 거리는 65% 줄었습니다」가 한 화면에 나란히 선다.
+   *
+   *  **적용은 여기서 같이 한다.** 담기만 하고 안 옮기면 「후」 배치가 표에만
+   *  있고 도면에는 없어서, 표를 보고 「그래서 지금 어느 쪽이지」가 된다.
+   */
+  const compare = () => {
+    if (!plan?.ok) return;
+    setBusy(true);
+    setTimeout(() => {
+      try {
+        const specOf = specReader();
+        const common = {
+          links: state.links, carts: state.carts, areas: state.areas, walls: state.walls,
+          openings: state.openings, shifts: state.shifts, beltSpeed: state.beltSpeed,
+          itemOf, specOf,
+        };
+        /* 두 배치를 **같은 씨앗**으로 돌린다(common random numbers) — 그래야
+           「A 는 운 좋게 고장이 안 났다」가 아니라 배치 차이만 남는다 */
+        const run = (placed) => {
+          const w = worldOf({ ...common, placed });
+          const r = replicate({
+            reps: REPS, seconds: REP_MIN * 60, seed: 1, world: w.world, flow: w.flow,
+            pick: () => throughput(shippedTotal(getShipped())) ?? 0,
+          });
+          /* 굳힌 뒤에 비운다 — 순서가 바뀌면 담은 값이 0 이 된다 */
+          const got = captureRun(placed, getShipped(), cost, r);
+          resetRun();
+          return got && { ...got, throughput: r.mean, ran: REP_MIN * 60 * r.n };
+        };
+
+        const before = run(state.placed);
+        const after = run(plan.placed);
+        dispatch({ type: 'SCENARIO_ADD', name: '손보기 전', layout: layoutSnapshot(state), run: before });
+        dispatch({
+          type: 'SCENARIO_ADD',
+          name: '손보기 후',
+          layout: { ...layoutSnapshot(state), placed: plan.placed },
+          run: after,
+        });
+        /* 담았으면 실제로도 옮긴다 — 안 그러면 표와 도면이 어긋난다 */
+        dispatch({ type: 'MOVE_MANY', moves: plan.placed.map((p) => ({ uid: p.uid, pos: p.pos })) });
+        dispatch({ type: 'SET', patch: { showScenarios: true } });
+        setPlan(null);
+      } catch (e) {
+        console.error('[배치 손보기] 견주기 실패', e);
+      } finally {
+        setBusy(false);
+      }
+    }, 30);
+  };
+
 
   const apply = () => {
     if (!plan?.ok) return;
@@ -3540,6 +3616,12 @@ function Tidy({ per }) {
           >
             이대로 옮기기 ({plan.steps.length}번)
           </button>
+          <button
+            type="button" onClick={compare} disabled={busy}
+            className="mt-1 flex w-full items-center justify-center gap-1.5 rounded-md bg-raise px-2 py-1 text-[10.5px] text-ink3 ring-1 ring-edge hover:bg-raiseh hover:text-ink disabled:opacity-50"
+          >
+            <GitCompare size={11} /> {busy ? '돌리는 중…' : '옮기고 전·후를 견줘 보기'}
+          </button>
           {/**
             * **「다 줄였다」와 「여기서 끊었다」는 다른 말이다.**
             *  걸음 천장(MAX_STEPS)에 걸리면 아직 줄어드는 중이었다는 뜻이다 —
@@ -3558,12 +3640,18 @@ function Tidy({ per }) {
             구역을 그렸으면 그 안에 머뭅니다.
             마음에 안 들면 <b className="text-ink4">Ctrl+Z</b> 한 번으로 돌아갑니다.
           </p>
+          <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+            <b className="text-ink3">견줘 보기</b>를 누르면 옮긴 뒤 <b className="text-ink3">전·후를 각각 여러 판</b>
+            돌려 배치 비교에 담습니다 — <b className="text-ink3">정말 그런지</b> 판정까지 나옵니다.
+          </p>
         </div>
       )}
 
       <p className="mt-1.5 text-[9.5px] leading-snug text-ink4">
-        <b className="text-ink4">처리량은 안 바뀝니다.</b> 라인의 천장은 공정 시간과 벨트 속도가
-        정하지 설비가 어디 앉아 있는지가 정하지 않습니다 — 줄어드는 것은 <b className="text-ink4">거리</b>입니다.
+        <b className="text-ink4">라인의 천장은 안 바뀝니다.</b> 천장은 공정 시간과 벨트 속도가 정하지
+        설비가 어디 앉아 있는지가 정하지 않습니다 — 줄어드는 것은 <b className="text-ink4">거리</b>입니다.
+        다만 <b className="text-ink4">잰 처리량은 조금 달라질 수 있습니다</b> — 벨트가 짧아지면 라인을
+        채우는 데 드는 시간이 줄어 같은 길이를 돌려도 몇 개 더 나갑니다.
         언덕을 내려가다 멈추는 방식이라 <b className="text-ink4">최선이라는 보장은 없습니다.</b>
       </p>
     </div>

@@ -194,6 +194,7 @@ t('트럭만 나눠 담고 밖으로 나간다', () => {
 
 /* ---------- 화면이 그것을 부르는가 -------------------------------------- */
 const lwSrc = await readSrc('ui/useLineWorld.js');
+const lineupSrc = await readSrc('core/lineup.js');
 for (const [file, what] of [['ui/RunDock.jsx', '여러 판'], ['ui/Scenarios.jsx', '배치 비교']]) {
   const s = await readSrc(file);
   t(`${what} 이 옮기는 쪽까지 넘긴다`, () => {
@@ -202,9 +203,10 @@ for (const [file, what] of [['ui/RunDock.jsx', '여러 판'], ['ui/Scenarios.jsx
   });
 }
 t('옮기는 쪽도 **같은 자리**에서 만든다', () => {
-  assert.ok(lwSrc.includes('flow: lineFlow({'), 'useLineWorld 가 flow 를 안 만든다');
-  assert.ok(lwSrc.includes('cartStations(p, placed, itemOf, opt)'), '역을 화면과 다르게 푼다');
-  const deps = lwSrc.match(/\}, \[([\s\S]*?)\]\);/)?.[1] ?? '';
+  assert.ok(lineupSrc.includes('flow: lineFlow({'), 'worldOf 가 flow 를 안 만든다');
+  assert.ok(lineupSrc.includes('cartStations(p, placed, itemOf, opt)'), '역을 화면과 다르게 푼다');
+  assert.ok(lwSrc.includes('worldOf({'), '훅이 core 를 안 부른다');
+  const deps = lwSrc.match(/\[([\s\S]*?)\],\s*\);/)?.[1] ?? '';
   for (const k of ['state.areas', 'state.walls', 'state.openings']) {
     assert.ok(deps.includes(k), `문이 ${k} 를 안 본다 — 개구부를 뚫어도 안 나간다`);
   }
