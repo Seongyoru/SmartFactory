@@ -33,7 +33,7 @@ import {
 } from '../core/orders.js';
 import {
   CYCLE_RANGE, LOT_RANGE, MIN_GAP, SETUP_RANGE, VAR_MAX, beltPerMinute, cycleOf, effectiveCycle,
-  lotOf, outputCapFor, perMinute, setupOf, spacingClamped, spacingFor, varOf,
+  lotOf, outputCapFor, perMinute, setupOf, shapeOf, spacingClamped, spacingFor, varOf,
 } from '../core/process.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
@@ -52,7 +52,7 @@ import {
   slotShares, tooSmallFor,
 } from '../core/bom.js';
 import {
-  FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, SCRAP_RANGE,
+  FAULT_DEFAULTS, MTBF_RANGE, MTTR_RANGE, REPAIR_VAR_MAX, SCRAP_RANGE,
   getMade, getScrapped, repairsOf, useFaults,
 } from '../core/faults.js';
 import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, unitWon, won } from '../core/cost.js';
@@ -106,6 +106,7 @@ import {
   wallBox,
   wallLines,
 } from '../core/area.js';
+import { SHAPES, shapeInfo } from '../core/random.js';
 import { focusOn } from '../core/focusStore.js';
 import { downloadCSV, downloadHTML, layoutSnapshot, stamp } from '../core/persistence.js';
 import { layoutInfo } from '../core/layoutInfo.js';
@@ -326,6 +327,7 @@ function FaultFields({ placed }) {
         onChange={(v) => set({ mtbf: v })}
       />
       {mtbf > 0 && (
+        <>
         <Slider
           label="평균 수리 시간 (MTTR)"
           min={MTTR_RANGE[0]} max={MTTR_RANGE[1]} step={MTTR_RANGE[2]}
@@ -333,6 +335,23 @@ function FaultFields({ placed }) {
           text={formatElapsed(placed.mttr ?? FAULT_DEFAULTS.mttr)}
           onChange={(v) => set({ mttr: v })}
         />
+        {/**
+          * **수리 시간도 흔들린다.** 지금까지는 30분짜리 고장이 언제나 정확히
+          *  30분이었다. 실제 수리는 오른쪽으로 꼬리가 길고(부품이 없거나 원인을
+          *  못 찾으면 몇 배가 된다) **그 꼬리가 라인을 세우는 시간의 대부분**이다.
+          *  안 넣으면 가동률이 늘 실제보다 좋게 나온다.
+          */}
+        <Slider
+          label="수리 시간 편차"
+          min={0} max={REPAIR_VAR_MAX} step={0.05}
+          value={placed.repairVar ?? FAULT_DEFAULTS.repairVar}
+          text={`±${Math.round((placed.repairVar ?? 0) * 100)} %`}
+          hint={(placed.repairVar ?? 0) > 0
+            ? '모양은 위 「흔들리는 모양」을 따릅니다 — 평균 수리 시간은 그대로입니다'
+            : '0 이면 늘 정확히 이 시간에 고쳐집니다 — 실제 수리는 그렇지 않습니다'}
+          onChange={(v) => set({ repairVar: v })}
+        />
+        </>
       )}
       <Slider
         label="불량률"
@@ -597,6 +616,7 @@ function EquipmentPanel({ placed }) {
   const lot = lotOf(placed, item);
   const setupSec = setupOf(placed, item);
   const effCycle = effectiveCycle(cycleSec, lot, setupSec);
+  const shape = shapeOf(placed, item);
   const bundle = Math.max(1, Math.round(placed.outputCount ?? 3));
   const machineRate = perMinute(cycleSec);
 
@@ -688,6 +708,46 @@ function EquipmentPanel({ placed }) {
             step={0.05}
             onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { cycleVar: v } })}
           />
+          {/**
+            * **흔들림의 모양.**
+            * -----------------------------------------------------------------
+            *  같은 ±20% 라도 모양에 따라 라인이 다르게 돈다. 「고르게」는 꼬리가
+            *  없어서 1.2배보다 오래 걸리는 개가 **아예 안 나온다** — 그런데
+            *  버퍼가 필요한 이유가 바로 그 꼬리다. 꼬리 없는 분포로 돌리면
+            *  버퍼를 실제보다 작게 잡게 된다.
+            *
+            *  넷 다 **평균이 1** 이라 라인의 천장은 안 움직인다. 달라지는 것은
+            *  흔들림뿐이다 — 안 그러면 두 배치를 견줄 때 배치 차이인지 분포
+            *  차이인지 알 수 없어진다.
+            */}
+          {cycleVar > 0 && (
+            <div className="mt-1.5">
+              <span className="text-[10px] text-ink4">흔들리는 모양</span>
+              <div className="mt-1 flex gap-1">
+                {SHAPES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { varShape: s.id } })}
+                    className={`flex-1 rounded px-1 py-0.5 text-[10px] ring-1 transition-colors ${
+                      shape === s.id
+                        ? 'bg-sky-500/15 text-sky-600 ring-sky-500/40'
+                        : 'bg-raise text-ink4 ring-edge hover:bg-raiseh hover:text-ink3'
+                    }`}
+                    title={`${s.stat} — ${s.why.replace(/\*\*/g, '')}`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+                <Rich text={shapeInfo(shape).why} /> · <b className="text-ink4">{shapeInfo(shape).stat}</b>
+              </p>
+              <p className="mt-0.5 text-[9.5px] leading-snug text-ink4">
+                넷 다 <b className="text-ink4">평균은 같습니다</b> — 천장은 안 바뀌고 흔들림만 달라집니다.
+              </p>
+            </div>
+          )}
           {/**
             * **로트 전환 (셋업).**
             * -----------------------------------------------------------------

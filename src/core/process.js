@@ -27,6 +27,8 @@
  */
 
 /** 기본 공정 시간 (초/개) — 라이브러리 항목이 안 정했을 때 */
+import { DEFAULT_SHAPE, drawShape, shapeOf as rShape } from './random.js';
+
 export const DEFAULT_CYCLE = 6;
 
 /** 인스펙터 슬라이더 범위 [최소, 최대, 눈금] (초/개) */
@@ -47,6 +49,9 @@ export function varOf(placed, item) {
   if (!Number.isFinite(v)) return 0;
   return Math.min(VAR_MAX, Math.max(0, v));
 }
+
+/** 이 설비의 흔들림 **모양** — 안 고르면 예전 그대로(고르게) */
+export const shapeOf = (placed, item) => rShape(placed?.varShape ?? item?.varShape);
 
 /** 벨트 위 덩어리 사이의 최소 간격(m) — 이보다 붙으면 물건이 서로 겹쳐 보인다 */
 export const MIN_GAP = 0.4;
@@ -140,9 +145,8 @@ export function beltPerMinute(gap, speed, layers) {
  *  **배수로 뽑는 이유**는 아래 `work` 주석 참고. 초로 못 박아 두면 공정 시간을
  *  바꿔도 걸려 있던 작업이 옛 시간을 그대로 쓴다.
  */
-export function drawMult(ratio = 0, rand = Math.random) {
-  const r = Math.min(VAR_MAX, Math.max(0, ratio || 0));
-  return Math.max(0.05, 1 + r * (rand() * 2 - 1));
+export function drawMult(ratio = 0, rand = Math.random, shape = DEFAULT_SHAPE) {
+  return drawShape(Math.min(VAR_MAX, Math.max(0, ratio || 0)), rand, shape);
 }
 
 /** 이번 한 개에 실제로 걸리는 시간 — 편차는 균등분포 */
@@ -234,7 +238,7 @@ export function resetWork(uid = null) {
  */
 export function runMachine(uid, dt, {
   cycleSec, cycleVar = 0, room = 0, pay = null, rand = Math.random,
-  lot = 0, setupSec = 0,
+  lot = 0, setupSec = 0, shape = DEFAULT_SHAPE,
 }) {
   took.set(uid, 0);
   if (!(dt > 0) || !(room > 0)) return 0;
@@ -263,7 +267,7 @@ export function runMachine(uid, dt, {
     if (w == null) {
       /* 새 개를 건다 — 재료는 여기서 낸다. 못 내면 그대로 굶는다(시간은 흘렀다) */
       if (pay && !pay()) break;
-      w = { done: 0, mult: drawMult(cycleVar, rand) };
+      w = { done: 0, mult: drawMult(cycleVar, rand, shape) };
     }
     /* 이번 개에 걸리는 시간을 **매 프레임 다시 잰다** — 그래서 공정 시간을
        바꾸면 걸려 있던 것에도 바로 반영된다 */

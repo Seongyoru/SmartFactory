@@ -97,6 +97,7 @@ export function runMachines(dt, d = {}) {
     const n = runMachine(m.uid, dt, {
       cycleSec: m.cycleSec,
       cycleVar: m.cycleVar,
+      shape: m.shape,
       /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
       lot: m.lot,
       setupSec: m.setupSec,

@@ -23,9 +23,12 @@
  */
 
 import { useSyncExternalStore } from 'react';
+import { drawShape } from './random.js';
 
 /** 설비 하나의 기본값 — 고장 없음 */
-export const FAULT_DEFAULTS = { mtbf: 0, mttr: 300, scrapRate: 0 };
+export const FAULT_DEFAULTS = { mtbf: 0, mttr: 300, scrapRate: 0, repairVar: 0 };
+/** 수리 시간 퍼짐의 상한 — 공정 편차보다 넉넉하다(수리는 더 크게 흔들린다) */
+export const REPAIR_VAR_MAX = 0.8;
 
 /** 인스펙터 슬라이더 범위 */
 export const MTBF_RANGE = [0, 7200, 60];      // 0(없음) ~ 2시간
@@ -91,7 +94,16 @@ export function stepFaults(dt, equips, rand = Math.random) {
       const mtbf = e.mtbf ?? 0;
       if (!(mtbf > 0)) continue;                       // 고장 없는 설비
       if (rand() >= 1 - Math.exp(-dt / mtbf)) continue;
-      remain = Math.max(1, e.mttr ?? FAULT_DEFAULTS.mttr);
+      /**
+       * **수리 시간도 흔들린다.** 지금까지는 고정값이었다 — 30분짜리 고장은
+       * 언제나 정확히 30분이었다. 실제 수리는 오른쪽으로 꼬리가 길다(부품이
+       * 없거나 원인을 못 찾으면 몇 배가 된다), 그리고 **그 꼬리가 라인을
+       * 세우는 시간의 대부분**이다. 안 넣으면 가동률이 늘 실제보다 좋게 나온다.
+       *
+       * 모양과 퍼짐은 설비가 고른 것을 그대로 쓴다. 평균이 1 이라
+       * **MTTR 을 안 건드린다** — 흔들림만 붙는다.
+       */
+      remain = Math.max(1, (e.mttr ?? FAULT_DEFAULTS.mttr) * drawShape(e.repairVar ?? 0, rand, e.shape));
       nextRepairs = nextRepairs ?? { ...repairs };
       nextRepairs[e.uid] = (nextRepairs[e.uid] ?? 0) + 1;
     }

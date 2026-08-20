@@ -90,7 +90,7 @@ import {
   addLotsShared, addMade, addStock, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
   useAllStock, useShipped,
 } from '../core/simStore.js';
-import { cycleOf, outputCapFor, runMachine, spacingFor, varOf } from '../core/process.js';
+import { cycleOf, outputCapFor, runMachine, shapeOf as varShapeOf, spacingFor, varOf } from '../core/process.js';
 import { tick, useElapsed } from '../core/clock.js';
 import { runMachines } from '../core/sim.js';
 import { haltState } from '../core/halt.js';
@@ -612,8 +612,15 @@ function SceneContent() {
      시점에 평가되므로, 선언보다 위에 두면 매 렌더 TDZ 로 터진다(화면이 통째로
      ErrorBoundary 로 넘어간다). 빌드는 문법만 보므로 잡아 주지 않는다. */
   const faultParams = useMemo(
-    () => placed.map((p) => ({ uid: p.uid, mtbf: p.mtbf ?? 0, mttr: p.mttr ?? FAULT_DEFAULTS.mttr })),
-    [placed],
+    () => placed.map((p) => ({
+      uid: p.uid, mtbf: p.mtbf ?? 0, mttr: p.mttr ?? FAULT_DEFAULTS.mttr,
+      /* **`shapeOf` 라는 이름은 이 파일에서 이미 구역이 쓴다**(아래 useCallback).
+         그대로 부르면 TDZ 로 화면이 통째로 죽는다 — 빌드는 통과한다.
+         화면도 헤드리스와 **같은 값**을 넘겨야 한다 — 갈리면 눈으로 본 라인과
+         여러 판이 돌린 라인이 달라진다 */
+      repairVar: p.repairVar ?? FAULT_DEFAULTS.repairVar, shape: varShapeOf(p, itemOf(p.itemId)),
+    })),
+    [placed, itemOf],
   );
   /* 지운 설비의 고장 기록까지 들고 있을 이유는 없다 */
   useEffect(() => { pruneFaults(new Set(placed.map((p) => p.uid))); }, [placed]);

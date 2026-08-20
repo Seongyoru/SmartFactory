@@ -19,7 +19,7 @@
  */
 
 import { inputCapOf, isSource, needFor, outputKindOf, recipeOf, slotShares } from './bom.js';
-import { cycleOf, lotOf, outputCapFor, setupOf, spacingFor, varOf } from './process.js';
+import { cycleOf, lotOf, outputCapFor, setupOf, shapeOf, spacingFor, varOf } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { linkPath } from './link.js';
@@ -125,6 +125,7 @@ export function machinesOf(d = {}) {
             at: p,
             cycleSec: cycleOf(p, item),
             cycleVar: varOf(p, item),
+            shape: shapeOf(p, item),
             /* 로트 전환 — 몇 개마다 몇 초 쉬는가. 0 이면 예전 그대로다 */
             lot: lotOf(p, item),
             setupSec: setupOf(p, item),
@@ -203,6 +204,9 @@ export function worldOf(d = {}) {
     uid: m.uid,
     mtbf: m.at?.mtbf ?? FAULT_DEFAULTS.mtbf,
     mttr: m.at?.mttr ?? FAULT_DEFAULTS.mttr,
+    /* 수리 시간도 흔들린다 — 모양은 설비가 공정에 고른 것을 같이 쓴다 */
+    repairVar: m.at?.repairVar ?? FAULT_DEFAULTS.repairVar,
+    shape: m.shape,
   }));
 
   return {
