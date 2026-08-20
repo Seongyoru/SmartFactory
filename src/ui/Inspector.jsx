@@ -741,7 +741,9 @@ function EquipmentPanel({ placed }) {
                 ))}
               </div>
               <p className="mt-1 text-[9.5px] leading-snug text-ink4">
-                <Rich text={shapeInfo(shape).why} /> · <b className="text-ink4">{shapeInfo(shape).stat}</b>
+                {/* `Rich` 는 이 파일에 없다(Tutorial 것이다) — 굵게는 걷어 내고 글자만 쓴다.
+                    빌드는 통과하고 **화면만 죽는** 종류라 브라우저에 띄워 보고 알았다. */}
+                {shapeInfo(shape).why.replace(/\*\*/g, '')} · <b className="text-ink4">{shapeInfo(shape).stat}</b>
               </p>
               <p className="mt-0.5 text-[9.5px] leading-snug text-ink4">
                 넷 다 <b className="text-ink4">평균은 같습니다</b> — 천장은 안 바뀌고 흔들림만 달라집니다.
