@@ -152,7 +152,7 @@ export function runReportHTML(d = {}) {
 
   /* ---- 표지 · 결론 먼저 ---- */
   p('<div class="wrap">');
-  p('<h1>EGIS Smart Factory — 실행 보고서</h1>');
+  p('<h1>Smart Factory — 실행 보고서</h1>');
   p(`<div class="when">${esc(d.at ?? '')} · 시뮬 경과 ${esc(hms(d.elapsedSec))} · 실제로 돈 시간 ${esc(hms(d.ranSec))}</div>`);
 
   p('<div class="cards">');
@@ -302,7 +302,7 @@ export function runReportHTML(d = {}) {
   const svg = chart(d.series);
   if (svg) { p('<h2>생산 추이</h2>'); p(svg); }
 
-  p('<p class="foot">EGIS Smart Factory 에서 자동으로 만든 문서입니다. '
+  p('<p class="foot">Smart Factory 에서 자동으로 만든 문서입니다. '
     + '숫자는 화면에 뜬 값과 같습니다 — 이 문서가 다시 계산하지 않습니다. '
     + '엑셀에서 다시 따지려면 같은 자리의 「CSV」 로 받으세요.</p>');
   p('</div>');

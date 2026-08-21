@@ -1,9 +1,9 @@
 # 인수인계 — 다음 세션에서 이어서
 
-작업 위치: `C:\Users\bsy\Desktop\Claude\EGIS_Smart_Factory`
-실행: `npm run dev` (포트 5174, `.claude/launch.json` 의 `egis-smart-factory`)
+작업 위치: `C:\Users\bsy\Desktop\Claude\Smart_Factory`
+실행: `npm run dev` (포트 5174, `.claude/launch.json` 의 `smart-factory`)
 검사: `npm test` — 868건, 의존성 없이 3초. **손대기 전에 한 번 돌리고 시작할 것**
-배포: Vercel (`egis-smart-factory-test.vercel.app`) · 공유 저장소는 Vercel Blob(icn1·Public)
+배포: Vercel (`smart-factory-test.vercel.app`) · 공유 저장소는 Vercel Blob(icn1·Public)
 
 ---
 

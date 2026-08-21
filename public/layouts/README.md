@@ -6,7 +6,7 @@
 
 ## 도면 추가하기
 
-1. 앱에서 **「내보내기」** — `egis-layout-YYYY-MM-DD.json` 이 받아집니다
+1. 앱에서 **「내보내기」** — `layout-YYYY-MM-DD.json` 이 받아집니다
 2. 그 파일을 이 폴더에 넣습니다 (이름은 알아보기 쉽게 바꿔도 됩니다)
 3. `index.json` 의 `layouts` 에 한 줄 적습니다
 

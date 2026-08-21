@@ -1,9 +1,9 @@
 {
-  "name": "egis-smart-factory",
+  "name": "smart-factory",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "EGIS Smart Factory - 설비 배치 에디터 (Factorio-like layout builder + Digital Twin)",
+  "description": "Smart Factory - 설비 배치 에디터 (Factorio-like layout builder + Digital Twin)",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

@@ -10,13 +10,17 @@
  * ---------------------------------------------------------------------------
  */
 
-const LAYOUT_KEY = 'egis.factory.layout.v1';
-const LIB_KEY = 'egis.factory.userlib.v1';
-const THEME_KEY = 'egis.factory.appearance';
-const GUIDE_KEY = 'egis.factory.guide.v1';
-const SCENARIO_KEY = 'egis.factory.scenarios.v1';
-const DB_NAME = 'egis-factory';
+const LAYOUT_KEY = 'factory.layout.v1';
+const LIB_KEY = 'factory.userlib.v1';
+const THEME_KEY = 'factory.appearance';
+const GUIDE_KEY = 'factory.guide.v1';
+const SCENARIO_KEY = 'factory.scenarios.v1';
+const DB_NAME = 'factory';
 const STORE = 'models';
+
+/* 저장 키가 바뀌면 **그 전에 저장해 둔 도면은 안 읽힌다.** 옮겨 오는 코드를 두는
+   쪽도 있었지만, 그러면 키를 두 벌 들고 다니게 된다 — 「어느 쪽이 진짜인가」가
+   늘 따라붙는다. 남은 데이터는 브라우저의 사이트 데이터 지우기로 정리하면 된다. */
 
 /**
  * 저장할 도면 한 벌.

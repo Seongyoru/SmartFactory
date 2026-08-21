@@ -57,7 +57,7 @@ t('구획 앞에는 빈 줄이 있다 — 엑셀에서 표가 붙어 버리지 �
   assert.equal(csv[i - 1].length, 0, '구획 바로 위가 빈 줄이 아니다');
 });
 t('맨 위는 요약이다', () => {
-  assert.equal(csv[0][0], 'EGIS Smart Factory — 실행 보고서');
+  assert.equal(csv[0][0], 'Smart Factory — 실행 보고서');
   assert.ok(find('시뮬 경과|1시간 2분 5초'), `경과가 이상하다: ${find('시뮬 경과')}`);
   assert.ok(find('처리량(개/시간)|412.5'));
   assert.ok(find('재공(개)|240'));
@@ -117,7 +117,7 @@ t('추이가 없으면 그 구획을 안 만든다', () => {
 t('아무것도 안 넘겨도 보고서가 나온다', () => {
   const r = R.runReportCSV();
   assert.ok(r.length > 5);
-  assert.equal(r[0][0], 'EGIS Smart Factory — 실행 보고서');
+  assert.equal(r[0][0], 'Smart Factory — 실행 보고서');
 });
 t('측정 전이면 처리량을 숫자로 적지 않는다', () => {
   const r = R.runReportCSV({ throughput: null });
@@ -198,7 +198,7 @@ const run = () => R.runReportCSV(payload());
 t('화면의 조립 함수가 실제로 돈다 — 빠진 이름이 없다', () => {
   const rows = run();
   assert.ok(Array.isArray(rows) && rows.length > 10, '보고서가 안 나왔다');
-  assert.equal(rows[0][0], 'EGIS Smart Factory — 실행 보고서');
+  assert.equal(rows[0][0], 'Smart Factory — 실행 보고서');
 });
 t('화면 값을 그대로 옮긴다 — 다시 계산하지 않는다', () => {
   const f = run().map((r) => r.join('|'));

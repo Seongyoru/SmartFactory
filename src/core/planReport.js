@@ -208,7 +208,7 @@ export function planReportHTML(d = {}) {
     + '쉬지 않고 도는 라인을 놓고 시간당으로 센 값이라, 실제로 돌리면 반드시 이보다 '
     + '나쁩니다. 잰 값은 <b>실행 보고서</b>에 있습니다.</p>');
 
-  p(`<div class="foot">EGIS Smart Factory · 도면 보고서 · ${esc(d.at ?? '')}</div>`);
+  p(`<div class="foot">Smart Factory · 도면 보고서 · ${esc(d.at ?? '')}</div>`);
   p('</div>');
 
   return '<!doctype html><html lang="ko"><head><meta charset="utf-8"/>'

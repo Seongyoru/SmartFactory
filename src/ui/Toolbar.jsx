@@ -490,7 +490,7 @@ export default function Toolbar() {
           E
         </span>
         <div className="leading-tight">
-          <p className="text-[12.5px] font-semibold text-ink">EGIS Smart Factory</p>
+          <p className="text-[12.5px] font-semibold text-ink">Smart Factory</p>
           <p className="text-[10px] text-ink4">설비 배치 에디터</p>
         </div>
       </div>
@@ -710,7 +710,7 @@ export default function Toolbar() {
         onClick={() =>
           downloadJSON(
             layoutSnapshot(state),
-            `egis-layout-${new Date().toISOString().slice(0, 10)}.json`,
+            `layout-${new Date().toISOString().slice(0, 10)}.json`,
           )
         }
         title="도면을 파일로 꺼냅니다 — 이 브라우저를 지워도 남는 유일한 사본입니다"
@@ -724,7 +724,7 @@ export default function Toolbar() {
       {/* 저장소에 담아 둔 공용 도면 — 담긴 것이 없으면 버튼도 안 나온다 */}
       <GalleryButton
         onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })}
-        onExport={() => downloadJSON(layoutSnapshot(state), `egis-layout-${new Date().toISOString().slice(0, 10)}.json`)}
+        onExport={() => downloadJSON(layoutSnapshot(state), `layout-${new Date().toISOString().slice(0, 10)}.json`)}
       />
       {/* 올리기 — 링크 하나로 서로 테스트. 올리기 전에 반드시 묻는다 */}
       <ShareButton snapshot={() => layoutSnapshot(state)} />

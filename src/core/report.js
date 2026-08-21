@@ -52,7 +52,7 @@ export function runReportCSV(d = {}) {
   const head = (title) => { blank(); rows.push([`■ ${title}`]); };
 
   /* ---- 요약 ---- */
-  rows.push(['EGIS Smart Factory — 실행 보고서']);
+  rows.push(['Smart Factory — 실행 보고서']);
   rows.push(['내보낸 시각', d.at ?? '']);
   rows.push(['시뮬 경과', hms(d.elapsedSec)]);
   rows.push(['실제로 돈 시간', hms(d.ranSec)]);
