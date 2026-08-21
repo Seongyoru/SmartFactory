@@ -58,11 +58,13 @@ t('**내려가면 음수 · 올라가면 양수**', () => {
 });
 
 t('**흔들림 안이면 폭에 안 넣는다**', () => {
-  /* 운을 폭에 넣으면 세우는 순서가 매번 바뀐다 */
-  const s = S.swingOf({ base: tight(100), low: tight(99.5), high: tight(140) });
-  assert.equal(s.sureDown, false, '0.5% 차이를 흔들렸다고 한다');
+  /* 운을 폭에 넣으면 세우는 순서가 매번 바뀐다.
+     **문턱 바로 아래(1.5%)로 잰다** — 0.5% 로 재면 새는 값이 너무 작아서
+     되돌려도 안 물린다(실제로 그렇게 안 물렸다). */
+  const s = S.swingOf({ base: tight(100), low: tight(98.5), high: tight(140) });
+  assert.equal(s.sureDown, false, '1.5% 차이를 흔들렸다고 한다');
   assert.ok(s.sureUp);
-  assert.ok(Math.abs(s.span - 0.4) < 0.03, `폭에 운이 섞였다 (${s.span})`);
+  assert.ok(Math.abs(s.span - 0.4) < 0.005, `폭에 운이 섞였다 (${s.span})`);
 });
 
 t('**손잡이 돌리기와 같은 문턱**을 쓴다', () => {
