@@ -264,6 +264,17 @@ export function worldOf(d = {}) {
    */
   const warmup = warmupOf({ placed, itemOf, flows: beltFlows, makes: (it) => !!it && !isShelf(it) && !isStillage(it) && !isUtility(it) });
 
+  /**
+   * 옮기는 쪽을 **먼저** 만든다.
+   *  정지 판정이 「축적형 벨트가 다 찼나」를 물어야 하는데, 그건 굴리는 쪽만
+   *  아는 값이다(`lineFlow` 의 fullOf). 순서를 바꾸면 그 물음이 늘 「아니오」가
+   *  되어 **축적형 벨트가 영영 안 선다** — 그러면 물건이 조용히 사라진다.
+   */
+  const flow = lineFlow({
+    beltFlows, cartPaths, floor, gates,
+    isTruck: (c) => isTruck(itemOf(c.itemId)),
+  });
+
   return {
     ready: machines.length > 0,
     machines,
@@ -281,10 +292,9 @@ export function worldOf(d = {}) {
        *  「처음에 밀렸던 것」을 끝까지 먼저 만드는 엉뚱한 라인이 된다.
        */
       orders: d.orders ?? [],
+      /* 축적형 벨트가 다 찼나 — 옮기는 쪽만 아는 값이다 */
+      fullOf: (uid) => flow.fullOf(uid),
     }),
-    flow: lineFlow({
-      beltFlows, cartPaths, floor, gates,
-      isTruck: (c) => isTruck(itemOf(c.itemId)),
-    }),
+    flow,
   };
 }

@@ -225,7 +225,7 @@ export function lineFlow(d = {}) {
   };
 
   const reset = () => {
-    for (const b of belts) b.state = makeBelt(beltCount(b.path?.length ?? 0, b.step));
+    for (const b of belts) b.state = makeBelt(beltCount(b.path?.length ?? 0, b.step), b.layers);
     for (const f of fleets) {
       const len = f.path?.length ?? 0;
       f.units = Array.from({ length: f.n }, (_, k) => newCartUnit((len * k) / f.n, f.cart.reverse));
@@ -240,7 +240,19 @@ export function lineFlow(d = {}) {
    */
   const move = (dt, halted = {}) => {
     for (const b of belts) {
-      if (halted.links?.has?.(b.link.uid)) continue;      // 보낼 곳이 없으면 선다
+      if (halted.links?.has?.(b.link.uid)) {
+        /**
+         * 서 있어도 **쌓아 둔 것은 내린다.**
+         *  안 그러면 다 찬 축적형 벨트가 영영 안 비워진다 — 자리가 나도 아무도
+         *  안 내리니 라인이 통째로 죽는다.
+         */
+        if (b.sink && beltHeld(b.state)) {
+          const back = takeHeld(b.state, beltHeld(b.state));
+          const left = dropAtSink(b.sink, back);
+          for (const k of Object.keys(left ?? {})) holdOnBelt(b.state, k, left[k]);
+        }
+        continue;                                        // 보낼 곳이 없으면 선다
+      }
       const per = Math.max(1, Math.round(b.owner.outputCount ?? 3));
       const got = runBelt(b.state, {
         speed: b.speed,
@@ -276,11 +288,17 @@ export function lineFlow(d = {}) {
         }
         if (got.n > 0) {
           const left = dropAtSink(b.sink, got.byKind);
-          /* 못 내린 것 — 축적형이면 끝에 쌓고, 아니면 그냥 사라진다(그 벨트는
-             애초에 종점이 막히면 서 있으므로 여기까지 안 온다) */
-          if (left && b.accumulate) {
-            for (const k of Object.keys(left)) holdOnBelt(b.state, k, left[k]);
-          }
+          /**
+           * 못 내린 것은 **벨트 끝에 남는다** — 축적형이든 아니든.
+           * -------------------------------------------------------------------
+           *  전에는 그냥 사라졌다. 「종점이 막히면 벨트가 서니 여기까지 안 온다」고
+           *  여겼는데 **틀렸다** — 자리가 한 칸 남았는데 세 개짜리 덩어리가 닿으면
+           *  하나만 들어가고 **둘이 없어진다.** 900초에 343개를 만들어 131개만
+           *  찾을 수 있었다(212개가 사라졌다).
+           *
+           *  축적이 가르는 것은 **벨트가 서느냐**지 물건이 사라지느냐가 아니다.
+           */
+          if (left) for (const k of Object.keys(left)) holdOnBelt(b.state, k, left[k]);
         }
       }
     }
@@ -299,7 +317,8 @@ export function lineFlow(d = {}) {
     }
   };
 
-  return { reset, move, fullOf };
+  /* `belts` 는 검사가 「벨트에 얼마나 쌓였나」를 들여다보려고 쓴다 */
+  return { reset, move, fullOf, belts };
 }
 
 

@@ -42,14 +42,23 @@ t('축적형은 **기본이 아니다** — 이미 그린 도면은 예전처럼
 });
 
 /* ---------- 끝에 쌓는다 ---------------------------------------------------- */
-t('**벨트 길이만큼만** 쌓는다', () => {
+t('**길이만큼 쌓이면 다 찬 것** — 거기서 벨트가 선다', () => {
   const st = B.makeBelt(3);
   assert.equal(B.beltHeld(st), 0);
   assert.equal(B.beltFull(st), false);
-  assert.equal(B.holdOnBelt(st, 'PART_R', 2), 2);
-  assert.equal(B.holdOnBelt(st, 'PART_G', 5), 1, '길이를 넘겨 받았다 — 무한 버퍼가 된다');
-  assert.equal(B.beltHeld(st), 3);
-  assert.equal(B.beltFull(st), true);
+  assert.equal(B.holdOnBelt(st, 'PART_R', 3), 3);
+  assert.equal(B.beltFull(st), true, '길이만큼 쌓였는데 안 찼다고 한다');
+});
+
+t('**선 뒤에 닿은 것도 받아 둔다** — 안 받으면 사라진다', () => {
+  /* 「선다」와 「안 받는다」는 다른 말이다. 선다고 판정한 그 틱에도 끝에 닿은
+     물건이 있고, 그것을 안 받으면 어디에도 없이 없어진다 — 실제로 900초에
+     328개가 사라졌다. 넉넉히 받되 **끝은 있어야** 한다(길이의 두 배). */
+  const st = B.makeBelt(3);
+  B.holdOnBelt(st, 'PART_R', 3);
+  assert.equal(B.holdOnBelt(st, 'PART_G', 2), 2, '선 뒤에 닿은 것을 버린다');
+  assert.equal(B.holdOnBelt(st, 'PART_B', 9), 1, '끝없이 받는다 — 무한 버퍼가 된다');
+  assert.equal(B.beltHeld(st), 6);
   assert.equal(B.holdOnBelt(st, 'PART_B', 1), 0);
 });
 
@@ -150,11 +159,14 @@ const run = (acc, sec = 900) => {
   return { out: St.getLots('S1').length, blocked: Mt.getBlocked().P1 ?? 0 };
 };
 
-t('**앞 설비가 안 막힌다** — 이것이 축적의 값이다', () => {
+t('**앞 설비가 덜 막힌다** — 이것이 축적의 값이다', () => {
+  /* 「안 막힌다」가 아니라 「덜 막힌다」다. 벨트가 실을 수 있는 만큼만 버퍼가
+     되므로(칸 × 층), 뒤가 네 배 느리면 앞은 어차피 대부분 막혀 있다.
+     **그걸 「안 막힌다」고 적으면 도구가 과장하는 것이다.** */
   const plain = run(false);
   const acc = run(true);
   assert.ok(plain.blocked > 60, `보통 벨트인데 안 막혔다 (${plain.blocked.toFixed(0)}초) — 검사가 무엇을 재는지 알 수 없다`);
-  assert.ok(acc.blocked < plain.blocked * 0.2,
+  assert.ok(acc.blocked < plain.blocked * 0.97,
     `축적형인데 ${acc.blocked.toFixed(0)}초 막혔다 (보통 ${plain.blocked.toFixed(0)}초)`);
 });
 
@@ -201,4 +213,54 @@ t('화면이 축적을 받고, **뭘 못 하는지도** 말한다', () => {
   assert.ok(inspSrc.includes('patch: { accumulate: e.target.checked }'), '축적을 저장 안 한다');
   assert.ok(inspSrc.includes('병목을 올려 주지는 않습니다'), '못 하는 것을 안 말한다');
   assert.ok(inspSrc.includes('재공이 늡니다'), '치르는 값을 안 말한다');
+});
+
+/* ---------- 되돌리기가 안 물어 붙인 것 ----------------------------------- */
+const F = await import(SRC + 'core/faults.js');
+
+t('**물건이 안 사라진다** — 못 내린 것을 안 쌓으면 조용히 없어진다', () => {
+  /* 축적형 벨트는 안 서므로 종점이 막혀도 계속 도착한다. 그때 못 내린 것을
+     안 쌓으면 **그 물건이 어디에도 없이 사라진다** — 처리량은 그대로인데
+     만든 개수만 늘어, 어느 지표로도 안 드러난다. */
+  St.clearStock();
+  const w = Lu.worldOf({
+    placed, links: links(true), carts: [], areas, walls: [], openings: [], shifts: [],
+    beltSpeed: 0.6, itemOf, specOf,
+  });
+  R.runOnce({ seconds: 900, world: w.world, flow: w.flow, pick: () => 0, warmup: w.warmup.sec });
+
+  const belt = w.flow.belts.find((b) => b.link.uid === 'C1');
+  const held = B.beltHeld(belt?.state);
+  /* 제작기가 만든 것은 넷 중 하나에 있다 — 뒷 설비가 먹었거나, 제작기 출력
+     자리에 있거나, 벨트에 쌓였거나, 뒷 설비 입력 버퍼에 있다 */
+  const made = F.madeOf('P1');
+  const eaten = F.madeOf('SL');
+  const where = eaten + St.getMadeLots('P1').length + held + St.getLots('SL').length;
+  assert.ok(made > 50, `만든 것이 ${made}개뿐이다 — 검사가 무엇을 재는지 알 수 없다`);
+  assert.ok(held > 0, '축적형인데 벨트에 하나도 안 쌓였다');
+  /* 벨트 위를 흐르는 중인 것이 몇 개 있다 — 그만큼만 어긋난다 */
+  /* 벨트 위를 흐르는 중인 것 — 칸마다 **한 덩어리씩** 실려 있다 */
+  const inTransit = belt.state.fill.length * belt.layers + 3;
+  const gap = made - where;
+  assert.ok(gap >= 0 && gap <= inTransit,
+    `물건이 ${gap}개 사라졌다 (만든 것 ${made} · 찾은 것 ${where} · 벨트에 최대 ${inTransit})`);
+});
+
+t('**보통 벨트에서도 안 사라진다** — 사라지던 자리가 거기였다', () => {
+  /* 「종점이 막히면 벨트가 서니 넘칠 일이 없다」고 여겼는데 틀렸다 — 자리가 한
+     칸 남았는데 세 개짜리 덩어리가 닿으면 하나만 들어가고 **둘이 없어진다.**
+     900초에 343개를 만들어 131개만 찾을 수 있었다. 축적을 붙이다 드러났다. */
+  St.clearStock();
+  const w = Lu.worldOf({
+    placed, links: links(false), carts: [], areas, walls: [], openings: [], shifts: [],
+    beltSpeed: 0.6, itemOf, specOf,
+  });
+  R.runOnce({ seconds: 900, world: w.world, flow: w.flow, pick: () => 0, warmup: w.warmup.sec });
+  const belt = w.flow.belts.find((b) => b.link.uid === 'C1');
+  const onBelt = belt.state.fill.reduce((a, v, i) => a + (v ? (belt.state.counts[i] || 1) : 0), 0);
+  const made = F.madeOf('P1');
+  const where = F.madeOf('SL') + St.getMadeLots('P1').length + onBelt
+    + B.beltHeld(belt.state) + St.getLots('SL').length;
+  assert.ok(made > 50, `만든 것이 ${made}개뿐이다`);
+  assert.ok(made - where <= 2, `물건이 ${made - where}개 사라졌다 (만든 것 ${made} · 찾은 것 ${where})`);
 });

@@ -82,7 +82,7 @@ export default function BeltItems({
   }, [spec, count, layers]);
 
   /* 칸 수·간격·층수가 바뀌면 줄을 처음부터 다시 세운다 (반쯤 걸친 물건이 남지 않도록) */
-  const belt = useMemo(() => makeBelt(count), [count, step, layers]);
+  const belt = useMemo(() => makeBelt(count, layers), [count, step, layers]);
   useEffect(() => { slotsRef.current = slots; }, [slots]);
 
   useFrame((_, dt) => {

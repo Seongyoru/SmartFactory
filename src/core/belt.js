@@ -52,7 +52,7 @@ export function beltCount(length, step) {
  *  gone  마지막으로 끝에 닿은 덩어리 번호
  *  fill  칸마다 "진짜 물건인가" — 번호를 칸 수로 나눈 나머지가 곧 자리
  */
-export function makeBelt(count) {
+export function makeBelt(count, layers = 1) {
   const n = Math.max(0, count);
   return {
     trav: 0,
@@ -88,6 +88,13 @@ export function makeBelt(count) {
     held: [],
     /** 칸마다 **몇 개** 실려 있는가 — 품종이 바뀌는 자리의 짧은 덩어리 때문 */
     counts: new Uint8Array(n),
+    /**
+     * 한 칸에 몇 개가 실리나 — **쌓을 수 있는 양이 여기서 나온다.**
+     *  칸은 「덩어리」고 덩어리에는 여러 개가 실린다. 칸 수만으로 한도를 잡으면
+     *  축적형 벨트의 버퍼가 **실제 벨트가 싣는 양의 3분의 1**이 되어, 축적을
+     *  켠 쪽이 오히려 더 막힌다 — 실제로 그렇게 나왔다(429초 → 740초).
+     */
+    per: Math.max(1, Math.round(layers) || 1),
     /** 이번 프레임에 끝에 닿은 것들 — `{ [종류]: 개수 }` */
     out: null,
   };
@@ -198,17 +205,34 @@ export function advanceBelt(st, { d, step, length, feeding = true, spawn = null,
 /** 끝에 쌓여 있는 개수 — 축적형 벨트가 버퍼 노릇을 하는 만큼이다 */
 export const beltHeld = (st) => st?.held?.length ?? 0;
 
-/** 더 쌓을 수 있나 — 칸 수만큼 쌓으면 벨트가 다 찬 것이다 */
-export const beltFull = (st) => beltHeld(st) >= (st?.fill?.length ?? 0);
+/**
+ * 더 쌓을 수 있나 — **칸 수만큼 쌓이면 다 찬 것**이고, 그때 벨트가 선다.
+ *  이 값이 곧 「벨트가 버퍼로 얼마나 되나」다.
+ */
+export const beltFull = (st) => beltHeld(st) >= holdRoom(st);
+
+/** 이 벨트가 실을 수 있는 개수 — 칸 수 × 한 칸에 실리는 개수 */
+const holdRoom = (st) => (st?.fill?.length ?? 0) * (st?.per ?? 1);
 
 /**
- * 쌓인 줄에 넣는다 — **벨트 길이만큼만.**
- *  넘치는 것은 안 받는다. 받아 버리면 벨트가 무한 버퍼가 되어, 종점이 막혀도
- *  라인이 영영 안 서는 거짓 그림이 된다.
+ * 쌓아 둘 수 있는 **끝까지의 한도** — 셈이 서는 자리(길이)의 두 배.
+ * ---------------------------------------------------------------------------
+ *  「길이만큼 쌓이면 선다」와 「길이를 넘으면 안 받는다」는 **다른 말이다.**
+ *  선다고 판정한 그 틱에도 이미 끝에 닿은 물건이 있고, 그것을 안 받으면
+ *  **그 물건이 어디에도 없이 사라진다** — 실제로 900초에 328개가 사라졌다.
+ *
+ *  그래서 셈은 길이에서 서고(`beltFull`), 받아 두는 것은 그보다 넉넉하다.
+ *  넉넉하되 **끝이 있어야** 한다 — 무한 버퍼가 되면 종점이 막혀도 라인이 영영
+ *  안 서는 거짓 그림이 된다.
+ */
+const holdCap = (st) => holdRoom(st) * 2;
+
+/**
+ * 쌓인 줄에 넣는다.
  *  @returns 실제로 받은 개수
  */
 export function holdOnBelt(st, kind, n) {
-  const room = Math.max(0, (st?.fill?.length ?? 0) - beltHeld(st));
+  const room = Math.max(0, holdCap(st) - beltHeld(st));
   const take = Math.max(0, Math.min(Math.round(n) || 0, room));
   for (let i = 0; i < take; i++) st.held.push(kind);
   return take;

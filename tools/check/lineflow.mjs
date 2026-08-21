@@ -202,7 +202,7 @@ for (const [file, what] of [['ui/RunDock.jsx', '여러 판'], ['ui/Scenarios.jsx
   });
 }
 t('옮기는 쪽도 **같은 자리**에서 만든다', () => {
-  assert.ok(lineupSrc.includes('flow: lineFlow({'), 'worldOf 가 flow 를 안 만든다');
+  assert.ok(lineupSrc.includes('const flow = lineFlow({'), 'worldOf 가 flow 를 안 만든다');
   assert.ok(lineupSrc.includes('cartStations(p, placed, itemOf, opt)'), '역을 화면과 다르게 푼다');
   assert.ok(lwSrc.includes('worldOf({'), '훅이 core 를 안 부른다');
   const deps = lwSrc.match(/\[([\s\S]*?)\],\s*\);/)?.[1] ?? '';

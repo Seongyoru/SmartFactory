@@ -2346,10 +2346,10 @@ function SceneContent() {
               const left = dropAtSink(sink, back);
               for (const k of Object.keys(left ?? {})) holdOnBelt(state, k, left[k]);
             }
+            /* 못 내린 것은 **벨트 끝에 남는다** — 축적형이든 아니든. 버리면
+               자리가 한 칸 남았을 때 덩어리의 나머지가 조용히 사라진다 */
             const left = dropAtSink(sink, byKind);
-            if (left && accumulate) {
-              for (const k of Object.keys(left)) holdOnBelt(state, k, left[k]);
-            }
+            if (left) for (const k of Object.keys(left)) holdOnBelt(state, k, left[k]);
           } : null}
         />
       ))}
