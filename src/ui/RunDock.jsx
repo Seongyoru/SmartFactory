@@ -59,6 +59,7 @@ import { ciText, replicate } from '../core/replicate.js';
 import { resetRun } from '../core/sim.js';
 import { bestOf, kneeOf, kneeText, knobOf, knobsFor, sweep } from '../core/sweep.js';
 import { fitOf, fitText, matchOf, matchText, movedFrom } from '../core/calibrate.js';
+import { rankOf, stepsOf, swingOf, swingText, tornadoText } from '../core/sensitivity.js';
 import { warmupText } from '../core/warmup.js';
 import { worldOf } from '../core/lineup.js';
 import { specReader } from './useLineWorld.js';
@@ -728,6 +729,120 @@ const SWEEP_MIN = 20;
  *  값 하나를 돌리고 `setTimeout(0)` 으로 숨을 쉰다 — 화면이 안 멈추고 표가
  *  **한 줄씩 채워지는 것이 보인다.**
  */
+/**
+ * **민감도** — 「어느 손잡이를 잡을까」.
+ * ---------------------------------------------------------------------------
+ *  손잡이 돌리기는 한 손잡이를 골라 값을 훑는다. 그 앞의 물음 —— **애초에 어느
+ *  손잡이가 결과를 흔드나** —— 에는 답하지 못했다. 손잡이가 여섯이면 여섯 번
+ *  훑고 표 여섯 개를 눈으로 견줘야 했다.
+ *
+ *  손잡이마다 **한 칸 아래와 한 칸 위**를 돌려 보고 크게 흔드는 순으로 세운다.
+ *  「±20%」가 아니라 이웃 값인 이유는 `sensitivity.js` 에 적어 뒀다.
+ */
+function Tornado() {
+  const { state, itemOf } = useEditor();
+  const [rows, setRows] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const layout = {
+    placed: state.placed, links: state.links, carts: state.carts,
+    areas: state.areas, walls: state.walls, openings: state.openings,
+    shifts: state.shifts, beltSpeed: state.beltSpeed,
+    isStillage: (p) => isStillage(itemOf(p.itemId)),
+  };
+  const knobs = knobsFor(layout);
+
+  const go = () => {
+    setBusy(true);
+    setRows([]);
+    const specOf = specReader();
+    const acc = [];
+    /* **손잡이 하나씩 잘라 돌린다** — 한 덩어리로 하면 화면이 몇 초씩 멈춘다
+       (손잡이 돌리기에서 배운 그대로) */
+    let i = 0;
+    const tick = () => {
+      try {
+        const k = knobs[i];
+        const steps = stepsOf(k, layout);
+        if (steps) {
+          const at = (v) => (v == null ? null : sweep({
+            knob: k.id, layout, values: [v],
+            build: (d) => worldOf({ ...d, itemOf, specOf }),
+            pick: () => throughput(shippedTotal(getShipped())) ?? 0,
+            seconds: TORNADO_MIN * 60, reps: TORNADO_REPS, seed: 1,
+          }).rows?.[0] ?? null);
+          const got = { base: at(steps.base), low: at(steps.low), high: at(steps.high) };
+          resetRun();
+          const swing = swingOf(got);
+          if (swing) acc.push({ knob: k, steps, swing });
+          setRows([...acc]);
+        }
+      } catch (e) {
+        console.error('[민감도] 실패', e);
+      }
+      if (++i < knobs.length) { setTimeout(tick, 0); return; }
+      setBusy(false);
+    };
+    setTimeout(tick, 30);
+  };
+
+  if (!knobs.length) {
+    return (
+      <p className="text-[10.5px] leading-relaxed text-ink4">
+        흔들어 볼 손잡이가 없습니다 — 카트나 벨트, 교대조를 두면 <b className="text-ink3">어느 것이
+        결과를 가장 크게 흔드는지</b>를 재 봅니다.
+      </p>
+    );
+  }
+
+  const ranked = rankOf(rows);
+  const wide = Math.max(0.01, ...ranked.map((r) => r.swing.span));
+
+  return (
+    <>
+      <p className="text-[9.5px] leading-snug text-ink4">
+        손잡이마다 <b className="text-ink3">한 칸 아래와 한 칸 위</b>를 돌려 보고, 결과를 크게
+        흔드는 순으로 세웁니다 — 어느 것을 먼저 손볼지가 여기서 갈립니다.
+      </p>
+      <button type="button" onClick={go} disabled={busy} className={`${OUT_BTN} mt-1.5 w-full justify-center disabled:opacity-50`}>
+        <Repeat size={13} /> {busy ? `흔드는 중… (${rows?.length ?? 0}/${knobs.length})` : '손잡이마다 한 칸씩 흔들기'}
+      </button>
+
+      {ranked.length > 0 && (
+        <div className="mt-1.5 border-t border-line pt-1.5">
+          {ranked.map((r) => (
+            <div key={r.knob.id} className="mb-1">
+              <div className="flex items-center gap-1.5 text-[10px]">
+                <span className="w-16 shrink-0 truncate text-right text-ink3" title={r.knob.label}>{r.knob.label}</span>
+                <span className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-kbd">
+                  <span
+                    className={`block h-full rounded-full ${r.swing.span > 0 ? 'bg-amber-500' : 'bg-kbd'}`}
+                    style={{ width: `${Math.min(100, (r.swing.span / wide) * 100)}%` }}
+                  />
+                </span>
+                <span className="w-28 shrink-0 text-right tabular-nums text-ink4">{swingText(r)}</span>
+              </div>
+            </div>
+          ))}
+          {!busy && (
+            <p className="mt-1.5 text-[10px] leading-snug text-ink2">
+              <b className="text-amber-600">{tornadoText(ranked)}</b>
+            </p>
+          )}
+          <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+            <b className="text-ink4">—</b> 는 <b className="text-ink3">흔들림 안</b>이라는 뜻입니다 —
+            바꿔도 눈에 띄게 안 변합니다. 값마다 {TORNADO_REPS}판 × {TORNADO_MIN}분, 씨앗은 같습니다.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** 민감도는 손잡이 수만큼 돌리므로 판을 줄인다 — 순서를 가리는 데는 이만큼이면 된다 */
+const TORNADO_REPS = 4;
+const TORNADO_MIN = 10;
+
 function Sweep() {
   const { state, itemOf } = useEditor();
   const [knob, setKnob] = useState(null);
@@ -1085,6 +1200,11 @@ export default function RunDock() {
         <div className="flex min-h-0 flex-1 divide-x divide-line overflow-x-auto">
           <Col title="값을 바꿔 가며" width={300}>
             <Sweep />
+          </Col>
+          {/* **어느 손잡이를 잡을까** — 값을 훑기 전의 물음이다. 왼쪽 옆에 두어
+              「먼저 이걸 보고 그다음 저기서 훑는다」가 몸짓으로 읽히게 한다 */}
+          <Col title="어느 손잡이가 흔드나" width={280}>
+            <Tornado />
           </Col>
           <Col title="무엇을 답하나">
             <p className="text-[10.5px] leading-relaxed text-ink3">
