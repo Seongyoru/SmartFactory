@@ -53,6 +53,7 @@ await import('./dispatch.mjs');
 await import('./divert.mjs');
 await import('./inspect.mjs');
 await import('./calibrate.mjs');
+await import('./warmup.mjs');
 await import('./random.mjs');
 await import('./sweep.mjs');
 

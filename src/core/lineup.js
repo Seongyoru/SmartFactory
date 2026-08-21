@@ -30,6 +30,7 @@ import {
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { beltKinds, linkPath } from './link.js';
+import { warmupOf } from './warmup.js';
 import { lineBalance } from './balance.js';
 import { lineFlow, lineWorld } from './replicate.js';
 import { cartPath, cartStations } from './cart.js';
@@ -254,9 +255,18 @@ export function worldOf(d = {}) {
     shape: m.shape,
   }));
 
+  /**
+   * 이 도면은 얼마나 데워야 하나 — **도면에서 센다**(`warmup.js`).
+   *  예전에는 10초 고정이었다. 240초에 한 판을 굽는 오븐이 있는 라인에서
+   *  11초에 나온 값을 「측정 끝」이라고 내놓으면 도구가 사람을 속이는 것이다.
+   */
+  const warmup = warmupOf({ placed, itemOf, flows: beltFlows, makes: (it) => !!it && !isShelf(it) && !isStillage(it) && !isUtility(it) });
+
   return {
     ready: machines.length > 0,
     machines,
+    /** { sec, fill, slow, cycle } — 화면이 「왜 그만큼 기다리나」를 적는다 */
+    warmup,
     /** **돌리기 전에** 계산으로 나오는 천장 (개/분) — 잰 값과 나란히 놓으라고 있다 */
     capacity: lineBalance({ placed, links, carts, itemOf, specOf, beltSpeed }).capacity,
     world: lineWorld({

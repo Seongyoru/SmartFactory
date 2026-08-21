@@ -96,7 +96,8 @@ import { runMachines } from '../core/sim.js';
 import { haltState } from '../core/halt.js';
 import { orderInfoOf } from '../core/orders.js';
 import { beltFlowsOf, machinesOf } from '../core/lineup.js';
-import { accumulate, plannedStop } from '../core/metrics.js';
+import { accumulate, plannedStop, setWarmup } from '../core/metrics.js';
+import { warmupOf } from '../core/warmup.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
 import { FAULT_DEFAULTS, pruneFaults, screen, stepFaults, useFaults } from '../core/faults.js';
 import { isShelf, isStillage, isTruck, isUtility, payloadByKey } from '../data/library.js';
@@ -126,7 +127,7 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts, orders }) {
+function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts, orders, warmup }) {
   const ship = useShipped();
   const shipped = shippedTotal(ship);
   const elapsedSec = useElapsed();
@@ -143,6 +144,9 @@ function SimClock({ running, halted, jammed, starved, unmanned, equips, machines
      설비가 한 번에 선다(clock.js 의 simStep). 소비자마다 따로 물으면 하나를
      반드시 빠뜨린다. */
   useEffect(() => { setShifts(shifts); }, [shifts]);
+  /* **예열도 도면이 정한다** — 헤드리스(`runOnce`)가 넣는 것과 같은 값이라야
+     눈으로 본 처리량과 반복 실행의 처리량이 같은 시점부터 재진다 */
+  useEffect(() => { setWarmup(warmup); }, [warmup]);
   useFrame((_, real) => {
     const dt = tick(real, running);
     /* **쉬는 시간에도 프레임은 돈다** — 그 시간을 계획정지로 세어야 한다.
@@ -844,6 +848,19 @@ function SceneContent() {
    * ---------------------------------------------------------------------- */
   /* 굴릴 설비 목록 — 계산은 `core/lineup.js` 가 한다(화면 밖도 같은 목록을 쓴다) */
   const machines = useMemo(() => machinesOf({ placed, itemOf }), [placed, itemOf]);
+
+  /**
+   * 이 도면은 얼마나 데워야 하나 — **도면에서 센다**(`core/warmup.js`).
+   *  헤드리스(`worldOf`)가 세는 것과 **같은 함수**다. 두 곳이 따로 판단하면
+   *  눈으로 본 처리량과 반복 실행의 처리량이 다른 시점부터 재진다.
+   */
+  const warmup = useMemo(
+    () => warmupOf({
+      placed, itemOf, flows: beltFlows,
+      makes: (it) => !!it && !isShelf(it) && !isStillage(it) && !isUtility(it),
+    }),
+    [placed, itemOf, beltFlows],
+  );
 
   /**
    * 한 덩어리 개수를 바꾸면 출력 자리의 **자투리를 버린다.**
@@ -2029,6 +2046,7 @@ function SceneContent() {
         machines={machines}
         shifts={state.shifts}
         orders={state.orders}
+        warmup={warmup}
       />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />

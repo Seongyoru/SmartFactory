@@ -17,7 +17,8 @@ import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './cor
 import { getSpec, loadModel, modelOptions } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
 import { shippedTotal, useAllStock, useShipped } from './core/simStore.js';
-import { bottleneck, getRan, throughput, useMetrics } from './core/metrics.js';
+import { bottleneck, getRan, throughput, useMetrics, warmupLeft } from './core/metrics.js';
+import { formatElapsed } from './core/clock.js';
 import { blockChain, stepTarget } from './core/diagnose.js';
 import { normalizeOrders } from './core/orders.js';
 import { focusOn } from './core/focusStore.js';
@@ -400,7 +401,11 @@ function ShippedHUD() {
             {/* 라인이 채워지기 전(WARMUP)에는 숫자를 내놓지 않는다 — 몇 초 만에
                 한 개만 나가도 수천 개/시간이 되어 사람을 속인다 */}
             {tp == null ? (
-              <span className="text-[10.5px] text-ink4">측정 중…</span>
+              /* **언제 끝나는지를 같이 적는다.** 「측정 중…」만 뜨면 사람이 도구가
+                 멈춘 줄 알고, 실제로 오븐이 있는 라인에서는 몇 분씩 간다 */
+              <span className="text-[10.5px] text-ink4">
+                측정 중… <span className="tabular-nums">{formatElapsed(warmupLeft())}</span> 남음
+              </span>
             ) : (
               <b className="tabular-nums text-ink">{tp.toFixed(1)} 개/시간</b>
             )}

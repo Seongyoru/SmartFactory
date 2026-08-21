@@ -117,8 +117,34 @@ export const producedInRun = (shipped) =>
  * 처리량이 뜻을 갖기까지 필요한 최소 시간(시뮬 초).
  *  갓 시작한 순간에는 몇 초 만에 한 개만 나가도 수천 개/시간이 된다. 라인이
  *  채워지기 전의 숫자는 견줄 값이 아니므로 아예 내놓지 않는다.
+ *
+ *  **이건 바닥값이다.** 실제로 얼마나 데워야 하는지는 도면이 정한다 —
+ *  240초에 한 판을 굽는 오븐은 10초에 아무것도 안 낸다(`warmup.js`).
  */
 export const WARMUP = 10;
+
+/**
+ * 이 도면의 예열 시간(초) — `warmupOf` 가 세어서 넣어 준다.
+ * ---------------------------------------------------------------------------
+ *  **여기 한 곳에 둔다.** 화면과 헤드리스가 각자 「이제 됐나」를 판단하면 눈으로
+ *  본 처리량과 반복 실행의 처리량이 갈린다. 도면이 바뀔 때 넣어 주고, 읽는 쪽은
+ *  `throughput` 하나뿐이다.
+ */
+let warmup = { sec: WARMUP };
+
+/**
+ * 예열을 넣는다 — 숫자만 줘도 되고, **왜 그만큼인지까지** 줘도 된다.
+ *  화면은 이유를 그대로 적는다(`warmupText`). 값만 보여 주면 「왜 4분이나
+ *  기다리나」를 아무도 못 답한다.
+ */
+export const setWarmup = (w) => {
+  const src = typeof w === 'object' && w ? w : { sec: w };
+  const sec = Math.max(WARMUP, Math.round(Number(src.sec) || 0));
+  if (sec === warmup.sec && src === warmup) return;
+  warmup = { ...src, sec };
+  emit();
+};
+export const getWarmup = () => warmup;
 
 const subs = new Set();
 
@@ -217,6 +243,8 @@ export const cartBlockRatio = (uid) => {
 export function resetMetrics() {
   ran = 0;
   planned = 0;
+  /* 예열은 **도면의 성질**이라 안 지운다 — 다시 재기를 눌렀다고 240초짜리
+     오븐이 10초에 데워지는 것은 아니다. 부르는 쪽이 도면을 바꿀 때 넣어 준다. */
   blocked = {};
   starved = {};
   unmanned = {};
@@ -313,9 +341,12 @@ export function starvedWorst() {
  *  말할 수 있게. 라인이 채워지기 전의 숫자는 견줄 값이 아니다.
  */
 export function throughput(shipped) {
-  if (ran < WARMUP) return null;
+  if (ran < warmup.sec) return null;
   return (producedInRun(shipped) * 3600) / ran;
 }
+
+/** 예열이 끝나기까지 남은 시간(초) — 화면이 「4분 12초 남음」을 적는다 */
+export const warmupLeft = () => Math.max(0, warmup.sec - ran);
 
 /**
  * 리드타임 — **한 개가 들어와서 나가기까지 몇 초인가.**

@@ -43,7 +43,8 @@ import { focusOn } from '../core/focusStore.js';
 import { formatElapsed, useElapsed } from '../core/clock.js';
 import {
   LOSS_FLOOR, getBlocked, getSeries, getStarved, getUnmanned, getRan,
-  getPlanned, getSetup, leadTimeSec, lossSplit, oeeOverall, throughput, useMetrics,
+  WARMUP, getPlanned, getSetup, getWarmup, leadTimeSec, lossSplit, oeeOverall, throughput,
+  useMetrics, warmupLeft,
 } from '../core/metrics.js';
 import { useFaults } from '../core/faults.js';
 import { getShipped, shippedTotal, useAllStock, useShipped } from '../core/simStore.js';
@@ -58,6 +59,7 @@ import { ciText, replicate } from '../core/replicate.js';
 import { resetRun } from '../core/sim.js';
 import { bestOf, kneeOf, kneeText, knobOf, knobsFor, sweep } from '../core/sweep.js';
 import { fitOf, fitText, matchOf, matchText, movedFrom } from '../core/calibrate.js';
+import { warmupText } from '../core/warmup.js';
 import { worldOf } from '../core/lineup.js';
 import { specReader } from './useLineWorld.js';
 import { isStillage } from '../data/library.js';
@@ -282,10 +284,30 @@ function Replicate() {
  * ======================================================================== */
 
 /** 라인 전체 성적 — 세 기둥을 곱한 것이 OEE 다. 하나만 나빠도 전체가 무너진다 */
-function Kpis({ elapsed, overall, flow }) {
+function Kpis({ elapsed, overall, flow, warmup }) {
   return (
     <>
       <Line label="경과 시간">{formatElapsed(elapsed)}</Line>
+      {/**
+        * 예열 — **언제부터 잰 값이 뜻을 갖나.**
+        * ---------------------------------------------------------------------
+        *  예전에는 10초 고정이었다. 240초에 한 판을 굽는 오븐이 있는 라인에서
+        *  11초에 나온 값을 「측정 끝」이라고 내놓으면 도구가 사람을 속이는 것이다.
+        *  이제 도면에서 세고(`core/warmup.js`), **왜 그만큼인지도 적는다.**
+        */}
+      {warmup?.sec > WARMUP && (
+        <Line label="예열" title="이만큼은 돌아야 처리량이 뜻을 갖습니다 — 도면에서 셉니다">
+          <span className={warmupLeft() > 0 ? 'text-amber-600' : 'text-ink3'}>
+            {formatElapsed(warmup.sec)}
+          </span>
+          {warmupLeft() > 0 && (
+            <span className="ml-1 text-[10px] tabular-nums text-ink4">{formatElapsed(warmupLeft())} 남음</span>
+          )}
+        </Line>
+      )}
+      {warmup?.sec > WARMUP && (
+        <p className="-mt-0.5 mb-1 text-[9.5px] leading-snug text-ink4">{warmupText(warmup)}</p>
+      )}
       {/**
         * 계획정지 — **부하시간 밖의 시간.**
         * ---------------------------------------------------------------------
@@ -986,7 +1008,7 @@ export default function RunDock() {
       {open && tab === 'run' && (
         <div className="flex min-h-0 flex-1 divide-x divide-line overflow-x-auto">
           <Col title="지표" width={190}>
-            <Kpis elapsed={elapsed} overall={overall} flow={flow} />
+            <Kpis elapsed={elapsed} overall={overall} flow={flow} warmup={getWarmup()} />
           </Col>
           <Col title="생산 추이">
             <ProductionChart series={series} />

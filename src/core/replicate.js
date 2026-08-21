@@ -36,7 +36,7 @@ import { newCartUnit, resetRun, runBelt, runCart, runMachines } from './sim.js';
 import { beltCount, makeBelt } from './belt.js';
 import { addLotsShared, addStock, arrivedOf, getShipped, takeBundles } from './simStore.js';
 import { haltState } from './halt.js';
-import { getRan } from './metrics.js';
+import { getRan, setWarmup } from './metrics.js';
 
 /** 한 판을 이만큼씩 끊어 굴린다 (시뮬 초) — 화면의 한 프레임과 같은 크기 */
 export const STEP = 0.1;
@@ -340,6 +340,7 @@ export function lineWorld(d = {}) {
  *  @param d.pick    (…) => 값 — 이 판에서 무엇을 볼지. 없으면 처리량
  *  @param d.rand    난수
  *  @param d.shifts  교대표 — **쉬는 조**(주말·정기보전)가 있으면 그때는 안 돈다
+ *  @param d.warmup  이 도면의 예열 시간(초) — 처리량을 언제부터 재나(`warmup.js`)
  */
 export function runOnce(d = {}) {
   const seconds = Math.max(0, d.seconds ?? 600);
@@ -347,6 +348,9 @@ export function runOnce(d = {}) {
   const step = d.step ?? STEP;
 
   resetRun();
+  /* **예열은 도면이 정한다** — `resetRun` 이 바닥값으로 되돌리므로 그 뒤에 넣는다.
+     화면 쪽은 씬이 같은 값을 넣는다(두 길이 같은 시점부터 재야 한다) */
+  if (d.warmup > 0) setWarmup(d.warmup);
   d.flow?.reset();
   const n = Math.round(seconds / step);
   for (let i = 0; i < n; i++) {

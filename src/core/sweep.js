@@ -171,6 +171,11 @@ export function sweep(d = {}) {
     const r = replicate({
       reps, seconds: d.seconds ?? 1800, seed: d.seed ?? 1,
       world: built.world, flow: built.flow, pick: d.pick,
+      /* **값마다 예열이 다르다** — 카트를 늘리면 라인이 빨리 차고, 로트를 키우면
+         한 순환이 길어진다. 한 값으로 고정하면 어떤 자리에서는 아직 데워지지도
+         않은 숫자를 표에 싣게 된다(`warmup.js`) */
+      warmup: built.warmup?.sec,
+      shifts: layout.shifts,
     });
     /* 판별 값을 그대로 들고 간다 — **짝지어 견주려면** 판마다의 값이 있어야 한다 */
     rows.push({ v, mean: r.mean, sd: r.sd, se: r.se, half: r.half, n: r.n, runs: r.runs });
