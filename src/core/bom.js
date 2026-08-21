@@ -34,7 +34,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import { PAYLOAD_ITEMS, allowedOutOf, canonKind } from '../data/library.js';
+import { scrapKindOf, PAYLOAD_ITEMS, allowedOutOf, canonKind } from '../data/library.js';
 
 /** 설비 입력 버퍼의 기본 크기(개) — 도면에 적지 않으면 이 값 */
 export const DEFAULT_INPUT_CAP = 30;
@@ -52,7 +52,11 @@ export const MAX_QTY = 20;
  */
 export const MAX_KINDS = 4;
 
-/** 불량품이 흐를 때 쓰는 종류 이름 — 라이브러리의 `PAYLOAD_ITEMS.SCRAP` */
+/**
+ * 갈래 없는 불량품 — **옛 도면**의 것이다.
+ *  지금은 품종마다 하나씩 낸다(`scrapKindOf`). 이 이름은 그때 저장된 도면을
+ *  읽을 때만 쓰인다.
+ */
 export const SCRAP_KIND = 'SCRAP';
 
 /* --------------------------------------------------------------------------
@@ -138,7 +142,8 @@ export const recipeAt = (placed, slot = 0) => {
 export function sendKindsOf(placed, item, scrapsOut = false) {
   const out = recipesOf(placed).map((r) => outKindOf(r, item));
   const list = [...new Set(out)];
-  if (scrapsOut) list.push(SCRAP_KIND);
+  /* 불량도 **품종마다** 나온다 — 제작품 1의 불량과 제작품 2의 불량은 다른 줄이다 */
+  if (scrapsOut) for (const k of list.slice()) list.push(scrapKindOf(k));
   return list;
 }
 

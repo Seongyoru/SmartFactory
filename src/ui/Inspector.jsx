@@ -60,7 +60,7 @@ import {
 } from '../core/faults.js';
 import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, unitWon, won } from '../core/cost.js';
 import {
-  PAYLOAD_ITEMS, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
+  PAYLOAD_ITEMS, isScrapKind, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
 } from '../data/library.js';
 import {
   MAX_BAYS,
@@ -534,7 +534,29 @@ function KindChip({ kind }) {
   );
 }
 
-const KIND_KEYS = Object.keys(PAYLOAD_ITEMS);
+/** 만들 수 있는 종류들 — 불량품은 빼고 본다(아래 `ingredientKinds`) */
+const KIND_KEYS = Object.keys(PAYLOAD_ITEMS).filter((k) => !isScrapKind(k));
+
+/**
+ * 재료로 고를 수 있는 것들 — **이 도면에 실제로 나오는 불량품까지.**
+ * ---------------------------------------------------------------------------
+ *  불량품이 품종마다 하나씩 생기면서 종류가 일곱에서 열셋이 됐다. 그걸 전부
+ *  고르개에 늘어놓으면 **불량을 안 쓰는 도면에서도 목록이 두 배**가 된다 —
+ *  고르개가 길어지는 것은 그 자체로 값을 깎는다.
+ *
+ *  그래서 **도면이 실제로 내보내는 불량품만** 보탠다. 아무도 불량을 안 내보내면
+ *  목록은 예전 그대로 여섯이다. 재작업 설비를 놓으려는 사람에게는 필요한 것이
+ *  마침 거기 있고, 나머지 사람에게는 아무것도 안 는다.
+ */
+function ingredientKinds(placed, itemOf) {
+  const out = new Set(KIND_KEYS);
+  for (const p of placed ?? []) {
+    const item = itemOf?.(p.itemId);
+    if (!item || scrapToOf(p, item) !== SCRAP_TO.OUT) continue;
+    for (const k of sendKindsOf(p, item, true)) if (isScrapKind(k)) out.add(k);
+  }
+  return [...out];
+}
 
 /**
  * 이 설비가 무엇을 먹고 무엇을 만드는가 (레시피 · BOM).
@@ -549,7 +571,7 @@ const KIND_KEYS = Object.keys(PAYLOAD_ITEMS);
  *  이 칸이 생겼다는 이유로 갑자기 서면 안 되므로 그것이 기본값이다.
  */
 function RecipeSection({ placed, item }) {
-  const { dispatch } = useEditor();
+  const { state, dispatch, itemOf } = useEditor();
   const lots = useLots(placed.uid);
   const stock = useStock(placed.uid);
 
@@ -610,7 +632,7 @@ function RecipeSection({ placed, item }) {
   };
 
   const used = new Set(recipe.in.map((r) => r.kind));
-  const addable = KIND_KEYS.filter((k) => !used.has(k));
+  const addable = ingredientKinds(state.placed, itemOf).filter((k) => !used.has(k));
 
   /* 지금 한 덩어리(= 적재 층수)를 만들 재료가 있는가 — 없으면 무엇이 없는지까지 */
   const missing = source ? {} : missingOf(countKinds(lots), needFor(recipe, per));

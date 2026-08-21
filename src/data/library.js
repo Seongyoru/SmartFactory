@@ -278,24 +278,68 @@ const payload = (key, name, family, model, tint, rgb) => ({
   color: shade(...rgb),
 });
 
-export const PAYLOAD_ITEMS = {
+/** 만들 수 있는 것들 — 불량품은 여기서 파생된다(`scrapKinds`) */
+const MAKEABLE = {
   PART_R: payload('PART_R', '제작품 1', FAMILY.PART, PART_MODEL, '#ff0000', [1, 0, 0]),
   PART_G: payload('PART_G', '제작품 2', FAMILY.PART, PART_MODEL, '#00ff00', [0, 1, 0]),
   PART_B: payload('PART_B', '제작품 3', FAMILY.PART, PART_MODEL, '#0000ff', [0, 0, 1]),
   ASM_C: payload('ASM_C', '조립품 1', FAMILY.ASM, ASM_MODEL, '#00ffff', [0, 1, 1]),
   ASM_M: payload('ASM_M', '조립품 2', FAMILY.ASM, ASM_MODEL, '#ff00ff', [1, 0, 1]),
   ASM_Y: payload('ASM_Y', '조립품 3', FAMILY.ASM, ASM_MODEL, '#ffff00', [1, 1, 0]),
+};
+
+/**
+ * 품종마다 하나씩 만드는 **불량품 종류.**
+ * ---------------------------------------------------------------------------
+ *  모양은 원래 것과 같고(불량이라고 생김새가 바뀌지는 않는다) **색만 죽인다** —
+ *  화면에서 「저건 불량이구나」가 바로 읽혀야 한다.
+ *
+ *  `PAYLOAD_ITEMS` 를 다 만든 뒤에 부르면 **TDZ 로 터진다**(초기화 중인 것을
+ *  읽게 된다). 그래서 만들 수 있는 것들(`MAKEABLE`)을 먼저 세우고 여기서 판다.
+ */
+const dull = (hex) => {
+  const n = parseInt(String(hex).slice(1), 16);
+  const mix = (v) => Math.round(v * 0.45 + 0x7a * 0.55);
+  const r = mix((n >> 16) & 255), g = mix((n >> 8) & 255), b = mix(n & 255);
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+};
+const dullRgb = (rgb) => (rgb ?? [1, 1, 1]).map((v) => v * 0.45 + 0.48 * 0.55);
+
+const SCRAP_ITEMS = Object.fromEntries(
+  Object.entries(MAKEABLE).map(([key, it]) => {
+    const k = `SCRAP_${key}`;
+    return [k, payload(k, `불량품 (${it.name})`, FAMILY.SCRAP, it.url, dull(it.tint), dullRgb(it.rgb))];
+  }),
+);
+
+export const PAYLOAD_ITEMS = {
+  ...MAKEABLE,
   /**
    * 불량품 — **검사에서 걸러진 것.**
    *  설비가 「불량을 내보내기」로 잡혀 있을 때만 생긴다(기본은 버림이라 이미
    *  그린 도면에는 한 개도 안 나온다). 벨트로 빼내 재작업 설비에 먹이거나
    *  폐기 적치대에 쌓는다 — 그 길을 그리는 것이 검사 라우팅이다.
    *
-   *  **어느 품종의 불량인지는 안 남는다.** 한 종류로 합친다 — 품종마다 불량을
-   *  따로 두면 종류가 갑절이 되어 모든 고르개가 두 배로 길어지는데, 「무엇을
-   *  고쳐 무엇으로 되돌리나」는 재작업 설비의 레시피가 이미 말하고 있다.
+   *  ── 갈래 없는 것 하나 + **품종마다 하나** ────────────────────────────────
+   *  아래 `SCRAP` 은 **옛 도면**의 것이다. 처음에는 불량을 한 종류로 합쳤는데,
+   *  그러면 「제작품 1 불량」과 「조립품 2 불량」이 같은 줄에 섞여 흘러서 재작업
+   *  설비가 무엇을 고치는지 알 수가 없다 — 갈래로 가를 수도 없다.
+   *
+   *  그래서 품종마다 하나씩 둔다(`scrapKindOf`). **고르개가 길어지는 문제**는
+   *  다른 데서 푼다 — 재료 고르개는 「이 도면에 실제로 나오는 불량품」만 보여
+   *  준다. 불량을 안 내보내는 도면에는 한 줄도 안 는다.
    */
   SCRAP: payload('SCRAP', '불량품', FAMILY.SCRAP, PART_MODEL, '#7a7a7a', [0.48, 0.48, 0.48]),
+  ...SCRAP_ITEMS,
+};
+
+/** 이 품종의 불량품 종류 이름 — 「제작품 1」 → 「불량품 (제작품 1)」 */
+export const scrapKindOf = (kind) => (PAYLOAD_ITEMS[`SCRAP_${kind}`] ? `SCRAP_${kind}` : 'SCRAP');
+
+/** 그 불량품이 원래 무엇이었나 — 갈래 없는 옛 불량품이면 null */
+export const baseKindOf = (kind) => {
+  const m = /^SCRAP_(.+)$/.exec(String(kind ?? ''));
+  return m && PAYLOAD_ITEMS[m[1]] ? m[1] : null;
 };
 
 /**

@@ -37,8 +37,7 @@ import { followDistance, forgetStation, loadRoom, pickSet, stepCart } from './ca
 import { advanceBelt, beltOffset } from './belt.js';
 import { SCRAP_TO, runMachine, resetWork, setupTook, slotOf } from './process.js';
 import { countKinds, needTimes, scaleNeed, slotShares } from './bom.js';
-/** 불량품이 쌓이는 종류 이름 — 라이브러리가 정한다 */
-const SCRAP_KIND = 'SCRAP';
+import { scrapKindOf } from '../data/library.js';
 import { nextSlot } from './dispatch.js';
 import { addRework, resetFaults, resetQuality, screen, screenAgain, stepFaults } from './faults.js';
 import { accumulate, accumulateCart, plannedStop, resetMetrics } from './metrics.js';
@@ -168,8 +167,16 @@ export function runMachines(dt, d = {}) {
        *  자리를 못 잡으면 그만큼만 쌓는다 — 남은 것은 그냥 버린다(그 설비가
        *  막힌 것이지, 불량이 공중에 떠 있으면 안 된다).
        */
+      /**
+       * **어느 품종의 불량인지까지** 남긴다 — 「불량품 (제작품 1)」.
+       *  한 종류로 합치면 제작품 1의 불량과 조립품 2의 불량이 같은 줄에 섞여
+       *  흘러서, 재작업 설비가 무엇을 고치는지 알 수가 없고 갈래로 가를 수도 없다.
+       */
       onScrap: m.scrapTo === SCRAP_TO.OUT
-        ? (n) => addMade(m.uid, Math.max(0, Math.min(n, m.cap - getMade(m.uid))), SCRAP_KIND)
+        ? (n) => addMade(
+          m.uid, Math.max(0, Math.min(n, m.cap - getMade(m.uid))),
+          scrapKindOf(now?.out ?? m.kinds?.[0]?.out),
+        )
         : null,
       /* 지금 재료로 **몇 개**를 만들 수 있나 — 판이 찼는지 보는 값이다 */
       avail: need ? () => needTimes(countKinds(getLots(m.uid)), need) : null,

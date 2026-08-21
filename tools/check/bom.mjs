@@ -77,11 +77,32 @@ t('고를 수 있는 것 · 배치할 때 심어 줄 것', () => {
 });
 
 /* ---------- 종류 여섯 · 옛 이름 별칭 ---------- */
-t('제작품 셋 + 조립품 셋 + 불량품', () => {
+t('제작품 셋 + 조립품 셋 + **품종마다 불량품 하나**', () => {
+  const makeable = ['PART_R', 'PART_G', 'PART_B', 'ASM_C', 'ASM_M', 'ASM_Y'];
   assert.deepEqual(Object.keys(lib.PAYLOAD_ITEMS),
-    ['PART_R', 'PART_G', 'PART_B', 'ASM_C', 'ASM_M', 'ASM_Y', 'SCRAP']);
-  assert.deepEqual(Object.values(lib.PAYLOAD_ITEMS).map((i) => i.name),
-    ['제작품 1', '제작품 2', '제작품 3', '조립품 1', '조립품 2', '조립품 3', '불량품']);
+    [...makeable, 'SCRAP', ...makeable.map((k) => `SCRAP_${k}`)]);
+  assert.deepEqual(Object.values(lib.PAYLOAD_ITEMS).slice(0, 6).map((i) => i.name),
+    ['제작품 1', '제작품 2', '제작품 3', '조립품 1', '조립품 2', '조립품 3']);
+  assert.equal(lib.PAYLOAD_ITEMS.SCRAP_PART_R.name, '불량품 (제작품 1)');
+});
+
+t('불량품은 **어느 품종의 것인지**를 들고 있다', () => {
+  /* 한 종류로 합치면 제작품 1의 불량과 조립품 2의 불량이 같은 줄에 섞여 흘러서,
+     재작업 설비가 무엇을 고치는지 알 수가 없고 갈래로 가를 수도 없다 */
+  assert.equal(lib.scrapKindOf('PART_R'), 'SCRAP_PART_R');
+  assert.equal(lib.baseKindOf('SCRAP_PART_R'), 'PART_R');
+  /* 모르는 품종이면 갈래 없는 옛 불량품으로 떨어진다 — 터지지 않는다 */
+  assert.equal(lib.scrapKindOf('nope'), 'SCRAP');
+  assert.equal(lib.baseKindOf('SCRAP'), null);
+  assert.equal(lib.baseKindOf('PART_R'), null);
+});
+
+t('불량품은 **모양은 같고 색만 죽는다**', () => {
+  /* 불량이라고 생김새가 바뀌지는 않는다. 색이 죽어야 화면에서 바로 읽힌다 */
+  const P = lib.PAYLOAD_ITEMS;
+  assert.equal(P.SCRAP_PART_R.url, P.PART_R.url);
+  assert.notEqual(P.SCRAP_PART_R.tint, P.PART_R.tint);
+  assert.equal(P.SCRAP_ASM_C.url, P.ASM_C.url);
 });
 
 t('불량품은 **만들기로 고를 수 없다** — 나오는 것이지 만드는 것이 아니다', () => {
@@ -102,7 +123,7 @@ t('갈래는 형상으로, 종류는 색으로 갈린다', () => {
   assert.notEqual(P.PART_R.url, P.ASM_C.url);
   assert.ok(P.ASM_C.url.endsWith('Assembly.glb'));
   /* 캐시 키는 여섯 다 달라야 한다 — 같으면 색이 서로 덮어쓴다 */
-  assert.equal(new Set(Object.values(P).map((i) => i.modelKey)).size, 7);
+  assert.equal(new Set(Object.values(P).map((i) => i.modelKey)).size, 13);
   /* RGB · CMY */
   assert.deepEqual([P.PART_R.tint, P.PART_G.tint, P.PART_B.tint],
     ['#ff0000', '#00ff00', '#0000ff']);

@@ -53,10 +53,10 @@ t('**내보내면 불량품으로 쌓인다**', () => {
     cycleSec: 1, room: 50,
     pay: () => true,
     check: () => 0,                                   // 전부 불량
-    onScrap: (n) => { out += n; St.addMade('M', n, 'SCRAP'); return n; },
+    onScrap: (n) => { out += n; St.addMade('M', n, 'SCRAP_PART_R'); return n; },
   });
   assert.ok(out > 0, '불량을 안 내보냈다');
-  assert.deepEqual([...new Set(St.getMadeLots('M'))], ['SCRAP']);
+  assert.deepEqual([...new Set(St.getMadeLots('M'))], ['SCRAP_PART_R']);
 });
 
 t('**자리를 먹는다** — 안 빼내면 막힌다', () => {
@@ -104,7 +104,8 @@ const placed = [
   },
   {
     uid: 'RW', name: '재작업', itemId: 'MACHINE_2', pos: [6, 4], rot: 0, outputCount: 3, cycleSec: 3,
-    inputCap: 40, recipe: { in: [{ kind: 'SCRAP', qty: 1 }], out: 'ASM_C' },
+    /* 불량품은 **품종마다** 나온다 — 제작품 1의 불량을 먹는 재작업 설비다 */
+    inputCap: 40, recipe: { in: [{ kind: 'SCRAP_PART_R', qty: 1 }], out: 'ASM_C' },
   },
   { uid: 'SA', name: '적치대 A', itemId: 'STILLAGE', pos: [-8, 0], rot: 0, capacity: 200 },
   { uid: 'SB', name: '적치대 B', itemId: 'STILLAGE', pos: [6, -4], rot: 0, capacity: 200 },
@@ -116,7 +117,7 @@ const links = [
   },
   {
     uid: 'CB', itemId: 'CONVEYOR', from: { uid: 'P1', portId: 'PORT_OUT@Z-' }, to: { uid: 'RW' },
-    radius: 0.5, layer: 1, width: 1, kinds: ['SCRAP'],
+    radius: 0.5, layer: 1, width: 1, kinds: ['SCRAP_PART_R'],
   },
   {
     uid: 'CC', itemId: 'CONVEYOR', from: { uid: 'RW', portId: 'PORT_OUT@Z-' }, to: { uid: 'SB' },
@@ -175,7 +176,8 @@ const inspSrc = await readSrc('ui/Inspector.jsx');
 t('굴리는 쪽이 불량 처리를 넘긴다', () => {
   assert.ok(lineupSrc.includes('scrapTo: scrapToOf(p, item)'), '설비 목록이 불량 처리를 안 싣는다');
   assert.ok(simSrc.includes("m.scrapTo === SCRAP_TO.OUT"), 'sim 이 내보내기를 모른다');
-  assert.ok(simSrc.includes('SCRAP_KIND'), '불량품 종류를 안 쓴다');
+  /* 어느 품종의 불량인지까지 남긴다 — 한 종류로 합치면 갈래로 못 가른다 */
+  assert.ok(simSrc.includes('scrapKindOf(now?.out'), '불량품 종류를 안 쓴다');
 });
 
 t('**재작업과 내보내기가 겹치지 않는다**', () => {
@@ -190,4 +192,52 @@ t('화면이 불량 처리를 받고, **불량이 있을 때만** 보여 준다'
   /* 「안 빼내면 막힌다」를 안 적으면 왜 설비가 서는지 아무도 모른다 */
   assert.ok(inspSrc.includes('빼내지 않으면 출력 자리가 차서 이 설비가 막힙니다'),
     '막히는 이유를 안 말한다');
+});
+
+/* ---------- 품종마다의 불량 --------------------------------------------- */
+t('**불량이 품종마다 제 길로 간다** — 한 종류로 합치면 못 가른다', () => {
+  const two = [
+    {
+      uid: 'P1', name: '제작기', itemId: 'MACHINE_1', pos: [-12, 16], rot: 0, outputCount: 3, cycleSec: 2,
+      lotSize: 10, scrapRate: 0.3, scrapTo: 'out',
+      recipes: [{ in: [], out: 'PART_R' }, { in: [], out: 'PART_G' }],
+    },
+    { uid: 'SA', itemId: 'STILLAGE', pos: [-12, 2], rot: 0, capacity: 200 },
+    { uid: 'SB', itemId: 'STILLAGE', pos: [0, 2], rot: 0, capacity: 200 },
+    { uid: 'SG', itemId: 'STILLAGE', pos: [12, 2], rot: 0, capacity: 200 },
+  ];
+  const ways = [
+    { uid: 'CA', itemId: 'CONVEYOR', from: { uid: 'P1', portId: 'PORT_OUT@Z-' }, to: { uid: 'SA' }, radius: 0.5, layer: 0, width: 1, kinds: ['SCRAP_PART_R'] },
+    { uid: 'CB', itemId: 'CONVEYOR', from: { uid: 'P1', portId: 'PORT_OUT@Z-' }, to: { uid: 'SB' }, radius: 0.5, layer: 1, width: 1, kinds: ['SCRAP_PART_G'] },
+    { uid: 'CG', itemId: 'CONVEYOR', from: { uid: 'P1', portId: 'PORT_OUT@Z-' }, to: { uid: 'SG' }, radius: 0.5, layer: 2, width: 1, kinds: ['PART_R', 'PART_G'] },
+  ];
+  St.clearStock();
+  const w = Lu.worldOf({
+    placed: two, links: ways, carts: [], areas, walls: [], openings: [], shifts: [],
+    beltSpeed: 0.6, itemOf, specOf,
+  });
+  R.runOnce({ seconds: 600, world: w.world, flow: w.flow, pick: () => 0, rand: R.seeded(3) });
+  const tally = (uid) => {
+    const out = {};
+    for (const k of St.getLots(uid)) out[k] = (out[k] ?? 0) + 1;
+    return out;
+  };
+  const a = tally('SA'); const b = tally('SB'); const g = tally('SG');
+  assert.ok((a.SCRAP_PART_R ?? 0) > 0, `제작품 1의 불량이 안 갔다 ${JSON.stringify(a)}`);
+  assert.ok((b.SCRAP_PART_G ?? 0) > 0, `제작품 2의 불량이 안 갔다 ${JSON.stringify(b)}`);
+  assert.equal(a.SCRAP_PART_G ?? 0, 0, '두 품종의 불량이 한 길에 섞였다');
+  assert.equal(b.SCRAP_PART_R ?? 0, 0, '두 품종의 불량이 한 길에 섞였다');
+  /* 양품 길에는 불량이 한 개도 없다 */
+  assert.ok((g.PART_R ?? 0) > 0 && (g.PART_G ?? 0) > 0, `양품이 안 갔다 ${JSON.stringify(g)}`);
+  for (const k of Object.keys(g)) assert.equal(/^SCRAP/.test(k), false, '양품 길에 불량이 섞였다');
+});
+
+const inspSrc2 = await readSrc('ui/Inspector.jsx');
+t('**고르개는 안 길어진다** — 도면이 내보내는 불량품만 보탠다', () => {
+  /* 불량품이 품종마다 생기면서 종류가 일곱에서 열셋이 됐다. 전부 늘어놓으면
+     불량을 안 쓰는 도면에서도 목록이 두 배가 된다 — 그 자체로 값을 깎는다 */
+  assert.ok(inspSrc2.includes('const KIND_KEYS = Object.keys(PAYLOAD_ITEMS).filter((k) => !isScrapKind(k));'),
+    '고르개가 불량품을 다 늘어놓는다');
+  assert.ok(inspSrc2.includes('ingredientKinds(state.placed, itemOf)'), '도면을 안 보고 고르개를 만든다');
+  assert.ok(inspSrc2.includes('scrapToOf(p, item) !== SCRAP_TO.OUT'), '안 내보내는 설비의 불량까지 보탠다');
 });
