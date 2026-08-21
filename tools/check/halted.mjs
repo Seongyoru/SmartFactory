@@ -263,7 +263,7 @@ t('레일 애니메이션이 벨트의 정지를 따라간다', () => {
   assert.ok(block.includes(STOP), `ConnectorView 에 ${STOP} 이 없다`);
 });
 t('벨트 위 물건은 서는 것과 마르는 것을 따로 받는다', () => {
-  const block = cut(src, '{beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap, kinds }) => (', 'onArrive=', 'BeltItems 배선');
+  const block = cut(src, '{beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap, kinds, accumulate }) => (', 'onArrive=', 'BeltItems 배선');
   assert.ok(block.includes(`running={state.running && ${STOP}}`), 'running 배선이 다르다');
   assert.ok(block.includes('feeding={!halted.dry.has(link.uid)}'), 'feeding 배선이 없다');
   /* 간격은 **자동 계산된 것**을 넘겨야 한다 — 설비에 저장된 옛 값이 아니라 */

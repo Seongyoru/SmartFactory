@@ -6,7 +6,7 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, FileText, GitCompare, RotateCcw, RotateCw, Table2, Trash2, Wand2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
-import { MAX_LAYER, beltKinds, layerLift, linkPath, portsOf } from '../core/link.js';
+import { MAX_LAYER, beltKinds, isAccumulating, layerLift, linkPath, portsOf } from '../core/link.js';
 import {
   CART_MARGIN, STATION_ROLE, cartPath, cartStations, fleetFits, haulPerMinute, isLoadStation,
   idleLoads, pickSet, roleOfStation, stationStyle,
@@ -1304,6 +1304,45 @@ function LinkPanel({ link }) {
         />
         <Row label="라이브러리 항목">{item?.name ?? link.itemId}</Row>
         <Row label="연장 방식">{item?.render === 'tube' ? '튜브 (절차적)' : '모델 반복'}</Row>
+      </Section>
+
+      {/**
+        * 축적형 — **막혀도 안 서고 끝에 쌓인다.**
+        * ---------------------------------------------------------------------
+        *  보통 벨트는 종점이 막히면 통째로 선다. 실제 라인에는 그렇지 않은 것이
+        *  많다 — 롤러가 물건 밑에서 계속 돌고 물건은 끝에서부터 밀려 쌓인다.
+        *  그동안 **상류는 계속 실을 수 있어서** 벨트 자체가 버퍼가 된다.
+        *
+        *  기본은 아니다. 이미 그린 도면이 갑자기 버퍼를 얻으면 처리량이 저절로
+        *  달라져서, 「내가 안 바꿨는데 값이 변했다」가 된다.
+        */}
+      <Section title="흐름">
+        <label className="flex items-center justify-between gap-2 py-1 text-[11px] text-ink2">
+          <span>축적형 (막혀도 안 섬)</span>
+          <input
+            type="checkbox"
+            checked={isAccumulating(link)}
+            onChange={(e) => dispatch({ type: 'UPDATE_LINK', uid: link.uid, patch: { accumulate: e.target.checked } })}
+            className="h-3.5 w-3.5 accent-sky-500"
+          />
+        </label>
+        <p className="mt-1 rounded bg-raise px-2 py-1.5 text-[10.5px] leading-relaxed text-ink4 ring-1 ring-edge">
+          {isAccumulating(link) ? (
+            <>
+              종점이 막혀도 <b className="text-ink2">안 섭니다</b> — 물건이 끝에서부터 쌓이고,
+              그동안 앞 설비는 계속 실을 수 있습니다. <b className="text-ink2">벨트가 버퍼</b>가
+              되는 셈입니다.
+              <br />다 쌓이면(벨트 길이만큼) 그때 섭니다.
+              <br /><b className="text-amber-600">병목을 올려 주지는 않습니다</b> — 앞 설비가 덜 설
+              뿐이고, 그만큼 <b className="text-ink2">재공이 늡니다.</b>
+            </>
+          ) : (
+            <>
+              종점이 막히면 <b className="text-ink2">벨트 전체가 섭니다</b> — 앞 설비도 바로 막힙니다.
+              롤러가 물건 밑에서 계속 도는 벨트라면 켜 두세요.
+            </>
+          )}
+        </p>
       </Section>
 
       <DivertSection link={link} />

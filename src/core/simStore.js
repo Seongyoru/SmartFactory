@@ -460,6 +460,33 @@ function takeRun(uid, at, n) {
   return take;
 }
 
+/**
+ * 벨트가 종점에 **내려놓는다** — 받아 준 만큼만.
+ * ---------------------------------------------------------------------------
+ *  화면과 헤드리스가 각자 적으면 축적 규칙이 두 벌이 된다. 여기 한 곳에 둔다.
+ *
+ *  @param sink  { uid, cap, slots } — 적치대면 slots 가 null 이다
+ *  @param byKind { [종류]: 개수 }
+ *  @returns { [종류]: 못 내린 개수 } · 다 내렸으면 null
+ */
+export function dropAtSink(sink, byKind) {
+  if (!sink || !byKind) return null;
+  let left = null;
+  for (const kind of Object.keys(byKind)) {
+    const want = Math.max(0, Math.round(byKind[kind]));
+    if (!want) continue;
+    let moved = 0;
+    if (sink.slots) {
+      const list = Array.from({ length: want }, () => kind);
+      moved = addLotsShared(sink.uid, list, (k) => sink.slots[k] ?? 0).moved;
+    } else {
+      moved = addStock(sink.uid, want, sink.cap, kind);
+    }
+    if (moved < want) { left = left ?? {}; left[kind] = want - moved; }
+  }
+  return left;
+}
+
 export function clearMade(uid = null) {
   if (uid == null) {
     if (!Object.keys(made).length) return;

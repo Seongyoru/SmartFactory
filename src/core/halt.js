@@ -44,6 +44,8 @@ import { isShelf, isStillage } from '../data/library.js';
  *  @param d.itemOf    (itemId) => 라이브러리 항목
  *  @param d.downMap   지금 고장 나 있는 설비 { uid: 남은 수리 시간 }
  *  @param d.crew      `assignCrew` 의 결과 — `unmanned` 를 읽는다
+ *  @param d.fullOf    (링크 uid) => 축적형 벨트가 **다 찼는가**. 없으면 안 찬 것으로
+ *                     본다 — 그러면 축적형 벨트는 영영 안 선다
  *  @returns { links, dry, equips, jammed, starved, unmanned }
  */
 export function haltState(d = {}) {
@@ -105,6 +107,17 @@ export function haltState(d = {}) {
       const have = countKinds(getLots(f.sink.uid));
       if (kinds.some((k) => (f.sink.slots[k] ?? 0) - (have[k] ?? 0) > 0)) continue;
     } else if (getStock(f.sink.uid) < f.sink.cap) continue;
+
+    /**
+     * **축적형 벨트는 종점이 막혀도 안 선다** — 끝에 쌓으며 계속 돈다.
+     * -------------------------------------------------------------------------
+     *  다 쌓이고 나서야 선다. 그 전에 세우면 축적의 뜻이 통째로 사라진다 —
+     *  버퍼가 되라고 만든 벨트가 예전처럼 상류를 바로 막아 버린다.
+     *
+     *  쌓인 양은 **굴리는 쪽의 상태**라 도면에서 못 읽는다. 부르는 쪽이 알려
+     *  준다(`fullOf`) — 안 주면 예전처럼 바로 선다.
+     */
+    if (f.accumulate && !(d.fullOf?.(f.link.uid) ?? false)) continue;
     links.add(f.link.uid);
     equips.add(f.owner.uid);
     jammed.add(f.owner.uid);
@@ -178,6 +191,14 @@ export function haltState(d = {}) {
       if (links.has(f.link.uid)) continue;
       const dest = f.link.to?.uid;
       if (!dest || !jammed.has(dest)) continue;
+      /**
+       * **축적형 벨트는 여기서도 안 선다** — 다 쌓일 때까지.
+       * -----------------------------------------------------------------------
+       *  ①(종점이 찼다)에만 넣었더니 **하류가 고장 났을 때는 그대로 섰다.**
+       *  그게 버퍼가 가장 필요한 자리인데 — 앞 설비가 고장 시간을 고스란히
+       *  같이 서 버렸다. 실제로 재 보고서야 드러났다(막힌 시간이 안 줄었다).
+       */
+      if (f.accumulate && !(d.fullOf?.(f.link.uid) ?? false)) continue;
       links.add(f.link.uid);
       equips.add(f.owner.uid);
       jammed.add(f.owner.uid);

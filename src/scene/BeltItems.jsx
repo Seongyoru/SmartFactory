@@ -25,7 +25,7 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { simStep } from '../core/clock.js';
-import { beltCount, beltHas, beltOffset, makeBelt } from '../core/belt.js';
+import { beltCount, beltHas, beltHeld, beltOffset, makeBelt } from '../core/belt.js';
 import { runBelt } from '../core/sim.js';
 import { PAYLOAD_ITEM } from '../data/library.js';
 
@@ -99,8 +99,13 @@ export default function BeltItems({
         /* 옛 도면(품종 하나)에서는 줄의 이름표를 쓴다 */
         kind: payload?.id ?? null,
       }, simStep(dt));
-      /* **종류별로** 넘긴다 — 같은 벨트 위에 두 품종이 앞뒤로 흐른다 */
-      if (got.n > 0) arriveRef.current?.(got.byKind);
+      /**
+       * **종류별로** 넘긴다 — 같은 벨트 위에 두 품종이 앞뒤로 흐른다.
+       *  벨트 상태도 같이 준다 — 축적형 벨트는 못 내린 것을 **끝에 쌓아** 두고
+       *  다음 프레임에 먼저 내린다(belt.js 의 held). 쌓아 둔 것이 있으면
+       *  이번에 도착한 것이 없어도 불러야 한다.
+       */
+      if (got.n > 0 || beltHeld(belt)) arriveRef.current?.(got.byKind ?? {}, belt);
     }
 
     const head = beltOffset(belt, step);

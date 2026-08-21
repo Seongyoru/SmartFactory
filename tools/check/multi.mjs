@@ -228,9 +228,13 @@ t('덩어리 규칙은 **한 곳에** 있다 — 화면과 헤드리스가 같�
   for (const src of [repSrc, sceneSrc]) assert.ok(src.includes('takeBundles('), '덩어리 규칙을 안 쓴다');
   assert.equal(/Math\.floor\(getMade\(/.test(repSrc), false, '옛 규칙이 남아 있다');
 });
+const storeArrive = await readSrc('core/simStore.js');
 t('도착 처리도 **종류마다** 한다', () => {
+  /* 내리는 규칙은 `simStore.dropAtSink` 한 곳에 있고 두 길이 그것을 부른다 —
+     축적형 벨트가 생기면서 「못 내린 것」까지 다뤄야 해서 한 자리로 모았다 */
+  assert.ok(/for \(const kind of Object\.keys\(byKind\)\)/.test(storeArrive), '종류를 안 가른다');
   for (const src of [repSrc, sceneSrc]) {
-    assert.ok(/for \(const kind of Object\.keys\(/.test(src), '종류를 안 가른다');
+    assert.ok(src.includes('dropAtSink('), '내리는 규칙을 안 쓴다');
   }
 });
 

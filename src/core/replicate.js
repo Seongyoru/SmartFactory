@@ -33,8 +33,8 @@
 import { isClosedAt } from './crew.js';
 import { orderInfoOf } from './orders.js';
 import { newCartUnit, resetRun, runBelt, runCart, runMachines } from './sim.js';
-import { beltCount, makeBelt } from './belt.js';
-import { addLotsShared, addStock, arrivedOf, getShipped, takeBundles } from './simStore.js';
+import { beltCount, beltFull, beltHeld, holdOnBelt, makeBelt, takeHeld } from './belt.js';
+import { arrivedOf, dropAtSink, getShipped, takeBundles } from './simStore.js';
 import { haltState } from './halt.js';
 import { getRan, setWarmup } from './metrics.js';
 
@@ -215,6 +215,15 @@ export function lineFlow(d = {}) {
     };
   });
 
+  /**
+   * 축적형 벨트가 **다 찼나** — 정지 판정이 이것을 본다(`haltState` 의 fullOf).
+   *  쌓인 양은 굴리는 쪽만 아는 값이라, 도면에서 만든 흐름에는 안 들어 있다.
+   */
+  const fullOf = (uid) => {
+    const b = belts.find((x) => x.link?.uid === uid);
+    return !!b?.state && beltFull(b.state);
+  };
+
   const reset = () => {
     for (const b of belts) b.state = makeBelt(beltCount(b.path?.length ?? 0, b.step));
     for (const f of fleets) {
@@ -247,18 +256,30 @@ export function lineFlow(d = {}) {
         /* 옛 도면(품종 하나)에서는 줄의 이름표를 쓴다 */
         kind: b.outKind,
       }, dt);
-      if (got.n > 0 && b.sink) {
-        /* **종류마다 따로 쌓는다.** 같은 벨트 위에 두 품종이 앞뒤로 흐르므로
-           줄에 이름표 하나만 붙이면 엉뚱한 종류로 쌓인다. */
-        for (const kind of Object.keys(got.byKind)) {
-          /* 불량은 **만들 때** 이미 걸렀다(sim 의 runMachines) — 벨트에는
-             양품만 실린다. 여기서 또 거르면 같은 불량률을 두 번 문다. */
-          const good = got.byKind[kind];
-          if (good <= 0) continue;
-          if (b.sink.slots) {
-            addLotsShared(b.sink.uid, Array.from({ length: good }, () => kind), (k) => b.sink.slots[k] ?? 0);
-          } else {
-            addStock(b.sink.uid, good, b.sink.cap, kind);
+      /**
+       * 종점에 내린다 — **쌓아 둔 것이 먼저다.**
+       * ---------------------------------------------------------------------
+       *  축적형 벨트는 막혀도 안 서고 끝에 쌓는다. 자리가 나면 **먼저 쌓인
+       *  것부터** 내려가야 순서가 안 뒤집힌다.
+       *
+       *  종류마다 따로 쌓는 것은 그대로다 — 같은 벨트에 두 품종이 앞뒤로
+       *  흐르므로 줄에 이름표 하나만 붙이면 엉뚱한 종류로 쌓인다.
+       *
+       *  불량은 **만들 때** 이미 걸렀다(sim 의 runMachines) — 벨트에는 양품만
+       *  실린다. 여기서 또 거르면 같은 불량률을 두 번 문다.
+       */
+      if (b.sink) {
+        if (beltHeld(b.state)) {
+          const back = takeHeld(b.state, beltHeld(b.state));
+          const left = dropAtSink(b.sink, back);
+          for (const k of Object.keys(left ?? {})) holdOnBelt(b.state, k, left[k]);
+        }
+        if (got.n > 0) {
+          const left = dropAtSink(b.sink, got.byKind);
+          /* 못 내린 것 — 축적형이면 끝에 쌓고, 아니면 그냥 사라진다(그 벨트는
+             애초에 종점이 막히면 서 있으므로 여기까지 안 온다) */
+          if (left && b.accumulate) {
+            for (const k of Object.keys(left)) holdOnBelt(b.state, k, left[k]);
           }
         }
       }
@@ -278,7 +299,7 @@ export function lineFlow(d = {}) {
     }
   };
 
-  return { reset, move };
+  return { reset, move, fullOf };
 }
 
 
@@ -305,6 +326,8 @@ export function lineWorld(d = {}) {
       itemOf: d.itemOf,
       downMap: d.downMap ? d.downMap() : {},
       crew: d.crew,
+      /* 축적형 벨트가 다 찼나 — 옮기는 쪽(`lineFlow`)만 아는 값이다 */
+      fullOf: d.fullOf,
     });
     return {
       machines: d.machines,

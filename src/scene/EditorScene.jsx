@@ -87,7 +87,8 @@ import { cartPath, cartStations } from '../core/cart.js';
 import { shelfBBox, shelfCapacity } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import {
-  addLotsShared, addMade, addStock, arrivedOf, getLots, getMade, getStock, shippedTotal, takeEach, takeMade,
+  addLotsShared, addMade, addStock, arrivedOf, dropAtSink, getLots, getMade, getStock, shippedTotal,
+  takeEach, takeMade,
   useAllStock, useShipped, takeBundles,
 } from '../core/simStore.js';
 import { cycleOf, outputCapFor, runMachine, shapeOf as varShapeOf, spacingFor, varOf } from '../core/process.js';
@@ -96,6 +97,7 @@ import { runMachines } from '../core/sim.js';
 import { haltState } from '../core/halt.js';
 import { orderInfoOf } from '../core/orders.js';
 import { beltFlowsOf, machinesOf } from '../core/lineup.js';
+import { beltHeld, holdOnBelt, takeHeld } from '../core/belt.js';
 import { accumulate, plannedStop, setWarmup } from '../core/metrics.js';
 import { warmupOf } from '../core/warmup.js';
 import { assignCrew, crewOf, crewRows, isWorkable, shiftAt } from '../core/crew.js';
@@ -2292,7 +2294,7 @@ function SceneContent() {
       })}
 
       {/* 벨트 위를 흐르는 반송물 — 종점이 가득 차면 서고, 재료가 떨어지면 마른다 */}
-      {beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap, kinds }) => (
+      {beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap, kinds, accumulate }) => (
         <BeltItems
           key={`f${link.uid}`}
           path={path}
@@ -2329,21 +2331,24 @@ function SceneContent() {
             return takeBundles(owner.uid, per, n, kinds);
           }}
           /* 종점에 닿은 것이 곧 재고가 된다 — **종류마다 따로** */
-          onArrive={sink ? (byKind) => {
-            /* 같은 벨트 위에 두 품종이 앞뒤로 흐른다. 줄에 이름표 하나만
-               붙이면 도착한 것이 엉뚱한 종류로 쌓인다. */
-            for (const kind of Object.keys(byKind ?? {})) {
-              /* 불량은 **만들 때** 이미 걸렀다(sim 의 runMachines) — 벨트에는
-                 양품만 실린다. 여기서 또 거르면 같은 불량률을 두 번 문다. */
-              const good = byKind[kind];
-              if (good <= 0) continue;
-              /* 재료를 먹는 설비는 **그 종류 몫**까지만 받는다. 안 쓰는 종류면
-                 몫이 0 이라 한 개도 안 들어간다(위 sink 주석 참고). */
-              if (sink.slots) {
-                addLotsShared(sink.uid, Array.from({ length: good }, () => kind), (k) => sink.slots[k] ?? 0);
-              } else {
-                addStock(sink.uid, good, sink.cap, kind);
-              }
+          /**
+           * 종점에 내린다 — 규칙은 `simStore.dropAtSink` **한 곳**에 있다.
+           * -------------------------------------------------------------------
+           *  종류마다 따로 쌓고(같은 벨트에 두 품종이 흐른다), 재료를 먹는
+           *  설비는 그 종류 몫까지만 받는다. 불량은 만들 때 이미 걸렀다.
+           *
+           *  **축적형 벨트는 못 내린 것을 끝에 쌓는다** — 자리가 나면 쌓아 둔
+           *  것이 먼저 내려가야 순서가 안 뒤집힌다(BeltItems 가 매 프레임 부른다).
+           */
+          onArrive={sink ? (byKind, state) => {
+            if (state && beltHeld(state)) {
+              const back = takeHeld(state, beltHeld(state));
+              const left = dropAtSink(sink, back);
+              for (const k of Object.keys(left ?? {})) holdOnBelt(state, k, left[k]);
+            }
+            const left = dropAtSink(sink, byKind);
+            if (left && accumulate) {
+              for (const k of Object.keys(left)) holdOnBelt(state, k, left[k]);
             }
           } : null}
         />

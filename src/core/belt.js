@@ -70,6 +70,22 @@ export function makeBelt(count) {
      *  적치대에 쌓인다 — 벨트가 길수록 더 어긋난다(실린 시각과 닿는 시각의 차).
      */
     kinds: new Array(n).fill(null),
+    /**
+     * **끝에 쌓인 것** — 축적형 벨트에서만 자란다 (`link.accumulate`).
+     * -------------------------------------------------------------------------
+     *  보통 벨트는 종점이 막히면 **통째로 선다**(비축적). 실제 라인에는 그렇지
+     *  않은 것이 많다 — 롤러가 물건 밑에서 계속 돌고 물건은 끝에서부터 밀려
+     *  쌓인다. 그동안 상류는 **계속 실을 수 있다.** 그래서 축적형 벨트는
+     *  그 자체가 버퍼다.
+     *
+     *  이 벨트 모델은 **칸이 고정된 고리**라 물건마다 자리가 없다 — 「앞차에
+     *  막혀 선다」를 그릴 수가 없다. 대신 **끝에 쌓인 줄**로 센다. 쌓을 수
+     *  있는 만큼(칸 수)까지 받고, 다 차면 그때 벨트가 선다.
+     *
+     *  종류를 그대로 들고 있어야 한다 — 갈래를 지나온 물건이 섞여 있고,
+     *  적치대는 종류마다 자리가 다르다.
+     */
+    held: [],
     /** 칸마다 **몇 개** 실려 있는가 — 품종이 바뀌는 자리의 짧은 덩어리 때문 */
     counts: new Uint8Array(n),
     /** 이번 프레임에 끝에 닿은 것들 — `{ [종류]: 개수 }` */
@@ -177,6 +193,37 @@ export function advanceBelt(st, { d, step, length, feeding = true, spawn = null,
 
   st.out = out;
   return arrived;
+}
+
+/** 끝에 쌓여 있는 개수 — 축적형 벨트가 버퍼 노릇을 하는 만큼이다 */
+export const beltHeld = (st) => st?.held?.length ?? 0;
+
+/** 더 쌓을 수 있나 — 칸 수만큼 쌓으면 벨트가 다 찬 것이다 */
+export const beltFull = (st) => beltHeld(st) >= (st?.fill?.length ?? 0);
+
+/**
+ * 쌓인 줄에 넣는다 — **벨트 길이만큼만.**
+ *  넘치는 것은 안 받는다. 받아 버리면 벨트가 무한 버퍼가 되어, 종점이 막혀도
+ *  라인이 영영 안 서는 거짓 그림이 된다.
+ *  @returns 실제로 받은 개수
+ */
+export function holdOnBelt(st, kind, n) {
+  const room = Math.max(0, (st?.fill?.length ?? 0) - beltHeld(st));
+  const take = Math.max(0, Math.min(Math.round(n) || 0, room));
+  for (let i = 0; i < take; i++) st.held.push(kind);
+  return take;
+}
+
+/**
+ * 쌓인 줄에서 **앞에서부터** 꺼낸다 — 먼저 쌓인 것이 먼저 내려간다.
+ *  @returns { [종류]: 개수 } · 없으면 null
+ */
+export function takeHeld(st, n) {
+  const take = Math.max(0, Math.min(Math.round(n) || 0, beltHeld(st)));
+  if (!take) return null;
+  const out = {};
+  for (const k of st.held.splice(0, take)) out[k] = (out[k] ?? 0) + 1;
+  return out;
 }
 
 /** 줄의 앞머리 위치 — 칸 k 는 여기서 k×간격 만큼 더 간 자리에 있다 */

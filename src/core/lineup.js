@@ -29,7 +29,7 @@ import {
 } from './process.js';
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
-import { beltKinds, linkPath } from './link.js';
+import { beltKinds, isAccumulating, linkPath } from './link.js';
 import { warmupOf } from './warmup.js';
 import { lineBalance } from './balance.js';
 import { lineFlow, lineWorld } from './replicate.js';
@@ -123,6 +123,8 @@ export function beltFlowsOf(d = {}) {
           const picked = beltKinds(link).filter((k) => own.includes(k));
           return {
             link, path, owner, sink, recipe, outKind, layers, speed, gap,
+            /** 막혀도 안 서고 끝에 쌓이는 벨트인가 (link.js 의 isAccumulating) */
+            accumulate: isAccumulating(link),
             /** null = 아무거나 · [종류…] = 이것만 */
             kinds: picked.length ? picked : null,
             /** 이 설비 산출 중 이 벨트가 맡은 몫 — 천장이 쓴다 */
