@@ -264,3 +264,24 @@ t('**보통 벨트에서도 안 사라진다** — 사라지던 자리가 거기
   assert.ok(made > 50, `만든 것이 ${made}개뿐이다`);
   assert.ok(made - where <= 2, `물건이 ${made - where}개 사라졌다 (만든 것 ${made} · 찾은 것 ${where})`);
 });
+
+t('**선 벨트도 쌓인 것은 내린다** — 안 그러면 영영 안 비워진다', () => {
+  /* 벨트가 서는 이유가 「종점이 찼다」만은 아니다. 하류가 **고장 나면** 자리가
+     남아 있어도 상류 벨트가 선다(정지 판정 ②). 그때 쌓인 것을 안 내리면
+     자리가 났는데도 아무도 안 내려 벨트가 영영 안 비워진다. */
+  St.clearStock();
+  const flows = [{
+    link: { uid: 'C1' }, path: { length: 6 }, owner: { uid: 'P1', outputCount: 3 },
+    sink: { uid: 'S1', cap: 50, slots: null },      // 자리는 넉넉하다
+    outKind: 'PART_R', layers: 3, speed: 0.6, gap: 2, accumulate: true,
+  }];
+  const flow = R.lineFlow({ beltFlows: flows, cartPaths: [], floor: null, gates: [] });
+  flow.reset();
+  const st = flow.belts[0].state;
+  B.holdOnBelt(st, 'PART_R', 4);
+  assert.equal(B.beltHeld(st), 4);
+  /* 벨트가 서 있다고 알린다 — 그래도 쌓인 것은 내려가야 한다 */
+  flow.move(1, { links: new Set(['C1']) });
+  assert.equal(B.beltHeld(st), 0, '선 벨트가 쌓인 것을 안 내린다');
+  assert.equal(St.getLots('S1').length, 4, '내린 것이 종점에 안 쌓였다');
+});
