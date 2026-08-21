@@ -297,18 +297,26 @@ const MAKEABLE = {
  *  `PAYLOAD_ITEMS` 를 다 만든 뒤에 부르면 **TDZ 로 터진다**(초기화 중인 것을
  *  읽게 된다). 그래서 만들 수 있는 것들(`MAKEABLE`)을 먼저 세우고 여기서 판다.
  */
-const dull = (hex) => {
+/**
+ * 색을 죽인다 — 회색 쪽으로 절반 당긴다.
+ *  **`tint` 에서 판다.** 만들어진 항목에는 `rgb` 가 안 남아 있다(`payload` 가
+ *  `color` 로 바꿔 넣는다) — 그걸 읽으려다 불량품 여섯이 **전부 같은 색**이
+ *  될 뻔했다. 되돌리기 테스트가 그 자리에서 터져 드러났다.
+ */
+const dullHex = (hex) => {
   const n = parseInt(String(hex).slice(1), 16);
   const mix = (v) => Math.round(v * 0.45 + 0x7a * 0.55);
   const r = mix((n >> 16) & 255), g = mix((n >> 8) & 255), b = mix(n & 255);
-  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  return { hex: `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`, rgb: [r / 255, g / 255, b / 255] };
 };
-const dullRgb = (rgb) => (rgb ?? [1, 1, 1]).map((v) => v * 0.45 + 0.48 * 0.55);
 
 const SCRAP_ITEMS = Object.fromEntries(
   Object.entries(MAKEABLE).map(([key, it]) => {
     const k = `SCRAP_${key}`;
-    return [k, payload(k, `불량품 (${it.name})`, FAMILY.SCRAP, it.url, dull(it.tint), dullRgb(it.rgb))];
+    const c = dullHex(it.tint);
+    /* `shade` 는 0/1 깃발을 받아 d1/00 으로 찍는다 — 죽인 색을 넣으면 세 칸이
+       다 켜져서 **여섯이 전부 같은 회색**이 된다. 견본 색은 그냥 넣어 준다. */
+    return [k, { ...payload(k, `불량품 (${it.name})`, FAMILY.SCRAP, it.url, c.hex, c.rgb), color: c.hex }];
   }),
 );
 

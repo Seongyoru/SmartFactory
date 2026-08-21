@@ -310,3 +310,13 @@ t('굶음 → 재료 도착 → 생산 → 다시 굶음', () => {
   assert.equal(starved(), true);                           // 다시 굶는다
 });
 
+
+t('불량품 여섯이 **서로 다른 색**이다', () => {
+  /* `payload` 가 rgb 를 color 로 바꿔 넣어서 항목에는 rgb 가 안 남는다. 그걸
+     읽으려다 불량품 여섯이 전부 같은 색이 될 뻔했다 — tint 에서 판다. */
+  const P = lib.PAYLOAD_ITEMS;
+  const scraps = Object.keys(P).filter((k) => /^SCRAP_/.test(k));
+  assert.equal(scraps.length, 6);
+  assert.equal(new Set(scraps.map((k) => P[k].tint)).size, 6, '불량품들이 같은 색이다');
+  assert.equal(new Set(scraps.map((k) => JSON.stringify(P[k].color))).size, 6, '3D 색이 같다');
+});
