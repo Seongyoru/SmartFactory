@@ -3,7 +3,10 @@
 작업 위치: `C:\Users\bsy\Desktop\Claude\Smart_Factory`
 실행: `npm run dev` (포트 5174, `.claude/launch.json` 의 `smart-factory`)
 검사: `npm test` — 868건, 의존성 없이 3초. **손대기 전에 한 번 돌리고 시작할 것**
-배포: Vercel (`smart-factory-test.vercel.app`) · 공유 저장소는 Vercel Blob(icn1·Public)
+배포: GitHub Pages (`.github/workflows/pages.yml` — main 에 푸시하면 자동)
+공유 서버(`api/share.js`)는 **꺼져 있다.** 정적 호스팅에는 서버 함수가 없으므로
+`SHARE_OFF` 로 갈라져 「내보내기/불러오기」로 안내한다. 서버가 있는 곳에 올리면
+그날 바로 살아난다 — 코드는 그대로 두었다.
 
 ---
 

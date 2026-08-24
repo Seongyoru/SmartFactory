@@ -57,7 +57,7 @@ async function complain(res) {
   /* `npm run dev` 에는 서버 함수가 아예 없다. 「404」 만 보여 주면 무엇을 해야
      하는지 알 길이 없으므로, 여기서만 그 사정을 대신 말한다. */
   if (res.status === 404 && !body?.error) {
-    const err = new Error('이 주소에는 공유 서버가 없습니다 — 배포된 곳(Vercel)에서 쓸 수 있습니다');
+    const err = new Error('이 주소에는 공유 서버가 없습니다 — 도면은 「내보내기」로 파일을 주고받으세요');
     err.code = SHARE_OFF;
     return err;
   }

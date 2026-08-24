@@ -32,6 +32,7 @@ await import('./orders.mjs');
 await import('./report.mjs');
 await import('./cost.mjs');
 await import('./share.mjs');
+await import('./base.mjs');
 await import('./balance.mjs');
 await import('./improve.mjs');
 await import('./planreport.mjs');

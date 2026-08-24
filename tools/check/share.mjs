@@ -157,7 +157,7 @@ const noServer = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조�
 
 t('서버 자체가 없을 때도 **무엇을 해야 하는지** 말한다', () => {
   assert.equal(noServer.code, S.SHARE_OFF);
-  assert.match(noServer.message, /배포된 곳/);
+  assert.match(noServer.message, /내보내기/);
 });
 
 /* ---------- 올린 것이 **목록에 남는다** ----------------------------------- */

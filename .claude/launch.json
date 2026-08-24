@@ -7,6 +7,12 @@
       "runtimeArgs": ["run", "dev"],
       "port": 5174,
       "autoPort": true
+    },
+    {
+      "name": "pages-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "preview", "--base", "/SmartFactory/", "--port", "4173"],
+      "port": 4173
     }
   ]
 }

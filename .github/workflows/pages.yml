@@ -1,0 +1,60 @@
+# =============================================================================
+#  main 에 푸시하면 GitHub Pages 로 배포한다
+# =============================================================================
+#  검사를 먼저 돌리고 그것이 통과할 때만 올린다. 깨진 것을 올려 두고 나중에
+#  발견하는 쪽이 배포가 늦는 쪽보다 나쁘다.
+#
+#  처음 한 번은 저장소 Settings → Pages → Source 를 "GitHub Actions" 로
+#  바꿔 주어야 한다. 그 전까지는 deploy 단계가 권한 없다고 멈춘다.
+# =============================================================================
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 한 번에 하나만. 연달아 푸시하면 앞의 것은 접는다.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # 검사 1000여 건. 여기서 걸리면 배포하지 않는다.
+      - run: npm test
+
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -20,6 +20,27 @@ import { analyzeConnector, analyzeModel } from './ports.js';
 
 const loader = new GLTFLoader();
 
+/**
+ * 앱이 놓인 자리를 앞에 붙인다.
+ * ---------------------------------------------------------------------------
+ *  라이브러리의 모델 주소는 `/models/Machine_1.glb` 처럼 **뿌리에서** 시작한다.
+ *  앱이 뿌리에 있으면 맞지만 `…/SmartFactory/` 같은 하위 경로에 올리면 뿌리로
+ *  새어 나가 전부 404 가 된다 — 설비 모델이 하나도 안 뜬다.
+ *
+ *  뿌리에서 시작하는 것만 손댄다. 올린 파일의 `blob:`, 캐시 열쇠로 쓰는 이름은
+ *  주소가 아니므로 그대로 둔다.
+ *
+ *  `import.meta.env` 는 Vite 가 채워 준다. 검사는 Node 로 곧장 부르므로 그것이
+ *  없다 — 그때는 `/` 로 두어 지금까지와 똑같이 동작한다.
+ */
+export const withBase = (base, p) =>
+  (typeof p === 'string' && p.startsWith('/')
+    ? String(base ?? '/').replace(/\/$/, '') + p
+    : p);
+
+const BASE = import.meta.env?.BASE_URL ?? '/';
+const atBase = (p) => withBase(BASE, p);
+
 /** key → { status, spec, error, promise } */
 const cache = new Map();
 const listeners = new Set();
@@ -309,7 +330,7 @@ export function loadModel(key, { url = null, buffer = null, axis = null, merge =
       reject(e);
     };
     if (buffer) loader.parse(buffer, '', onDone, onErr);
-    else loader.load(url ?? key, onDone, undefined, onErr);
+    else loader.load(atBase(url ?? key), onDone, undefined, onErr);
   });
   entry.promise = promise;
   cache.set(key, entry);
