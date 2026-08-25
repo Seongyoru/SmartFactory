@@ -17,6 +17,7 @@ import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
 import { DEFAULT_SHIFT, normalizeShifts } from './crew.js';
 import { normalizeOrders } from './orders.js';
 import { nextMeasure } from './measure.js';
+import { docFromPlan, isEmptyDoc } from './cad.js';
 import { DEFAULT_RATES, normalizeRates } from './cost.js';
 import {
   OPENING_DEFAULTS,
@@ -796,6 +797,43 @@ function reducer(state, action) {
           },
         ],
         selected: { kind: 'opening', uid },
+      };
+    }
+
+    /**
+     * CAD 도면을 통째로 얹는다 (`cad.js` 의 planOf 결과).
+     * -----------------------------------------------------------------------
+     *  **덮어쓰지 않고 더한다.** 이미 그려 둔 것을 지우는 쪽이 편해 보이지만,
+     *  잘못 고른 레이어로 한 번 반입하면 그때까지의 작업이 사라진다. 더하기만
+     *  하면 Ctrl+Z 한 번으로 없던 일이 된다 (withHistory 가 doc 이 바뀐 것을
+     *  보고 한 칸으로 센다 — coalesceTag 에 안 넣었으므로 묶이지 않는다).
+     *
+     *  `marks`(설비 자리 표시)는 **안 받는다.** 도면의 블록 이름이 이 앱의
+     *  설비와 같을 리 없어서, 짐작으로 놓으면 틀린 설비가 놓인다. 잘못 놓인
+     *  설비는 안 놓인 것보다 나쁘다 — 이름과 자리는 대화상자가 알려 준다.
+     */
+    case 'IMPORT_CAD': {
+      if (!action.plan) return state;
+      const made = docFromPlan(action.plan, {
+        seq: state.seq,
+        build: state.build,
+        counts: {
+          walls: state.walls.length,
+          areas: state.areas.length,
+          pillars: state.pillars.length,
+          openings: state.openings.length,
+        },
+      });
+      if (isEmptyDoc(made)) return { ...state, hint: '가져올 것이 없습니다 — 레이어를 골라 주세요' };
+      return {
+        ...state,
+        seq: made.seq,
+        walls: [...state.walls, ...made.walls],
+        areas: [...state.areas, ...made.areas],
+        pillars: [...state.pillars, ...made.pillars],
+        openings: [...state.openings, ...made.openings],
+        selected: null,
+        hint: '도면을 얹었습니다 — 되돌리기(Ctrl+Z) 한 번으로 취소됩니다',
       };
     }
 

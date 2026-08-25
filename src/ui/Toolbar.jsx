@@ -9,6 +9,7 @@ import {
   Eye,
   EyeOff,
   GitCompare,
+  DraftingCompass,
   GraduationCap,
   Copy,
   Grid3x3,
@@ -40,6 +41,7 @@ import { layoutSummary, layoutThumbSVG } from '../core/thumb.js';
 import { layoutInfo } from '../core/layoutInfo.js';
 import { PAYLOAD_ITEMS } from '../data/library.js';
 import { Btn, IconBtn } from './common.jsx';
+import CadDialog from './CadDialog.jsx';
 
 const kb = (n) => (n > 0 ? `${(n / 1024).toFixed(1)} KB` : '');
 const when = (at) => {
@@ -469,6 +471,7 @@ export default function Toolbar() {
   const simSpeed = useSimSpeed();
   const elapsed = useElapsed();
   const fileRef = useRef(null);
+  const [cadOpen, setCadOpen] = useState(false);
 
   const setView = (view) => dispatch({ type: 'SET', patch: { view } });
   const setTool = (tool) => dispatch({ type: 'SET_TOOL', tool });
@@ -722,6 +725,15 @@ export default function Toolbar() {
         <Upload size={13} /> 불러오기
       </Btn>
       {/* 저장소에 담아 둔 공용 도면 — 담긴 것이 없으면 버튼도 안 나온다 */}
+      <Btn onClick={() => setCadOpen(true)} title="CAD 도면(DXF)에서 벽·바닥·기둥을 가져옵니다">
+        <DraftingCompass size={13} /> CAD 반입
+      </Btn>
+      {cadOpen && (
+        <CadDialog
+          onClose={() => setCadOpen(false)}
+          onImport={(plan) => dispatch({ type: 'IMPORT_CAD', plan })}
+        />
+      )}
       <GalleryButton
         onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })}
         onExport={() => downloadJSON(layoutSnapshot(state), `layout-${new Date().toISOString().slice(0, 10)}.json`)}
