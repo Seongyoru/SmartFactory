@@ -194,6 +194,11 @@ export default function CadDialog({ onClose, onImport }) {
                     <b className="text-ink3"> (자리만 알려 드립니다 — 설비는 직접 놓아 주세요)</b>
                   </div>
                 )}
+                {plan?.dropped.merged > 0 && (
+                  <div className="mt-1 text-xs text-ink4">
+                    같은 자리에 겹쳐 있던 벽 {plan.dropped.merged}개를 한 줄로 합쳤습니다
+                  </div>
+                )}
                 {(plan?.dropped.wall > 0 || plan?.dropped.area > 0) && (
                   <div className="mt-1 text-xs text-ink4">
                     너무 작아 버린 것 — 벽 {plan.dropped.wall} · 바닥 {plan.dropped.area}

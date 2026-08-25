@@ -154,7 +154,8 @@ export function guessRole(name, row = {}) {
   if (/DIM|치수|TEXT|문자|HATCH|해칭|AXIS|축|GRID|NOTE/.test(s)) return ROLE.SKIP;
   if (/DOOR|문|SHUTTER|셔터|출입|GATE/.test(s)) return ROLE.DOOR;
   if (/COL|기둥|PILLAR|POST/.test(s)) return ROLE.PILLAR;
-  if (/WALL|벽|파티션|PARTITION/.test(s)) return ROLE.WALL;
+  /* 「판넬」은 국내 공장 도면에서 곧 벽이다 — 샌드위치판넬로 벽을 세운다 */
+  if (/WALL|벽|파티션|PARTITION|판넬|판델|PANEL/.test(s)) return ROLE.WALL;
   if (/FLOOR|바닥|SLAB|ROOM|실|AREA|구역|OFFICE|사무/.test(s)) return ROLE.FLOOR;
   if (/EQUIP|설비|MACHINE|기계|BLOCK/.test(s)) return ROLE.MARK;
 
