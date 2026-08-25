@@ -139,6 +139,7 @@ export function mergeWalls(segs = [], opt = {}) {
   }
   return out;
 }
+
 /** 이보다 좁은 구역은 버린다 — 해칭 조각이 이 크기다 (m²) */
 export const MIN_AREA = 0.25;
 
