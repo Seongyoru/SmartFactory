@@ -19,7 +19,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, FileUp, X } from 'lucide-react';
 import { boundsOf, parseDxf, UNIT_LABEL } from '../core/dxf.js';
-import { ROLE, ROLE_LABEL, guessRoles, planOf, planText, scaleFromSpan, scaleOf } from '../core/cad.js';
+import { PAIR_MAX, ROLE, ROLE_LABEL, guessRoles, planOf, planText, scaleFromSpan, scaleOf } from '../core/cad.js';
 import { Btn } from './common.jsx';
 
 /** 이보다 큰 파일은 읽는 동안 화면이 멈춘다 — 먼저 알린다 (MB) */
@@ -32,6 +32,8 @@ export default function CadDialog({ onClose, onImport }) {
   const [roles, setRoles] = useState({});
   const [scale, setScale] = useState(1);
   const [flipY, setFlipY] = useState(true);
+  /** 평행한 두 줄을 벽 하나로 볼 최대 두께 (m). 0 이면 안 짝짓는다 */
+  const [pair, setPair] = useState(PAIR_MAX);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [why, setWhy] = useState(null);
@@ -63,8 +65,8 @@ export default function CadDialog({ onClose, onImport }) {
   }, []);
 
   const plan = useMemo(
-    () => (parsed ? planOf(parsed, { roles, scale, flipY }) : null),
-    [parsed, roles, scale, flipY],
+    () => (parsed ? planOf(parsed, { roles, scale, flipY, pair }) : null),
+    [parsed, roles, scale, flipY, pair],
   );
 
   /** 가로폭을 사람이 고쳐 넣으면 축척이 따라온다 — 아는 치수 하나로 바로잡는 길 */
@@ -150,6 +152,33 @@ export default function CadDialog({ onClose, onImport }) {
                   />
                   m 입니다
                 </label>
+              </section>
+
+              {/* ---- 벽 두께 ---- */}
+              <section className="rounded-lg border border-line p-3">
+                <div className="mb-2 text-xs font-semibold text-ink2">벽 두께</div>
+                <p className="text-xs text-ink4">
+                  도면의 벽은 대개 <b className="text-ink3">양쪽 면 두 줄</b>로 그려집니다.
+                  그대로 두면 벽이 두 장씩 나란히 섭니다. 아래 값보다 가까운 두 줄은
+                  <b className="text-ink3"> 벽 하나로</b> 접고, 잰 간격을 그 벽의 두께로 씁니다.
+                </p>
+                <label className="mt-2 flex items-center gap-2 text-xs text-ink3">
+                  <input
+                    type="number"
+                    min="0"
+                    max="2"
+                    step="0.05"
+                    value={pair}
+                    onChange={(e) => setPair(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-24 rounded border border-line bg-panel px-2 py-1 text-ink"
+                  />
+                  m 까지 — <b className="text-ink3">0 이면 접지 않습니다</b>
+                </label>
+                <p className="mt-1 text-xs text-ink4">
+                  {plan?.dropped.paired > 0
+                    ? <>두 줄짜리 벽 <b className="text-ink3">{plan.dropped.paired}개</b>를 하나로 접었습니다 — 남은 벽 {plan.walls.length}개</>
+                    : <>접힌 것이 없습니다. 벽이 두 겹으로 보이면 이 값을 올려 보세요 — 다만 <b className="text-ink3">사람이 지나다니는 통로까지 메우지 않게</b> 조금씩 올리세요.</>}
+                </p>
               </section>
 
               {/* ---- 레이어 배정 ---- */}

@@ -140,6 +140,105 @@ export function mergeWalls(segs = [], opt = {}) {
   return out;
 }
 
+/** 평행한 두 줄을 벽 하나로 볼 **최대 두께** (m) — 0 이면 안 짝짓는다 */
+export const PAIR_MAX = 0.4;
+/** 이보다 가까우면 이미 `mergeWalls` 가 한 줄로 만들었다 (m) */
+export const PAIR_MIN = 0.02;
+/** 짧은 쪽의 이만큼은 나란히 겹쳐야 「같은 벽의 두 면」이다 */
+export const PAIR_OVERLAP = 0.6;
+
+/**
+ * =============================================================================
+ *  평행한 두 줄을 벽 하나로 — 도면의 벽은 **양쪽 면**으로 그려진다
+ * =============================================================================
+ *  건축 도면에서 벽은 선 하나가 아니라 **면 두 개**다. 200 mm 벽이면 200 mm
+ *  떨어진 평행선 두 줄이다. `mergeWalls` 는 이것을 일부러 안 합친다 — 나란한
+ *  것을 합치기 시작하면 **복도가 사라지기** 때문이다.
+ *
+ *  그래서 조건을 훨씬 좁게 건다 — 「평행하고 · 가깝고 · 나란히 겹치는」 둘만.
+ *
+ *  **복도를 지키는 것은 거리다.** 복도의 양쪽 벽도 평행하고 나란히 겹치므로,
+ *  그 둘을 갈라 놓는 것은 사이가 얼마나 뜨느냐뿐이다. 사람이 지나다니는 폭은
+ *  벽 두께일 수 없으니 `PAIR_MAX` 가 그 선을 긋는다.
+ *
+ *  겹침을 보는 이유는 따로 있다. 벽 끝에서 직각으로 꺾여 나가는 짧은 토막은
+ *  평행하지도 않아 애초에 안 걸리지만, **T 자로 만나는 벽**은 평행하고 가까운
+ *  채로 스칠 수 있다. 그런 것은 나란히 겹치지 않으므로 여기서 걸러진다.
+ *
+ *  ── 왜 값을 사람이 정하는가 ──────────────────────────────────────────────
+ *  벽 두께는 도면마다 다르다. 조적벽 190, 판넬 50~150, 방화벽은 300 이 넘는다.
+ *  하나로 못 박으면 어떤 도면에서는 벽이 안 합쳐지고 어떤 도면에서는 좁은
+ *  통로가 벽으로 메워진다. **몇 쌍이 합쳐졌는지 보면서 사람이 맞추게** 한다.
+ *
+ *  @returns 같은 모양의 배열. 짝지어진 것은 가운데 선 하나가 되고 잰 두께(`t`)를 단다.
+ */
+export function pairWalls(segs = [], opt = {}) {
+  const max = Number(opt.max ?? PAIR_MAX);
+  if (!(max > 0)) return segs;
+  const min = Number(opt.min ?? PAIR_MIN);
+  const need = Number(opt.overlap ?? PAIR_OVERLAP);
+
+  const info = segs.map((s) => {
+    const dx = s.b[0] - s.a[0];
+    const dy = s.b[1] - s.a[1];
+    const len = Math.hypot(dx, dy);
+    return { s, len, ux: len ? dx / len : 0, uy: len ? dy / len : 0 };
+  });
+
+  /* 짝이 될 만한 것을 다 모아 두고 **가까운 것부터** 확정한다. 한 면이 양쪽
+     이웃과 다 그럴듯할 때, 더 가까운 쪽이 같은 벽일 가능성이 높다. */
+  const cands = [];
+  for (let i = 0; i < info.length; i += 1) {
+    const A = info[i];
+    if (!(A.len > 0)) continue;
+    for (let j = i + 1; j < info.length; j += 1) {
+      const B = info[j];
+      if (!(B.len > 0)) continue;
+      if (Math.abs(A.ux * B.uy - A.uy * B.ux) > SAME_DIR) continue;
+
+      /* A 를 기준선으로 두었을 때 B 가 어느 쪽으로 얼마나 떨어져 있나 (부호 있음) */
+      const vx = B.s.a[0] - A.s.a[0];
+      const vy = B.s.a[1] - A.s.a[1];
+      const cross = A.ux * vy - A.uy * vx;
+      const d = Math.abs(cross);
+      if (d < min || d > max) continue;
+
+      /* A 위의 위치로 바꿔 겹치는 길이를 잰다 */
+      const at = (q) => (q[0] - A.s.a[0]) * A.ux + (q[1] - A.s.a[1]) * A.uy;
+      let b0 = at(B.s.a);
+      let b1 = at(B.s.b);
+      if (b0 > b1) { const tmp = b0; b0 = b1; b1 = tmp; }
+      const lo = Math.max(0, b0);
+      const hi = Math.min(A.len, b1);
+      const ov = hi - lo;
+      if (ov <= 0 || ov < need * Math.min(A.len, B.len)) continue;
+
+      cands.push({ i, j, d, ov, lo, hi, cross });
+    }
+  }
+  cands.sort((p, q) => p.d - q.d || q.ov - p.ov);
+
+  const used = new Set();
+  const out = [];
+  for (const c of cands) {
+    if (used.has(c.i) || used.has(c.j)) continue;
+    used.add(c.i);
+    used.add(c.j);
+    const A = info[c.i];
+    /* 가운데로 절반 옮긴다 — 왼쪽 법선은 (−uy, ux) 다 */
+    const hx = (-A.uy * c.cross) / 2;
+    const hy = (A.ux * c.cross) / 2;
+    out.push({
+      a: [A.s.a[0] + A.ux * c.lo + hx, A.s.a[1] + A.uy * c.lo + hy],
+      b: [A.s.a[0] + A.ux * c.hi + hx, A.s.a[1] + A.uy * c.hi + hy],
+      t: c.d,
+    });
+  }
+  /* 짝이 없던 것은 그대로 간다 — 한쪽 면만 그린 벽도 벽이다 */
+  for (let i = 0; i < segs.length; i += 1) if (!used.has(i)) out.push(segs[i]);
+  return out;
+}
+
 /** 이보다 좁은 구역은 버린다 — 해칭 조각이 이 크기다 (m²) */
 export const MIN_AREA = 0.25;
 
@@ -361,8 +460,13 @@ export function planOf(parsed, opts = {}) {
   const joined = mergeWalls(walls);
   dropped.merged = walls.length - joined.length;
 
+  /* 그다음 **양쪽 면을 벽 하나로** 접는다. 순서가 중요하다 — 토막난 면을 먼저
+     이어 붙여야 마주 보는 면과 「나란히 겹친다」가 성립한다. */
+  const paired = pairWalls(joined, { max: opts.pair ?? PAIR_MAX });
+  dropped.paired = joined.length - paired.length;
+
   return {
-    walls: joined,
+    walls: paired,
     areas,
     pillars,
     doors,
@@ -429,7 +533,9 @@ export function docFromPlan(plan, opts = {}) {
     a: w.a,
     b: w.b,
     name: `반입 벽 ${from('walls') + i + 1}`,
-    thickness: b.wallThickness,
+    /* 양쪽 면에서 **재 온** 두께가 있으면 그것을 쓴다 — 도면이 아는 값이
+       설정 기본값보다 낫다. 한쪽 면뿐이던 벽은 잰 것이 없으니 기본값으로. */
+    thickness: w.t ?? b.wallThickness,
     height: b.wallHeight,
     color: b.wallColor,
   }));
