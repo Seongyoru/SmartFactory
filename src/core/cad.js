@@ -50,6 +50,95 @@ export const ROLE_LABEL = {
 
 /** 이보다 짧은 벽은 버린다 — 치수선 끄트머리 같은 부스러기다 (m) */
 export const MIN_WALL = 0.05;
+
+/** 같은 직선으로 볼 기울기 차이 — 1.5° */
+const SAME_DIR = Math.sin((1.5 * Math.PI) / 180);
+/** 같은 직선으로 볼 **수직** 거리 (m) */
+export const SAME_LINE = 0.02;
+/** 이어 붙일 **틈** (m) — 이보다 벌어져 있으면 딴 벽으로 둔다 */
+export const JOIN_GAP = 0.02;
+
+/**
+ * =============================================================================
+ *  겹친 벽을 한 줄로
+ * =============================================================================
+ *  도면에서 벽 하나가 선 하나로 오는 일은 드물다. 같은 자리에 두 번 그어져
+ *  있거나(복사·블록 중복), 긴 벽이 토막으로 나뉘어 끝이 맞물려 있다. 반입은
+ *  선 하나를 **두께를 가진 판 한 장**으로 만들므로, 그대로 두면 같은 자리에
+ *  판이 여러 장 겹쳐 선다 — 화면에서 벽이 두꺼워 보이고 개수가 부풀며,
+ *  지우려면 한 장씩 골라야 한다.
+ *
+ *  ── 어떻게 묶는가 ────────────────────────────────────────────────────────
+ *  같은 **직선** 위에 있는 것끼리 모은 다음, 그 직선을 수직선 삼아 1차원
+ *  구간으로 바꿔 겹치는 구간을 합친다. 각도와 수직 거리로 묶으므로 선을 그은
+ *  방향(A→B 냐 B→A 냐)은 상관없다.
+ *
+ *  ── 틈을 왜 조금만 봐주는가 ──────────────────────────────────────────────
+ *  토막난 벽은 끝이 딱 안 맞고 밀리미터쯤 벌어져 있다. 그 정도는 이어야 한다.
+ *  그렇다고 넉넉히 잡으면 **문 구멍을 메운다** — 문은 벽을 끊어 표현하는데,
+ *  그 끊긴 자리를 이어 버리면 지나갈 수 없는 도면이 된다. 그래서 2 cm 만 본다.
+ *
+ *  @param segs [{ a:[x,y], b:[x,y] }]
+ *  @returns 같은 모양의 배열 — 겹친 것은 하나로 합쳐져 있다
+ */
+export function mergeWalls(segs = [], opt = {}) {
+  const near = Number(opt.near ?? SAME_LINE);
+  const join = Number(opt.join ?? JOIN_GAP);
+
+  /** 직선 하나 — 지나는 점(p)·방향(u)·그 위의 구간들 */
+  const lines = [];
+
+  for (const s of segs) {
+    const dx = s.b[0] - s.a[0];
+    const dy = s.b[1] - s.a[1];
+    const len = Math.hypot(dx, dy);
+    if (!(len > 0)) continue;
+    const ux = dx / len;
+    const uy = dy / len;
+
+    let host = null;
+    for (const L of lines) {
+      /* 단위벡터끼리의 외적 = |sin θ| — 뒤집힌 방향도 0 이라 같이 잡힌다 */
+      if (Math.abs(ux * L.uy - uy * L.ux) > SAME_DIR) continue;
+      /* 그 직선에서 얼마나 떨어져 있나 */
+      const vx = s.a[0] - L.px;
+      const vy = s.a[1] - L.py;
+      if (Math.abs(vx * L.uy - vy * L.ux) > near) continue;
+      host = L;
+      break;
+    }
+    if (!host) {
+      host = { px: s.a[0], py: s.a[1], ux, uy, spans: [] };
+      lines.push(host);
+    }
+
+    /* 직선 위의 위치로 바꾼다 — 시작점에서 방향으로 얼마나 갔는가 */
+    const at = (p) => (p[0] - host.px) * host.ux + (p[1] - host.py) * host.uy;
+    const t0 = at(s.a);
+    const t1 = at(s.b);
+    host.spans.push(t0 <= t1 ? [t0, t1] : [t1, t0]);
+  }
+
+  const out = [];
+  for (const L of lines) {
+    L.spans.sort((p, q) => p[0] - q[0]);
+    let cur = null;
+    const flush = () => {
+      if (!cur) return;
+      out.push({
+        a: [L.px + L.ux * cur[0], L.py + L.uy * cur[0]],
+        b: [L.px + L.ux * cur[1], L.py + L.uy * cur[1]],
+      });
+    };
+    for (const sp of L.spans) {
+      if (cur && sp[0] <= cur[1] + join) { cur[1] = Math.max(cur[1], sp[1]); continue; }
+      flush();
+      cur = [sp[0], sp[1]];
+    }
+    flush();
+  }
+  return out;
+}
 /** 이보다 좁은 구역은 버린다 — 해칭 조각이 이 크기다 (m²) */
 export const MIN_AREA = 0.25;
 
@@ -68,12 +157,15 @@ export function guessRole(name, row = {}) {
   if (/FLOOR|바닥|SLAB|ROOM|실|AREA|구역|OFFICE|사무/.test(s)) return ROLE.FLOOR;
   if (/EQUIP|설비|MACHINE|기계|BLOCK/.test(s)) return ROLE.MARK;
 
-  /* 이름이 안 알려 주면 **들어 있는 것**으로 짐작한다 — 원만 잔뜩이면 기둥,
-     닫힌 다각형뿐이면 바닥, 선이 많으면 벽. */
-  if (row.circles > 0 && !row.lines && !row.polys) return ROLE.PILLAR;
-  if (row.inserts > 0 && !row.lines && !row.polys) return ROLE.MARK;
-  if (row.polys > 0 && row.polys === row.closed && !row.lines) return ROLE.FLOOR;
-  if (row.lines > 0) return ROLE.WALL;
+  /* ── 이름이 안 알려 주면 **안 가져온다** ─────────────────────────────────
+     한때는 들어 있는 것으로 짐작했다 — 「선이 있으면 벽」. 그런데 도면에서 선을
+     가진 레이어는 벽만이 아니다. 가구(`FUR`)도, 해칭(`HAT`)도, 기호(`SYM`)도
+     전부 선이다. 실제 도면 하나를 넣어 보니 열두 레이어 중 아홉이 벽이 됐고,
+     해칭 스물여덟 줄이 그대로 벽 스물여덟 장이 됐다.
+
+     짐작이 틀리면 **치우는 쪽이 더 비싸다.** 안 가져온 것은 목록에서 골라
+     다시 넣으면 되지만, 잘못 들어온 벽 수백 장은 하나씩 지워야 한다.
+     그래서 이름이 말해 주는 것만 가져오고 나머지는 사용자가 고르게 둔다. */
   return ROLE.SKIP;
 }
 
@@ -262,8 +354,13 @@ export function planOf(parsed, opts = {}) {
     walls.push({ a, b: c });
   }
 
+  /* 같은 자리에 겹쳐 선 것을 여기서 한 줄로 만든다 — 판을 만들기 **전에**.
+     만들고 나서 지우려면 사용자가 한 장씩 골라야 한다. */
+  const joined = mergeWalls(walls);
+  dropped.merged = walls.length - joined.length;
+
   return {
-    walls,
+    walls: joined,
     areas,
     pillars,
     doors,
