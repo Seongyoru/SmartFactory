@@ -269,7 +269,7 @@ const hook = await readSrc('ui/useLineWorld.js');
 t('반복 실행은 **세 번째 탭**이다 — 실행 탭에 다섯 칸을 늘어놓지 않는다', () => {
   /* 이 파일이 탭을 만든 이유가 「폭이 모자라 글자가 잘렸다」였다. 새 칸을
      실행 탭에 밀어 넣으면 그 문제를 되풀이한다. */
-  assert.match(dock, /\['reps', '여러 판'\]/, '세 번째 탭이 없다');
+  assert.match(dock, /\['reps', '반복 실행'\]/, '세 번째 탭이 없다');
   assert.match(dock, /tab === 'reps' && \(/, '탭으로 안 갈린다');
   const runCols = dock.slice(dock.indexOf("tab === 'run' && ("), dock.indexOf("tab === 'cost' && ("));
   assert.equal((runCols.match(/<Col title=/g) ?? []).length, 4, '실행 탭이 네 칸을 넘었다');

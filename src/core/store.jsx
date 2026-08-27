@@ -206,7 +206,8 @@ const initialState = {
    */
   showRunDock: true,
 
-  /** 아래 띠에서 보고 있는 탭 — 'run'(이번 실행) 또는 'cost'(원가) */
+  /** 아래 띠에서 보고 있는 탭 — 'run' · 'cost' · 'reps'(반복 실행) · 'sweep'(민감도).
+      **저장하지 않는다** — 새로고침하면 'run' 으로 돌아온다 */
   runTab: 'run',
 
   /**

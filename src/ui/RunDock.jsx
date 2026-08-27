@@ -1,6 +1,6 @@
 /**
  * =============================================================================
- *  아래 띠 — 이번 실행 · 원가
+ *  아래 띠 — 이번 실행 · 원가 · 반복 실행 · 민감도
  * =============================================================================
  *  둘 다 오른쪽 인스펙터에 있었다. 그런데 이 둘은 **무엇을 골랐든 계속 보고
  *  있어야 하는 값**이다 — 설비를 눌러 레시피를 고치는 동안에도 처리량과 개당
@@ -82,7 +82,9 @@ function Col({ title, width, children }) {
       style={width ? { width } : { minWidth: GROW_MIN }}
     >
       <h3 className="mb-1.5 shrink-0 text-[10px] font-semibold uppercase tracking-wider text-ink4">{title}</h3>
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+      {/* 넘치면 **잘리는 것이 아니라 스크롤**이다. 아래로 넘친 내용을 볼 방법이
+          없으면, 사람은 그 값이 없다고 읽는다 — 있는 것이 안 보이는 쪽이 더 나쁘다. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
     </div>
   );
 }
@@ -1021,7 +1023,9 @@ function Sweep() {
   );
 }
 
-const TABS = [['run', '실행'], ['cost', '원가'], ['reps', '여러 판'], ['sweep', '얼마나']];
+/* 라벨만 바꾼다. id 는 검사와 소스 여러 곳이 문자열로 붙들고 있고, 바꿔서
+   얻을 것이 없다. */
+const TABS = [['run', '실행'], ['cost', '원가'], ['reps', '반복 실행'], ['sweep', '민감도']];
 
 export default function RunDock() {
   const { state, dispatch } = useEditor();

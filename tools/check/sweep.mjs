@@ -216,7 +216,7 @@ t('손잡이 설명이 **무엇을 알게 되나**로 적혀 있다', () => {
 const dock = await readSrc('ui/RunDock.jsx');
 
 t('네 번째 탭이 붙었다 — 그리고 **한 값씩 잘라 돌린다**', () => {
-  assert.ok(dock.includes("['sweep', '얼마나']"), '탭이 없다');
+  assert.ok(dock.includes("['sweep', '민감도']"), '탭이 없다');
   const fn = dock.slice(dock.indexOf('function Sweep()'), dock.indexOf('const TABS ='));
   assert.ok(fn.includes('values: [values[i]]'), '한 덩어리로 돌린다 — 화면이 멈춘다');
   assert.ok(fn.includes('setTimeout(tick, 0)'), '조각 사이에 숨을 안 쉰다');
