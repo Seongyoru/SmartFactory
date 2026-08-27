@@ -4151,6 +4151,9 @@ function Tidy({ per }) {
         const common = {
           links: state.links, carts: state.carts, areas: state.areas, walls: state.walls,
           openings: state.openings, shifts: state.shifts, beltSpeed: state.beltSpeed,
+          /* 배치 둘을 견줄 때도 오더는 같아야 한다 — 안 넘기면 디스패칭 규칙이
+             양쪽 다 「차례대로」가 되어 규칙을 바꾼 효과가 안 보인다 */
+          orders: state.orders,
           itemOf, specOf,
         };
         /* 두 배치를 **같은 씨앗**으로 돌린다(common random numbers) — 그래야

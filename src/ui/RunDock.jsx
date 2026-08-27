@@ -747,7 +747,7 @@ function Tornado() {
   const layout = {
     placed: state.placed, links: state.links, carts: state.carts,
     areas: state.areas, walls: state.walls, openings: state.openings,
-    shifts: state.shifts, beltSpeed: state.beltSpeed,
+    shifts: state.shifts, orders: state.orders, beltSpeed: state.beltSpeed,
     isStillage: (p) => isStillage(itemOf(p.itemId)),
   };
   const knobs = knobsFor(layout);
@@ -856,7 +856,7 @@ function Sweep() {
   const layout = {
     placed: state.placed, links: state.links, carts: state.carts,
     areas: state.areas, walls: state.walls, openings: state.openings,
-    shifts: state.shifts, beltSpeed: state.beltSpeed,
+    shifts: state.shifts, orders: state.orders, beltSpeed: state.beltSpeed,
     isStillage: (p) => isStillage(itemOf(p.itemId)),
   };
   const knobs = knobsFor(layout);

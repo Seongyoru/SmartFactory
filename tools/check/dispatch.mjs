@@ -224,3 +224,45 @@ t('**남은 납기가 시간에 따라 준다** — 시계를 안 넘기면 영�
   assert.equal(early.due, 600);
   assert.equal(late.due, 300, '시간이 흘렀는데 납기가 그대로다 — 시계를 안 넘긴다');
 });
+
+/* ---------- 화면이 오더를 **넘기는가** ------------------------------------- *
+ *  `lineup.js:294` 가 `d.orders` 를 받고 `replicate.js` 가 그것으로 `orderInfo`
+ *  를 만든다. 배관은 끝까지 깔려 있는데, **마지막 한 칸**을 안 이으면 오더가
+ *  늘 빈 배열이 되어 `orderInfoOf` 가 `() => null` 을 돌려주고, 디스패칭 규칙이
+ *  조용히 「차례대로」가 된다.
+ *
+ *  이 실패는 **아무것도 안 터진다.** 라인은 잘 돌고 값도 그럴듯하다. 다만
+ *  화면에서 보던 라인과 「반복 실행 · 민감도」가 **서로 다른 라인**이 된다.
+ *  그래서 값이 아니라 배선을 못 박는다.
+ * -------------------------------------------------------------------------- */
+
+const worldSrc = await readSrc('ui/useLineWorld.js');
+const dockSrc = await readSrc('ui/RunDock.jsx');
+
+t('화면 없이 굴리는 world 가 오더를 들고 간다', () => {
+  assert.match(worldSrc, /orders: state\.orders,/);
+});
+
+t('도면이 그대로여도 **오더가 바뀌면** world 를 다시 만든다', () => {
+  /* useMemo 의 deps 에 안 넣으면 오더를 고쳐도 옛 world 로 돌린다 —
+     화면은 새 규칙으로 돌고 반복 실행만 옛 오더로 도는, 가장 헷갈리는 어긋남 */
+  assert.match(worldSrc, /state\.shifts, state\.orders, itemOf, version\]/);
+});
+
+t('손잡이 돌리기와 민감도도 오더를 들고 간다 — 두 곳 다', () => {
+  const hits = dockSrc.split('shifts: state.shifts, orders: state.orders,').length - 1;
+  assert.equal(hits, 2, `${hits}곳 — 토네이도와 민감도 둘 다여야 한다`);
+});
+
+t('배치 비교도 오더를 들고 간다 — 규칙을 바꾼 효과가 보이려면', () => {
+  assert.match(inspSrc, /orders: state\.orders,/);
+});
+
+t('오더가 없으면 규칙이 **조용히 차례대로가 된다** — 위 배선의 근거', () => {
+  /* 이 값이 이 검사들의 이유다. 넘기든 안 넘기든 아무것도 안 터지므로,
+     「안 넘기면 이렇게 된다」를 값으로 남겨 둔다. */
+  const none = O.orderInfoOf([], {}, 0);
+  assert.equal(none('PART_R'), null);
+  assert.equal(D.nextSlot(0, KINDS, D.RULE.DUE, none), D.nextSlot(0, KINDS, D.RULE.ORDER));
+  assert.equal(D.nextSlot(1, KINDS, D.RULE.BEHIND, none), D.nextSlot(1, KINDS, D.RULE.ORDER));
+});

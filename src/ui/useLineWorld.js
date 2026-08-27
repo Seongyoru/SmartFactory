@@ -53,12 +53,16 @@ export function useLineWorld() {
       walls: state.walls,
       openings: state.openings,
       shifts: state.shifts,
+      /* **오더가 라인을 이끈다.** 디스패칭 규칙(납기 먼저·밀린 것 먼저)이 이걸
+         읽는다. 안 넘기면 규칙이 조용히 「차례대로」가 되어, 화면에서 보던
+         라인과 여기서 돌린 라인이 서로 다른 것이 된다. */
+      orders: state.orders,
       beltSpeed: state.beltSpeed,
       itemOf,
       specOf: specReader(),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.placed, state.links, state.carts, state.areas, state.walls, state.openings,
-      state.beltSpeed, state.shifts, itemOf, version],
+      state.beltSpeed, state.shifts, state.orders, itemOf, version],
   );
 }
