@@ -368,6 +368,7 @@ export function lineWorld(d = {}) {
       orderInfo: orderInfoOf(d.orders ?? [], {
         shipped: getShipped(),
         arrivedOf,
+        reaches: d.reaches,
       }, elapsed),
     };
   };

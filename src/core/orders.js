@@ -107,24 +107,53 @@ export const remainOf = (order, done) => Math.max(0, (order?.qty ?? 0) - Math.ma
  *  한 종류에 오더가 여럿이면 **가장 급한 것**을 그 종류의 값으로 본다.
  *  다 찬 오더는 안 본다 — 끝난 것을 계속 만들면 남은 오더가 영영 안 끝난다.
  *
- *  @returns (종류) => { due, ratio } · 볼 오더가 없으면 null
+ *  ── 열쇠가 **(설비, 종류)** 인 까닭 ──────────────────────────────────────
+ *  한때는 종류만이었다. 그러면 그 종류를 만드는 설비가 **전부** 그 오더에 끌려
+ *  간다 — 산출이 오더의 목적지에 닿든 말든. 적치대로 보내는 제작기와 조립기로
+ *  보내는 제작기가 함께 끌려가 **조립기가 굶어 라인이 섰다**(실측: 조립품 93 → 0,
+ *  그런데 적치대 진척은 192 로 똑같았다 — 끌려간 쪽의 기여가 0 이었다).
+ *
+ *  그래서 설비를 받아 「이 설비가 도울 수 있는 오더」만 본다. 닿는지 모르면
+ *  닿는 것으로 본다(`reach.js`) — 덜 걸러내는 쪽으로 틀려야 한다.
+ *
+ *  @param ctx.reaches (설비 uid, 목적지 uid) => 닿는가 · 없으면 전부 닿는다
+ *  @returns (설비 uid) => (종류) => { due, ratio } · 볼 오더가 없으면 null
  *            due   남은 납기(초). 납기를 안 정했으면 Infinity(급하지 않다)
  *            ratio 진척 0~1
  */
 export function orderInfoOf(orders, ctx = {}, elapsedSec = 0) {
   const rows = normalizeOrders(orders);
-  if (!rows.length) return () => null;
-  const by = new Map();
-  for (const o of rows) {
-    const done = doneOf(o, ctx);
-    if (done >= o.qty) continue;                       // 다 찼다
-    const due = o.dueMin > 0 ? o.dueMin * 60 - elapsedSec : Infinity;
-    const cur = { due, ratio: progressOf(o, done) };
-    const had = by.get(o.kind);
-    /* 같은 종류에 오더가 여럿이면 **더 급한 쪽**을 남긴다 */
-    if (!had || cur.due < had.due) by.set(o.kind, cur);
-  }
-  return (kind) => by.get(kind) ?? null;
+  if (!rows.length) return () => () => null;
+  const reaches = typeof ctx.reaches === 'function' ? ctx.reaches : () => true;
+
+  const build = (uid) => {
+    const by = new Map();
+    for (const o of rows) {
+      /**
+       * **이 설비가 도울 수 있는 오더인가.**
+       *  자리에 쌓는 오더만 가린다. 출하 오더는 어디로 나가는지 도면이 말해
+       *  주지 않으므로 전부 해당하는 것으로 본다.
+       */
+      if (o.at === DONE_AT.STORE && o.atUid && uid && !reaches(uid, o.atUid)) continue;
+      const done = doneOf(o, ctx);
+      if (done >= o.qty) continue;                       // 다 찼다
+      const due = o.dueMin > 0 ? o.dueMin * 60 - elapsedSec : Infinity;
+      const cur = { due, ratio: progressOf(o, done) };
+      const had = by.get(o.kind);
+      /* 같은 종류에 오더가 여럿이면 **더 급한 쪽**을 남긴다 */
+      if (!had || cur.due < had.due) by.set(o.kind, cur);
+    }
+    return (kind) => by.get(kind) ?? null;
+  };
+
+  /* 설비마다 한 번만 세운다 — 이 함수 자체가 틱마다 새로 만들어지므로
+     여기 담긴 것은 그 틱 동안만 산다 */
+  const cache = new Map();
+  return (uid) => {
+    let f = cache.get(uid);
+    if (!f) { f = build(uid); cache.set(uid, f); }
+    return f;
+  };
 }
 /**
  * 이 규칙이 **이 도면에서 실제로 도는가** — 안 돌면 그 까닭을 말한다.

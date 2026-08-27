@@ -106,7 +106,7 @@ const ORDERS = [
 ];
 
 t('오더에서 **남은 납기와 진척**을 뽑는다', () => {
-  const info = O.orderInfoOf(ORDERS, { shipped: { PART_R: 50 } }, 300);
+  const info = O.orderInfoOf(ORDERS, { shipped: { PART_R: 50 } }, 300)('M1');
   assert.equal(info('PART_R').due, 30 * 60 - 300);
   assert.equal(info('PART_R').ratio, 0.5);
   assert.equal(info('PART_G').due, 10 * 60 - 300);
@@ -115,13 +115,13 @@ t('오더에서 **남은 납기와 진척**을 뽑는다', () => {
 });
 
 t('**다 찬 오더는 목록에서 빠진다**', () => {
-  const info = O.orderInfoOf(ORDERS, { shipped: { PART_R: 100 } }, 0);
+  const info = O.orderInfoOf(ORDERS, { shipped: { PART_R: 100 } }, 0)('M1');
   assert.equal(info('PART_R'), null, '다 찼는데 계속 만들라고 한다');
   assert.ok(info('PART_G'));
 });
 
 t('오더가 없으면 **아무 값도 안 준다**', () => {
-  assert.equal(O.orderInfoOf([], {}, 0)('PART_R'), null);
+  assert.equal(O.orderInfoOf([], {}, 0)('M1')('PART_R'), null);
 });
 
 t('한 종류에 오더가 여럿이면 **더 급한 쪽**', () => {
@@ -129,7 +129,7 @@ t('한 종류에 오더가 여럿이면 **더 급한 쪽**', () => {
     { uid: 'A', kind: 'PART_R', qty: 100, dueMin: 60, at: 'ship' },
     { uid: 'B', kind: 'PART_R', qty: 100, dueMin: 10, at: 'ship' },
   ];
-  assert.equal(O.orderInfoOf(two, {}, 0)('PART_R').due, 600);
+  assert.equal(O.orderInfoOf(two, {}, 0)('M1')('PART_R').due, 600);
 });
 
 /* ---------- 굴려 본다 ----------------------------------------------------- */
@@ -176,7 +176,7 @@ const procSrc = await readSrc('core/process.js');
 
 t('굴리는 쪽이 규칙을 넘긴다', () => {
   assert.ok(lineupSrc.includes('rule: ruleOf(p, item)'), '설비 목록이 규칙을 안 싣는다');
-  assert.ok(simSrc.includes('pickSlot: (cur) => nextSlot(cur, many.map((k) => k.out), m.rule, d.orderInfo)'),
+  assert.ok(simSrc.includes('m.rule, d.orderInfo?.(m.uid))'),
     'sim 이 규칙을 안 쓴다');
   assert.ok(procSrc.includes('pickSlot ? pickSlot(slotOf(uid), many) : (slotOf(uid) + 1) % many'),
     '공정이 규칙을 안 본다');
@@ -185,7 +185,7 @@ t('굴리는 쪽이 규칙을 넘긴다', () => {
 t('두 길이 **같은 함수**로 오더를 읽는다', () => {
   /* 각자 계산하면 눈으로 본 순서와 반복 실행의 순서가 갈린다 */
   assert.ok(repSrc.includes('orderInfo: orderInfoOf('), '헤드리스가 오더를 안 읽는다');
-  assert.ok(sceneSrc.includes('orderInfoOf(orders, { shipped: ship, arrivedOf }, elapsedSec)'),
+  assert.ok(sceneSrc.includes('orderInfoOf(orders, { shipped: ship, arrivedOf, reaches }, elapsedSec)'),
     '화면이 오더를 안 읽는다');
   /* 진척은 매 틱 달라진다 — 한 번 만들어 두면 처음에 밀렸던 것만 계속 만든다 */
   assert.ok(repSrc.includes('return (elapsed = 0) => {'), '헤드리스가 오더를 한 번만 읽는다');
@@ -218,8 +218,8 @@ t('**남은 납기가 시간에 따라 준다** — 시계를 안 넘기면 영�
     beltFlows: [], machines: [], placed: [], itemOf: () => null,
     orders: [{ uid: 'O', kind: 'PART_R', qty: 100, dueMin: 10, at: 'ship' }],
   });
-  const early = world(0).orderInfo('PART_R');
-  const late = world(300).orderInfo('PART_R');
+  const early = world(0).orderInfo('M1')('PART_R');
+  const late = world(300).orderInfo('M1')('PART_R');
   assert.ok(early && late, '오더를 못 읽는다');
   assert.equal(early.due, 600);
   assert.equal(late.due, 300, '시간이 흘렀는데 납기가 그대로다 — 시계를 안 넘긴다');
@@ -261,7 +261,7 @@ t('배치 비교도 오더를 들고 간다 — 규칙을 바꾼 효과가 보�
 t('오더가 없으면 규칙이 **조용히 차례대로가 된다** — 위 배선의 근거', () => {
   /* 이 값이 이 검사들의 이유다. 넘기든 안 넘기든 아무것도 안 터지므로,
      「안 넘기면 이렇게 된다」를 값으로 남겨 둔다. */
-  const none = O.orderInfoOf([], {}, 0);
+  const none = O.orderInfoOf([], {}, 0)('M1');
   assert.equal(none('PART_R'), null);
   assert.equal(D.nextSlot(0, KINDS, D.RULE.DUE, none), D.nextSlot(0, KINDS, D.RULE.ORDER));
   assert.equal(D.nextSlot(1, KINDS, D.RULE.BEHIND, none), D.nextSlot(1, KINDS, D.RULE.ORDER));
@@ -292,7 +292,7 @@ t('같은 오더로 밀린 것 먼저는 멀쩡하다 — 그래서 헷갈린다
 
 t('그 말이 참인지 값으로 — 납기 0 이면 정말 차례대로다', () => {
   const kinds = ['PART_R', 'PART_G'];
-  const info = O.orderInfoOf([{ uid: 'O', kind: 'PART_G', qty: 100, dueMin: 0, at: 'ship' }], {}, 0);
+  const info = O.orderInfoOf([{ uid: 'O', kind: 'PART_G', qty: 100, dueMin: 0, at: 'ship' }], {}, 0)('M1');
   for (let c = 0; c < 4; c += 1) {
     assert.equal(D.nextSlot(c, kinds, D.RULE.DUE, info), D.nextSlot(c, kinds, D.RULE.ORDER));
   }
@@ -316,7 +316,7 @@ t('두 품종에 납기가 다 걸리면 할 말이 없다 — 그때가 규칙�
   ];
   assert.equal(O.ruleGap(D.RULE.DUE, o, ['PART_R', 'PART_G']), null);
   /* 그리고 실제로 급한 쪽을 고른다 */
-  const info = O.orderInfoOf(o, {}, 0);
+  const info = O.orderInfoOf(o, {}, 0)('M1');
   assert.equal(D.nextSlot(0, ['PART_R', 'PART_G'], D.RULE.DUE, info), 0);   // R 이 10분
 });
 

@@ -96,6 +96,7 @@ import { isClosed, rawStep, setShifts, tick, useElapsed } from '../core/clock.js
 import { runMachines } from '../core/sim.js';
 import { haltState } from '../core/halt.js';
 import { orderInfoOf } from '../core/orders.js';
+import { reachOf } from '../core/reach.js';
 import { beltFlowsOf, machinesOf } from '../core/lineup.js';
 import { beltHeld, holdOnBelt, takeHeld } from '../core/belt.js';
 import { accumulate, plannedStop, setWarmup } from '../core/metrics.js';
@@ -138,9 +139,14 @@ function SimClock({ running, halted, jammed, starved, unmanned, equips, machines
    *  헤드리스 쪽은 `lineWorld` 가 같은 함수로 같은 값을 만든다. 두 곳이 따로
    *  계산하면 화면에서 본 순서와 반복 실행의 순서가 갈린다.
    */
+  /** 이 설비가 저 자리에 닿는가 — 도면이 바뀔 때만 다시 본다 */
+  const reaches = useMemo(
+    () => reachOf({ links: state.links, carts: state.carts }),
+    [state.links, state.carts],
+  );
   const orderInfo = useMemo(
-    () => orderInfoOf(orders, { shipped: ship, arrivedOf }, elapsedSec),
-    [orders, ship, elapsedSec],
+    () => orderInfoOf(orders, { shipped: ship, arrivedOf, reaches }, elapsedSec),
+    [orders, ship, elapsedSec, reaches],
   );
   /* 교대표를 시계에 물린다 — **쉬는 시간 판정이 시계 안에 있어야** 벨트·카트·
      설비가 한 번에 선다(clock.js 의 simStep). 소비자마다 따로 물으면 하나를

@@ -30,6 +30,7 @@ import {
 import { stillageCapacity } from './stillage.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { beltKinds, isAccumulating, linkPath } from './link.js';
+import { reachOf } from './reach.js';
 import { warmupOf } from './warmup.js';
 import { lineBalance } from './balance.js';
 import { lineFlow, lineWorld } from './replicate.js';
@@ -292,6 +293,8 @@ export function worldOf(d = {}) {
        *  「처음에 밀렸던 것」을 끝까지 먼저 만드는 엉뚱한 라인이 된다.
        */
       orders: d.orders ?? [],
+      /** 이 설비가 저 자리에 닿는가 — 안 닿는 설비는 그 오더를 안 본다 */
+      reaches: reachOf({ links: d.links, carts: d.carts }),
       /* 축적형 벨트가 다 찼나 — 옮기는 쪽만 아는 값이다 */
       fullOf: (uid) => flow.fullOf(uid),
     }),

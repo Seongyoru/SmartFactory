@@ -150,7 +150,9 @@ export function runMachines(dt, d = {}) {
        *  견줄 값(납기 · 진척)은 오더에서 뽑아 부르는 쪽이 넘긴다(`orderInfo`).
        *  여기서 재고를 직접 읽으면 화면과 헤드리스가 다른 값을 본다.
        */
-      pickSlot: (cur) => nextSlot(cur, many.map((k) => k.out), m.rule, d.orderInfo),
+      /* 오더는 **이 설비 것만** 본다 — 산출이 목적지에 안 닿는 설비까지 끌려가면
+         그쪽 하류가 굶는다(orders.js 의 열쇠가 (설비, 종류) 인 까닭) */
+      pickSlot: (cur) => nextSlot(cur, many.map((k) => k.out), m.rule, d.orderInfo?.(m.uid)),
       /**
        * **불량은 만들 때 거른다.**
        *  예전에는 벨트 끝에서 걸렀다. 그래서 카트로 나르는 설비는 불량률을
