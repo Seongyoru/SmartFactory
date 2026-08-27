@@ -4,7 +4,7 @@
  *  여기서 나오는 수가 그대로 재고와 처리량이 되므로, 개수가 새거나 늘면 안 된다.
  */
 import assert from 'node:assert/strict';
-import { SRC, group, t } from './_harness.mjs';
+import { SRC, group, readSrc, t } from './_harness.mjs';
 
 group('벨트 흐름');
 
@@ -172,4 +172,64 @@ t('trav 가 커지면 되감아도 자리가 그대로다', () => {
   assert.ok(st.trav < 1e6, `되감기지 않았다: ${st.trav}`);
   assert.equal(st.born, Math.floor(st.trav / 3), 'born 이 trav 와 어긋났다');
   assert.ok(Math.abs(onBelt(st) - before) <= 1, '되감기가 줄을 흐트러뜨렸다');
+});
+
+/* ---------- 칸마다 제 색으로 ---------------------------------------------- *
+ *  `beltKind` 는 오래전부터 있었고 값도 맞게 나왔다. 그런데 **부르는 곳이
+ *  없었다.** 그리는 쪽은 벨트 한 줄에 규격 하나를 잡고 「이 칸에 뭐가 있나」만
+ *  물었다 — 「무엇인가」를 안 물었다.
+ *
+ *  그래서 여기서 둘을 함께 못 박는다. 값이 맞게 나오는가, 그리고 **그리는 쪽이
+ *  실제로 그 값을 읽는가.** 값만 재면 이 버그가 그대로 다시 난다.
+ * -------------------------------------------------------------------------- */
+
+const items = await readSrc('scene/BeltItems.jsx');
+const scene = await readSrc('scene/EditorScene.jsx');
+
+t('칸마다 실린 종류가 다르게 나온다 — 두 품종을 번갈아 태워서', () => {
+  const st = B.makeBelt(8, 1);
+  const seen = [];
+  for (let i = 0; i < 8; i += 1) {
+    const kind = i % 2 === 0 ? 'PART_R' : 'PART_G';
+    B.advanceBelt(st, {
+      d: 1, step: 1, length: 8, feeding: true, kind,
+      spawn: () => ({ made: 1, kind }),
+    });
+  }
+  /* 줄 전체를 훑는다. **한 종류로 얼어붙지 않는다**는 것이 요점이다 —
+     화면이 못 보고 있던 값이 바로 이것이다. */
+  const on = Array.from({ length: 8 }, (_, k) => B.beltKind(st, k));
+  seen.push(...on);
+  assert.ok(on.includes('PART_R'), `빨강이 없다 — ${JSON.stringify(on)}`);
+  assert.ok(on.includes('PART_G'), `초록이 없다 — ${JSON.stringify(on)}`);
+  /* 이웃한 칸이 서로 다르다 — 번갈아 태웠으니 */
+  const flips = on.slice(1).filter((v, i) => v && on[i] && v !== on[i]).length;
+  assert.ok(flips >= 3, `이웃이 거의 같다 — ${JSON.stringify(on)}`);
+});
+
+t('빈칸은 종류가 없다 — 「모르겠다」와 「없다」를 가른다', () => {
+  const st = B.makeBelt(4, 1);
+  assert.equal(B.beltKind(st, 0), null);
+});
+
+t('**그리는 쪽이 그 값을 읽는다** — 값만 맞고 안 읽으면 화면은 그대로다', () => {
+  assert.match(items, /beltKind\(belt, k\)/, 'BeltItems 가 칸의 종류를 안 묻는다');
+});
+
+t('있는지와 무엇인지를 **따로** 묻는다', () => {
+  /* fill 과 kinds 는 다른 배열이다. 이름표 하나로 둘을 겸하면 이름표가 빈
+     칸의 물건이 통째로 사라진다 */
+  assert.match(items, /!beltHas\(belt, k\)/, '있는지를 안 묻는다 — 물건이 사라질 수 있다');
+});
+
+t('종류마다 규격을 따로 잡는다 — 줄 하나에 규격 하나면 색이 얼어붙는다', () => {
+  assert.match(items, /usePayloadSpecs\(\)/, '종류별 규격을 안 읽는다');
+  assert.match(items, /slot\.made/, '칸마다 종류별 사본을 안 들고 있다');
+});
+
+t('갈래가 하나면 그 종류로 그린다 — 불량품 벨트가 양품 색이 되지 않게', () => {
+  /* `outKind` 는 **첫 레시피**의 산출이다. 불량품만 빼내는 벨트에 그것을 주면
+     화면이 불량품을 양품 색으로 그린다 — 갈래가 하나뿐이면 그 종류를 쓴다. */
+  assert.ok(scene.includes('payloadByKey(kinds?.length === 1 ? kinds[0] : outKind)'),
+    '갈래가 잡힌 벨트도 첫 레시피 색으로 그린다');
 });
