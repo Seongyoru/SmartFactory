@@ -2,7 +2,7 @@
  * 우측 인스펙터 — 선택한 설비/연결의 상세, 없으면 도면 요약
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronDown, ChevronUp, FileText, GitCompare, RotateCcw, RotateCw, Table2, Trash2, Wand2 } from 'lucide-react';
 import { VIEW, selItems, useEditor } from '../core/store.jsx';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
@@ -4522,6 +4522,23 @@ export default function Inspector() {
    */
   const stickHead = !multi && !!(placed || cart || link);
 
+  /**
+   * **고른 것이 바뀌면 스크롤을 맨 위로.**
+   * ---------------------------------------------------------------------------
+   *  아래까지 내려가 손잡이를 만지다가 다른 설비를 고르면, 내용은 통째로 바뀌는데
+   *  스크롤만 그 자리에 남는다. 그러면 **엉뚱한 데를 보고 있게 된다** — 새로 고른
+   *  설비의 이름도, 무엇을 만드는지도 화면 밖이다.
+   *
+   *  열쇠는 **고른 것들의 목록**이다. 이름이나 값이 바뀌었다고 되돌리면 손잡이를
+   *  만지는 도중에 화면이 튄다 — 「무엇을 고르고 있나」가 바뀔 때만 되돌린다.
+   *  벽은 한 면씩 고르므로 `edge` 까지 봐야 옆면으로 옮겼을 때도 되돌아간다.
+   */
+  const bodyRef = useRef(null);
+  const selKey = selected.map((i) => [i.kind, i.uid, i.edge ?? ''].join(':')).join('|');
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = 0;
+  }, [selKey]);
+
   return (
     /**
      * **첫 구역을 위에 붙여 둔다.**
@@ -4539,6 +4556,7 @@ export default function Inspector() {
      *  지나가는 내용이 비쳐 보이기 때문이다.
      */
     <aside
+      ref={bodyRef}
       className={`w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel ${stickHead ? STUCK_HEAD : ''}`}
     >
       {multi ? <MultiPanel items={multi} />

@@ -529,10 +529,15 @@ t('모든 패널이 **구역으로 시작한다** — 이 방식이 기대는 �
  *  쪽으로 적으면 잊었을 때 **안 붙을 뿐**이다 — 틀리는 방향이 안전한 쪽이다.
  * -------------------------------------------------------------------------- */
 
-/** 인스펙터의 판정을 그대로 떼어 와 값으로 굴린다 */
+/**
+ * 인스펙터의 판정을 그대로 떼어 와 값으로 굴린다.
+ *  **그 한 문장만** 떼어야 한다 — 범위를 넓게 잡으면 옆에 있는 훅까지 딸려 와
+ *  `useRef is not defined` 로 터진다(실제로 겪었다).
+ */
+const stickLine = insp.match(/ {2}const stickHead = [^;]+;/)?.[0];
 const stickOf = (() => {
-  const body = cut(insp, '  const stickHead =', '  return (').replace(/\s*return \($/, '');
-  return new Function('multi', 'placed', 'cart', 'link', `${body}\n return stickHead;`);
+  assert.ok(stickLine, '판정 문장을 못 찾았다 — 이름이 바뀌었으면 이 검사도 고칠 것');
+  return new Function('multi', 'placed', 'cart', 'link', `${stickLine}\n return stickHead;`);
 })();
 
 t('설비 · 카트 · 컨베이어에는 붙인다 — 길고 만질 것이 많다', () => {
@@ -553,9 +558,8 @@ t('여럿 골랐을 때는 안 붙인다 — 첫 구역이 목록이라 붙일 �
 t('**빼는 목록이 아니라 붙이는 목록이다** — 잊었을 때 안 붙는 쪽으로 틀린다', () => {
   /* 이 방향이 이 규칙의 요점이다. 부정으로 적기 시작하면 패널이 늘 때마다
      여기를 손봐야 하고, 잊으면 짧은 패널이 조용히 붙는다. */
-  const body = cut(insp, '  const stickHead =', '  return (');
-  assert.match(body, /!!\(placed \|\| cart \|\| link\)/, '붙이는 목록이 아니다');
-  assert.equal(/wall|pillar|opening|zone|area/.test(body), false,
+  assert.match(stickLine, /!!\(placed \|\| cart \|\| link\)/, '붙이는 목록이 아니다');
+  assert.equal(/wall|pillar|opening|zone|area/.test(stickLine), false,
     '빼는 쪽으로 적혀 있다 — 패널이 늘 때마다 손봐야 한다');
 });
 
@@ -563,4 +567,29 @@ t('선반과 적치대는 **설비로 함께 걸린다** — 따로 적을 필�
   /* 둘 다 `placed` 에서 갈라져 나온 것이라 placed 하나면 셋이 다 걸린다 */
   assert.match(insp, /const shelf = placed && isShelf/);
   assert.match(insp, /const stillage = placed && isStillage/);
+});
+
+/* ---------- 고른 것이 바뀌면 스크롤을 맨 위로 ------------------------------- *
+ *  아래까지 내려가 손잡이를 만지다가 다른 설비를 고르면, 내용은 통째로 바뀌는데
+ *  스크롤만 그 자리에 남는다. 새로 고른 설비의 이름도, 무엇을 만드는지도 화면
+ *  밖이라 **엉뚱한 데를 보고 있게 된다.**
+ * -------------------------------------------------------------------------- */
+
+t('고른 것이 바뀌면 스크롤을 되돌린다', () => {
+  assert.match(insp, /bodyRef\.current\.scrollTop = 0/, '스크롤을 안 되돌린다');
+  assert.match(insp, /<aside\s*\n\s*ref=\{bodyRef\}/, '되돌릴 그릇에 안 물려 있다');
+});
+
+t('되돌리는 열쇠가 **고른 것들의 목록**이다 — 값이 바뀔 때마다 튀면 안 된다', () => {
+  /* 이름이나 손잡이 값이 바뀌었다고 되돌리면 만지는 도중에 화면이 튄다.
+     「무엇을 고르고 있나」가 바뀔 때만 되돌려야 한다. */
+  assert.match(insp, /const selKey = selected\.map/, '열쇠를 목록에서 안 만든다');
+  assert.match(insp, /\}, \[selKey\]\);/, '열쇠 말고 다른 것에 매여 있다');
+});
+
+t('벽은 **한 면씩** 고르므로 edge 까지 본다', () => {
+  /* 같은 벽의 옆면으로 옮기면 uid 는 그대로다 — edge 를 안 보면 안 되돌아간다 */
+  const line = insp.match(/const selKey = [^;]+;/)?.[0] ?? '';
+  assert.match(line, /i\.edge/, 'edge 를 안 본다 — 옆면으로 옮겨도 스크롤이 남는다');
+  assert.match(line, /i\.kind/, 'kind 를 안 본다 — 종류가 달라도 uid 가 같을 수 있다');
 });
