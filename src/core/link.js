@@ -87,7 +87,19 @@ export function resolveEndpoint(ep, placedList, itemOf, ctx = {}) {
   }
 
   const ports = portsOf(placed, itemOf(placed.itemId));
-  return ports.find((p) => p.id === ep.portId) ?? ports[0] ?? null;
+  /**
+   * 옛 이름으로도 찾는다.
+   * ---------------------------------------------------------------------------
+   *  포트 이름에서 방향 접미사를 걷어냈다(`PORT_IN@Z+1` → `PORT_IN_1`). 이미
+   *  그려 둔 도면은 **옛 이름**으로 포트를 가리키고 있으므로 그것도 받아 준다.
+   *
+   *  못 찾으면 `ports[0]` 으로 떨어지는데, 그게 이 자리에서 가장 나쁜 결과다 —
+   *  유출부를 가리키던 벨트가 **조용히 유입부에 붙는다.** 값도 그림도 멀쩡해
+   *  보이고 라인만 안 흐른다.
+   */
+  return ports.find((p) => p.id === ep.portId)
+    ?? ports.find((p) => p.raw === ep.portId)
+    ?? ports[0] ?? null;
 }
 
 

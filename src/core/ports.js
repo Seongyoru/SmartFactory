@@ -31,6 +31,28 @@ import { rotateXZ } from './grid.js';
 
 const PORT_NAME = /^(port|in|out)[_\-.]/i;
 const DIR_SUFFIX = /@\s*([xz])\s*([+-])/i;
+
+/**
+ * 보여 줄 이름 — 방향 접미사를 걷어낸다.
+ * ---------------------------------------------------------------------------
+ *      PORT_IN@Z+    →  PORT_IN
+ *      PORT_IN@Z+1   →  PORT_IN_1
+ *      PORT_OUT@Z-   →  PORT_OUT
+ *
+ *  **방향은 여전히 읽는다.** 접미사는 「이 포트가 어느 쪽으로 열려 있나」를
+ *  적는 칸이고, 마커를 놓은 자리와 어긋나면 경고를 내는 안전망이다(아래
+ *  `warning`). 실제로 그 경고가 뒤집힌 포트를 한 번 잡았다. 걷어내는 것은
+ *  **화면에 보여 줄 이름**뿐이고, 읽는 일은 그대로 한다.
+ *
+ *  @param name GLB 노드 이름
+ */
+export function simplifyPortId(name) {
+  const s = String(name ?? '');
+  const m = /^(.*?)@\s*[xz]\s*[+-]\s*(\d*)$/i.exec(s);
+  if (!m) return s;
+  const base = m[1].replace(/[_\-.\s]+$/, '');
+  return m[2] ? `${base}_${m[2]}` : base;
+}
 /* IN/OUT 판정.
    앞뒤가 글자가 아니기만 하면 인정한다 — PORT_IN@X- 처럼 방향 접미사가
    바로 붙는 형태가 표준이라, 구분자를 _ - . 로만 한정하면 전부 놓친다.
@@ -174,6 +196,8 @@ export function analyzeModel(object) {
 
     return {
       id: nm,
+      /** GLB 에 적힌 그대로 — 옛 도면이 이 이름으로 포트를 가리킨다 */
+      raw: nm,
       kind,
       pos: [pos.x, pos.y, pos.z],
       dir,
@@ -181,6 +205,22 @@ export function analyzeModel(object) {
       warning,
     };
   });
+
+  /**
+   * 이름을 단순하게 — 다만 **모델 안에서 겹치지 않을 때만**.
+   * ---------------------------------------------------------------------------
+   *  모델링 규약은 `PORT_IN` 과 `PORT_IN@Z-` 를 둘 다 허용한다. 모서리로 급전하는
+   *  설비라면 `PORT_IN@X-` 와 `PORT_IN@Z+` 가 함께 있을 수 있는데, 접미사를 떼면
+   *  **둘이 같은 이름으로 뭉개진다.** 그러면 벨트가 늘 첫 번째 것에만 붙고,
+   *  둘째 포트는 있는데 못 쓰는 것이 된다 — 화면에는 아무 말도 안 뜬다.
+   *
+   *  그래서 겹치면 그 모델은 **원래 이름을 그대로 쓴다.** 읽기 좋은 이름보다
+   *  가리키는 것이 정확한 이름이 먼저다.
+   */
+  const simple = ports.map((p) => simplifyPortId(p.raw));
+  if (new Set(simple).size === ports.length) {
+    ports.forEach((p, i) => { p.id = simple[i]; });
+  }
 
   /* 4) 폴백 — bbox 네 변 중앙에 자동 포트.
         높이는 모델 높이의 45% (일반적인 반송 높이) 로 잡는다. */
