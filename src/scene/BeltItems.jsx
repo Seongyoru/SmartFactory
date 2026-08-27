@@ -27,7 +27,7 @@ import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { simStep } from '../core/clock.js';
-import { beltCount, beltHas, beltHeld, beltKind, beltOffset, makeBelt } from '../core/belt.js';
+import { beltCount, beltHas, beltHeld, beltKind, beltLoad, beltOffset, makeBelt } from '../core/belt.js';
 import { runBelt } from '../core/sim.js';
 import { PAYLOAD_ITEM } from '../data/library.js';
 
@@ -71,11 +71,16 @@ export default function BeltItems({
     const n = Math.max(1, layers);
     const group = cloneScene(sp);
     group.position.set(0, 0, 0);
+    /* 0층은 group 자신이라 목록에 없다. **children 을 층 번호로 쓰면 안 된다** —
+       cloneScene 은 사본 하나를 통째로 주므로 자식을 이미 달고 온다. */
+    const tiers = [];
     for (let i = 1; i < n; i++) {
       const layer = cloneScene(sp);
       layer.position.y = i * h;
       group.add(layer);
+      tiers.push(layer);
     }
+    group.userData.tiers = tiers;
     return group;
   };
 
@@ -155,6 +160,18 @@ export default function BeltItems({
       /* 이번 종류만 보이게 — 나머지는 그대로 두고 끈다(다시 만들지 않는다) */
       for (const [k2, o] of slot.made) if (o) o.visible = (k2 === kind);
       if (!obj) { g.visible = false; continue; }
+
+      /**
+       * **실린 개수만큼만** 세운다.
+       *  덩어리가 늘 꽉 차지는 않는다 — 로트 4개를 3개씩 내보내면 `3 + 1` 로
+       *  나뉘고, 품종이 바뀌는 자리와 불량품이 끼는 자리마다 자투리가 생긴다.
+       *  늘 층 수만큼 그리면 1개 실린 칸이 3단으로 보이고, 그것이 적치대에
+       *  1개로 들어가니 「두 개가 사라졌다」로 읽힌다. 사라진 것은 없다 —
+       *  **그림이 거짓말을 한 것이다.**
+       */
+      const load = beltLoad(belt, k);
+      const tiers = obj.userData.tiers;
+      if (tiers) for (let i = 0; i < tiers.length; i++) tiers[i].visible = load >= i + 2;
 
       const f = path.at(s);
       g.visible = true;
