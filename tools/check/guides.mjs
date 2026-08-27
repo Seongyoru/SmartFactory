@@ -425,3 +425,37 @@ t('보고서 걸음은 **실제로 필요한 것**을 말한다', () => {
   const rep = G.guideById('plan').steps.find((s) => s.id === 'report');
   assert.match(rep.need, /밖으로 나가야|트럭/, '돌리기만 하면 되는 것처럼 말한다');
 });
+
+/* ---------- 설비 인스펙터의 **차례** ---------------------------------------- *
+ *  설비를 고르는 이유는 대개 둘이다 — 「이게 뭘 만들지」와 「얼마나 빨리 만들지」.
+ *  그 둘의 차례가 뒤집혀 있었다. 무엇을 만드는지 모르는 채로 처리량부터 읽게
+ *  했고, 「만드는 것」은 인력·고장 사이에 끼어 있었다.
+ *
+ *  차례를 재는 검사가 하나도 없었다 — 구역을 하나 옮기면 아무도 모른다.
+ * -------------------------------------------------------------------------- */
+
+const insp = await readSrc('ui/Inspector.jsx');
+
+t('설비 인스펙터 — **무엇을 만드나**가 처리량보다 위다', () => {
+  const at = (s) => insp.indexOf(s);
+  const 설비 = at('<Section title="설비">');
+  const 만드는것 = at('<RecipeSection key={placed.uid}');
+  const 생산 = at('<Section title="생산" data-guide="panel-production">');
+  const 인력 = at('<CrewFields placed={placed} />');
+
+  assert.ok(설비 > 0 && 만드는것 > 0 && 생산 > 0 && 인력 > 0, '구역을 못 찾았다');
+  assert.ok(설비 < 만드는것, '이름·ID 보다 위로 올라갔다 — 「무엇을 고쳤나」를 먼저 확인한다');
+  assert.ok(만드는것 < 생산, '처리량이 「만드는 것」보다 위다 — 답을 모르는 채로 속도를 읽는다');
+  assert.ok(생산 < 인력, '생산이 인력 아래로 내려갔다');
+});
+
+t('설비를 바꾸면 고른 품종도 처음으로 — key 가 살아 있다', () => {
+  /* 옮기다 key 를 흘리면, 앞 설비에서 2번 품종을 보던 상태가 그대로 남아
+     다른 설비의 2번이 열린다. 값은 멀쩡하고 화면만 거짓말한다. */
+  assert.match(insp, /<RecipeSection key=\{placed\.uid\}/, 'key 가 없다');
+});
+
+t('「만드는 것」이 한 벌만 있다 — 옮기다 두 벌이 되면 둘 다 그려진다', () => {
+  const n = insp.split('<RecipeSection key={placed.uid}').length - 1;
+  assert.equal(n, 1, `${n}벌`);
+});

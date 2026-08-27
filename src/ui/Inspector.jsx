@@ -898,6 +898,16 @@ function EquipmentPanel({ placed }) {
         <EquipUptime uid={placed.uid} />
       </Section>
 
+      {/* ── **무엇을 만드나**가 먼저다 ──────────────────────────────────────
+          설비를 고르는 이유는 대개 「이게 뭘 만들지」와 「얼마나 빨리 만들지」
+          둘이다. 그런데 그 둘의 순서가 뒤집혀 있었다 — 무엇을 만드는지 모르는
+          채로 처리량부터 읽게 했다. 위치·회전·전력보다 훨씬 자주 보는 것이라
+          맨 위 「설비」(이름·ID) 바로 다음이 제자리다.
+
+          설비를 바꾸면 **고른 품종도 처음으로** — key 가 없으면 앞 설비에서
+          2번 품종을 보던 상태가 그대로 남아, 다른 설비의 2번이 열린다 */}
+      <RecipeSection key={placed.uid} placed={placed} item={item} />
+
       <Section title="생산" data-guide="panel-production">
         <div className="rounded-md border border-edge bg-field px-2.5 py-2">
           <div className="flex items-baseline justify-between">
@@ -1154,10 +1164,6 @@ function EquipmentPanel({ placed }) {
           </p>
         </div>
       </Section>
-
-      {/* 설비를 바꾸면 **고른 품종도 처음으로** — key 가 없으면 앞 설비에서
-          2번 품종을 보던 상태가 그대로 남아, 다른 설비의 2번이 열린다 */}
-      <RecipeSection key={placed.uid} placed={placed} item={item} />
 
       <CrewFields placed={placed} />
 
