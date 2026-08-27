@@ -21,11 +21,13 @@
  * ---------------------------------------------------------------------------
  */
 
+import * as THREE from 'three';
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
+import { usePayloadSpecs } from '../core/payload.js';
 import { simStep } from '../core/clock.js';
-import { beltCount, beltHas, beltHeld, beltOffset, makeBelt } from '../core/belt.js';
+import { beltCount, beltHas, beltHeld, beltKind, beltOffset, makeBelt } from '../core/belt.js';
 import { runBelt } from '../core/sim.js';
 import { PAYLOAD_ITEM } from '../data/library.js';
 
@@ -50,6 +52,7 @@ export default function BeltItems({
   payload = PAYLOAD_ITEM,
 }) {
   const spec = useModelSpec(payload);
+  const specOf = usePayloadSpecs();
   /* 콜백은 매 렌더 새로 오므로 ref 로 잡아 둔다 — useFrame 을 다시 걸지 않기 위해 */
   const arriveRef = useRef(onArrive);
   arriveRef.current = onArrive;
@@ -62,24 +65,41 @@ export default function BeltItems({
   const step = Math.max(0.4, gap);
   const count = useMemo(() => beltCount(path?.length ?? 0, step), [path, step]);
 
-  /* 슬롯: 한 덩어리(= 여러 층)를 담는 그룹. 층수가 바뀔 때만 다시 만든다.
-     clone() 은 지오메트리·머티리얼을 공유하므로 수십 개를 놓아도 가볍다. */
+  /** 규격 하나로 한 덩어리(= 여러 층)를 세운다 */
+  const stackOf = (sp) => {
+    const h = sp.bbox.size[1] || 0.3;
+    const n = Math.max(1, layers);
+    const group = cloneScene(sp);
+    group.position.set(0, 0, 0);
+    for (let i = 1; i < n; i++) {
+      const layer = cloneScene(sp);
+      layer.position.y = i * h;
+      group.add(layer);
+    }
+    return group;
+  };
+
+  /**
+   * 칸마다 그릇 하나. 그 안에 **종류별 사본**이 들어간다.
+   * ---------------------------------------------------------------------------
+   *  칸은 최대 60개, 한 벨트에 흐를 수 있는 종류는 최대 8가지(양품 4 + 불량 4)다.
+   *  전부 미리 만들면 480 덩어리가 되는데, 실제로 흐르는 종류는 보통 한둘이다.
+   *  그래서 **그 칸에 그 종류가 처음 실릴 때** 만들어 붙인다.
+   *
+   *  안 보이는 것은 드로우콜이 안 나가고, 지오메트리·재질은 `cloneScene` 이
+   *  공유하므로 사본이 늘어도 메모리는 거의 안 는다.
+   */
   const slots = useMemo(() => {
     if (!spec || count === 0) return [];
-    const h = spec.bbox.size[1] || 0.3;
-    const n = Math.max(1, layers);
-    return Array.from({ length: count }, () => {
-      const group = cloneScene(spec);
-      group.position.set(0, 0, 0);
-      for (let i = 1; i < n; i++) {
-        const layer = cloneScene(spec);
-        layer.position.y = i * h;
-        group.add(layer);
-      }
-      group.visible = false;
-      return group;
-    });
+    return Array.from({ length: count }, () => ({ shell: new THREE.Group(), made: new Map() }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, count, layers]);
+
+  /* 매 프레임 고리 안에서 쓴다 — 훅을 다시 걸지 않으려고 ref 로 잡아 둔다 */
+  const specOfRef = useRef(specOf);
+  specOfRef.current = specOf;
+  const stackOfRef = useRef(stackOf);
+  stackOfRef.current = stackOf;
 
   /* 칸 수·간격·층수가 바뀌면 줄을 처음부터 다시 세운다 (반쯤 걸친 물건이 남지 않도록) */
   const belt = useMemo(() => makeBelt(count, layers), [count, step, layers]);
@@ -110,9 +130,32 @@ export default function BeltItems({
 
     const head = beltOffset(belt, step);
     for (let k = 0; k < list.length; k++) {
-      const g = list[k];
+      const slot = list[k];
+      const g = slot.shell;
       const s = head + k * step;
+      /**
+       * **둘을 따로 묻는다** — 「있나」와 「무엇인가」.
+       *  `beltHas` 는 `st.fill` 을, `beltKind` 는 `st.kinds` 를 본다. 색인은 같지만
+       *  보는 배열이 달라서, 물건은 있는데 이름표가 빈 칸이 생길 수 있다.
+       *  이름표 하나로 둘을 겸하면 그런 칸의 물건이 **통째로 사라진다.**
+       */
       if (s > L || !beltHas(belt, k)) { g.visible = false; continue; }
+      /* 이름표가 없는 칸(옛 도면·한 품종)은 줄에 준 payload 로 그린다 —
+         「무엇인지 모르겠다」가 「없다」가 되면 물건이 통째로 사라진다 */
+      const kind = beltKind(belt, k) ?? payload?.id ?? null;
+
+      /* 이 칸에 이 종류가 **처음** 실렸으면 그때 만든다 */
+      let obj = slot.made.get(kind);
+      if (obj === undefined) {
+        const sp = specOfRef.current?.(kind);
+        obj = sp ? stackOfRef.current(sp) : null;
+        if (obj) g.add(obj);
+        slot.made.set(kind, obj);           // 규격이 없으면 null 을 담아 다시 안 만든다
+      }
+      /* 이번 종류만 보이게 — 나머지는 그대로 두고 끈다(다시 만들지 않는다) */
+      for (const [k2, o] of slot.made) if (o) o.visible = (k2 === kind);
+      if (!obj) { g.visible = false; continue; }
+
       const f = path.at(s);
       g.visible = true;
       g.position.set(f.pos[0], f.pos[1], f.pos[2]);
@@ -123,8 +166,8 @@ export default function BeltItems({
   if (!slots.length) return null;
   return (
     <group>
-      {slots.map((g, i) => (
-        <primitive key={i} object={g} />
+      {slots.map((slot, i) => (
+        <primitive key={i} object={slot.shell} />
       ))}
     </group>
   );

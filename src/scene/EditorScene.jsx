@@ -2301,7 +2301,11 @@ function SceneContent() {
           speed={speed}
           gap={gap}
           layers={layers}
-          payload={payloadByKey(outKind)}
+          /* 갈래가 잡힌 벨트는 **그 종류**를 싣는다 — `outKind` 는 첫 레시피의
+             것이라, 불량품만 빼내는 벨트가 양품 색으로 그려지고 있었다.
+             (여러 종류를 나르는 벨트는 아직 첫 종류 색이다 — 칸마다 다르게
+              그리는 것은 BeltItems 쪽 일이다) */
+          payload={payloadByKey(kinds?.length === 1 ? kinds[0] : outKind)}
           /* 벨트가 도는가 — 보낼 곳이 없을 때만 선다 */
           running={state.running && !halted.links.has(link.uid)}
           /* 새로 올라탈 것이 있는가 — 앞 설비가 고장·무인·굶음이면 앞머리만 빈다 */
