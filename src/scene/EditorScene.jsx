@@ -130,7 +130,7 @@ const ANCHOR_MARGIN = 0.8;
  *  여기서 막힌 설비 목록을 함께 넘긴다 — 그 시간을 적분한 것이 곧 가동률이고,
  *  가장 오래 막힌 설비가 병목이다. 이미 매 프레임 계산하면서 버리던 값이다.
  */
-function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts, orders, warmup }) {
+function SimClock({ running, halted, jammed, starved, unmanned, equips, machines, shifts, orders, warmup, reaches }) {
   const ship = useShipped();
   const shipped = shippedTotal(ship);
   const elapsedSec = useElapsed();
@@ -139,11 +139,6 @@ function SimClock({ running, halted, jammed, starved, unmanned, equips, machines
    *  헤드리스 쪽은 `lineWorld` 가 같은 함수로 같은 값을 만든다. 두 곳이 따로
    *  계산하면 화면에서 본 순서와 반복 실행의 순서가 갈린다.
    */
-  /** 이 설비가 저 자리에 닿는가 — 도면이 바뀔 때만 다시 본다 */
-  const reaches = useMemo(
-    () => reachOf({ links: state.links, carts: state.carts }),
-    [state.links, state.carts],
-  );
   const orderInfo = useMemo(
     () => orderInfoOf(orders, { shipped: ship, arrivedOf, reaches }, elapsedSec),
     [orders, ship, elapsedSec, reaches],
@@ -856,6 +851,14 @@ function SceneContent() {
    * ---------------------------------------------------------------------- */
   /* 굴릴 설비 목록 — 계산은 `core/lineup.js` 가 한다(화면 밖도 같은 목록을 쓴다) */
   const machines = useMemo(() => machinesOf({ placed, itemOf }), [placed, itemOf]);
+  /**
+   * 이 설비가 저 자리에 닿는가 — 오더가 **도울 수 없는 설비**를 끌고 가지 않게.
+   *  도면이 바뀔 때만 다시 본다. 헤드리스 쪽은 `lineup.js` 가 같은 함수로 만든다.
+   */
+  const reaches = useMemo(
+    () => reachOf({ links: state.links, carts: state.carts }),
+    [state.links, state.carts],
+  );
 
   /**
    * 이 도면은 얼마나 데워야 하나 — **도면에서 센다**(`core/warmup.js`).
@@ -2055,6 +2058,7 @@ function SceneContent() {
         shifts={state.shifts}
         orders={state.orders}
         warmup={warmup}
+        reaches={reaches}
       />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />

@@ -102,3 +102,32 @@ t('두 길이 다 판정 함수를 물고 간다', () => {
   assert.match(sceneSrc, /reachOf\(\{ links: state\.links, carts: state\.carts \}\)/, '화면이 안 문다');
   assert.match(repSrc, /reaches: d\.reaches/, 'replicate 가 안 넘긴다');
 });
+
+/* ---------- 없는 변수를 쓰지 않았는가 --------------------------------------- *
+ *  `SimClock` 은 도면(`state`)을 안 받는 작은 컴포넌트다. 그런데 거기에
+ *  `state.links` 를 쓰는 줄을 넣어 **배포된 앱이 통째로 죽었다** —
+ *  「화면을 그리는 중 오류가 났습니다 · state is not defined」.
+ *
+ *  `vite build` 는 이것을 **안 잡는다.** 없는 식별자는 문법이 아니라 실행 때
+ *  터지기 때문이다. 이 세션에서 그 사실을 적어 두고도 또 당했다. 그래서 값이
+ *  아니라 **범위**를 못 박는다.
+ * -------------------------------------------------------------------------- */
+
+const simClock = (() => {
+  const at = sceneSrc.indexOf('function SimClock(');
+  assert.ok(at > 0, 'SimClock 을 못 찾았다 — 이름이 바뀌었으면 이 검사도 고칠 것');
+  /* 다음 최상위 닫는 중괄호까지 */
+  const end = sceneSrc.indexOf('\n}', at);
+  return sceneSrc.slice(at, end);
+})();
+
+t('SimClock 은 **도면을 안 만진다** — 받지도 않은 것을 쓰면 앱이 통째로 죽는다', () => {
+  assert.equal(/\bstate\./.test(simClock), false,
+    'SimClock 안에서 state 를 쓴다 — 이 컴포넌트는 state 를 안 받는다');
+});
+
+t('닿는가 판정은 **부모가 만들어 내려보낸다**', () => {
+  assert.match(simClock, /warmup, reaches \}/, 'SimClock 이 reaches 를 안 받는다');
+  assert.match(sceneSrc, /reaches=\{reaches\}/, '부모가 안 내려보낸다');
+  assert.match(sceneSrc, /const reaches = useMemo\(/, '부모가 안 만든다');
+});
