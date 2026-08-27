@@ -4459,6 +4459,29 @@ function Summary() {
   );
 }
 
+/**
+ * 붙어 있는 머리의 모양.
+ * ---------------------------------------------------------------------------
+ *  **줄로 나누지 않고 배열로 잇는다.** 여러 줄짜리 className 을 쓰면 그 안에
+ *  줄바꿈이 그대로 들어가는데, 이 저장소의 작업 파일은 CRLF 라 `\r` 까지 섞인다.
+ *  브라우저는 공백으로 보고 넘어가지만 번들 내용이 달라져, 같은 소스인데도
+ *  로컬과 CI 의 빌드 해시가 갈린다(실제로 그것 때문에 「배포가 안 됐다」고
+ *  한참 헤맸다). 배열로 이으면 만들어지는 문자열에 줄바꿈이 안 들어간다.
+ *
+ *  색은 `bg-head` 다 — 상단 툴바와 대화상자 머리가 쓰는, 이 앱의 **머리 표면**
+ *  색이다. 아래쪽 `bg-panel` 과 두 테마 모두에서 갈린다. 그림자는 붙었을 때
+ *  **위에 떠 있다**고 읽히게 한다.
+ */
+const STUCK_HEAD = [
+  '[&>div:first-child]:sticky',
+  '[&>div:first-child]:top-0',
+  '[&>div:first-child]:z-10',
+  '[&>div:first-child]:bg-head',
+  '[&>div:first-child]:max-h-[45%]',
+  '[&>div:first-child]:overflow-y-auto',
+  '[&>div:first-child]:shadow-[0_3px_8px_-4px_rgba(0,0,0,0.3)]',
+].join(' ');
+
 export default function Inspector() {
   const { state } = useEditor();
   useModelsVersion();
@@ -4497,10 +4520,7 @@ export default function Inspector() {
      *  지나가는 내용이 비쳐 보이기 때문이다.
      */
     <aside
-      className="w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel
-        [&>div:first-child]:sticky [&>div:first-child]:top-0 [&>div:first-child]:z-10
-        [&>div:first-child]:bg-panel [&>div:first-child]:shadow-[0_1px_0_var(--color-line)]
-        [&>div:first-child]:max-h-[45%] [&>div:first-child]:overflow-y-auto"
+      className={`w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel ${STUCK_HEAD}`}
     >
       {multi ? <MultiPanel items={multi} />
         : area ? <AreaPanel area={area} edge={sel.edge} />

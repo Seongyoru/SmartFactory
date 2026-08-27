@@ -474,9 +474,27 @@ t('오른쪽 패널의 첫 구역이 위에 붙는다', () => {
   assert.match(insp, /\[&>div:first-child\]:top-0/, '붙는 자리가 없다');
 });
 
-t('붙은 머리가 **제 바탕을 가진다** — 없으면 밑이 비쳐 보인다', () => {
-  assert.match(insp, /\[&>div:first-child\]:bg-panel/, '바탕이 없다 — 글자가 겹쳐 보인다');
+t('붙은 머리가 **아래와 색이 다르다** — 어디까지가 고정인지 보이게', () => {
+  /* 바탕이 아예 없으면 밑으로 지나가는 글자가 비쳐 보인다. 바탕을 주되 아래
+     (`bg-panel`)와 **같은 색이면** 어디까지가 붙어 있는 것인지 안 보인다.
+     `bg-head` 는 상단 툴바와 대화상자 머리가 쓰는 색이라 두 테마 모두에서
+     갈린다(밝은쪽 #ffffff 대 #f7f9fc · 어두운쪽 #0f172a 대 #0b1322). */
+  assert.match(insp, /\[&>div:first-child\]:bg-head/, '머리와 아래가 같은 색이다');
   assert.match(insp, /\[&>div:first-child\]:z-10/, '아래 내용이 머리 위로 지나간다');
+  assert.match(insp, /\[&>div:first-child\]:shadow-/, '떠 있다는 느낌이 없다');
+});
+
+t('머리 모양을 **배열로 잇는다** — 여러 줄 className 은 CRLF 를 품는다', () => {
+  /* 여러 줄로 쓰면 문자열 안에 줄바꿈이 그대로 들어가고, 이 저장소의 작업
+     파일은 CRLF 라 캐리지리턴까지 섞인다. 브라우저는 공백으로 넘기지만 번들
+     내용이 달라져 **로컬과 CI 의 빌드 해시가 갈린다** — 그것 때문에 「배포가
+     안 됐다」고 한참 헤맸다. */
+  assert.match(insp, /const STUCK_HEAD = \[/, '머리 모양이 상수로 안 묶여 있다');
+  assert.match(insp, /\]\.join\(' '\)/, '배열로 안 잇는다');
+  const at = insp.indexOf('className={`w-[292px]');
+  assert.ok(at > 0, 'aside 의 className 을 못 찾았다');
+  assert.equal(/\n/.test(insp.slice(at, insp.indexOf('}', at))), false,
+    'className 이 여러 줄이다 — 줄바꿈이 클래스 문자열에 들어간다');
 });
 
 t('머리가 패널을 다 먹지 않는다 — 낮은 창에서 볼 자리가 남아야 한다', () => {
