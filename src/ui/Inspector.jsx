@@ -30,7 +30,7 @@ import { REPS, REP_MIN } from './Scenarios.jsx';
 import { runReportCSV } from '../core/report.js';
 import { runReportHTML } from '../core/reportHtml.js';
 import {
-  DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, statusOf,
+  DEFAULT_ORDER, DONE_AT, ORDER, formatSpan, normalizeOrders, ruleGap, statusOf,
 } from '../core/orders.js';
 import {
   BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, REWORK_RANGE, SCRAP_TO,
@@ -844,6 +844,8 @@ function EquipmentPanel({ placed }) {
   const setupSec = setupOf(placed, item);
   /** 이 설비가 든 품종 수 — 슬라이더의 **이름이 여기에 달려 있다** */
   const kinds = recipesOf(placed).length;
+  /** 이 설비가 만드는 종류들 — 규칙이 도는지 따질 때 쓴다 */
+  const kindNames = recipesOf(placed).map((r) => outKindOf(r, item)).filter(Boolean);
   /** 로트를 채웠을 때 다음 품종을 무엇으로 고르나 (dispatch.js) */
   const rule = ruleOf(placed, item);
   /**
@@ -1122,6 +1124,13 @@ function EquipmentPanel({ placed }) {
                 ))}
               </select>
               <span className="mt-1 block text-[9.5px] leading-snug text-ink4">{RULE_HINT[rule]}</span>
+              {/* 규칙이 **먹일 것 없이** 돌고 있으면 그 사실을 말한다. 라인은 잘 돌고
+                  값도 그럴듯해서 화면만 보고는 알 방법이 없다. */}
+              {ruleGap(rule, state.orders, kindNames) && (
+                <span className="mt-1 block rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[9.5px] leading-snug text-ink2">
+                  {ruleGap(rule, state.orders, kindNames)}
+                </span>
+              )}
             </label>
           )}
           {lot > 0 && setupSec > 0 && (

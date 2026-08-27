@@ -266,3 +266,68 @@ t('오더가 없으면 규칙이 **조용히 차례대로가 된다** — 위 �
   assert.equal(D.nextSlot(0, KINDS, D.RULE.DUE, none), D.nextSlot(0, KINDS, D.RULE.ORDER));
   assert.equal(D.nextSlot(1, KINDS, D.RULE.BEHIND, none), D.nextSlot(1, KINDS, D.RULE.ORDER));
 });
+
+/* ---------- 규칙이 **먹일 것 없이** 돌 때 ---------------------------------- *
+ *  「납기 먼저」를 골라 두고 오더에 납기를 안 넣으면 규칙은 아무것도 안 하고
+ *  조용히 「차례대로」가 된다. 라인은 잘 돌고 값도 그럴듯하다.
+ *
+ *  실제로 그 상태로 한참 시험하다 「납기 먼저는 고장인가」로 이어졌다. 고장이
+ *  아니라 **먹일 것이 없었다.** 같은 오더인데 「밀린 것 먼저」만 돌던 것도 같은
+ *  까닭이다 — 진척은 0 이라도 견줄 수 있고, 남은 납기는 Infinity 라 못 견준다.
+ * -------------------------------------------------------------------------- */
+
+t('납기 없는 오더 — 납기 먼저가 **왜 안 도는지** 말한다', () => {
+  const o = [{ uid: 'O', kind: 'PART_R', qty: 100, dueMin: 0, at: 'ship' }];
+  const say = O.ruleGap(D.RULE.DUE, o, ['PART_R', 'PART_G']);
+  assert.ok(say, '아무 말도 안 한다');
+  assert.match(say, /납기/);
+});
+
+t('같은 오더로 밀린 것 먼저는 멀쩡하다 — 그래서 헷갈린다', () => {
+  const o = [{ uid: 'O', kind: 'PART_R', qty: 100, dueMin: 0, at: 'ship' }];
+  /* 진척은 0 이라도 견줄 수 있다. 한 품종에만 걸린 것은 따로 알린다 */
+  const say = O.ruleGap(D.RULE.BEHIND, o, ['PART_R', 'PART_G']);
+  assert.equal(/납기/.test(say ?? ''), false, '납기 얘기를 하면 안 된다');
+});
+
+t('그 말이 참인지 값으로 — 납기 0 이면 정말 차례대로다', () => {
+  const kinds = ['PART_R', 'PART_G'];
+  const info = O.orderInfoOf([{ uid: 'O', kind: 'PART_G', qty: 100, dueMin: 0, at: 'ship' }], {}, 0);
+  for (let c = 0; c < 4; c += 1) {
+    assert.equal(D.nextSlot(c, kinds, D.RULE.DUE, info), D.nextSlot(c, kinds, D.RULE.ORDER));
+  }
+  /* 밀린 것 먼저는 다르다 — 견줄 값이 있다 */
+  assert.notEqual(
+    [0, 1, 2, 3].map((c) => D.nextSlot(c, kinds, D.RULE.BEHIND, info)).join(),
+    [0, 1, 2, 3].map((c) => D.nextSlot(c, kinds, D.RULE.ORDER)).join(),
+  );
+});
+
+t('납기는 넣었는데 오더가 한 품종뿐이면 **그것을** 말한다', () => {
+  /* 틀린 것은 아니다. 다만 「왜 늘 이것만 만들지」의 답이라 말해 준다 */
+  const o = [{ uid: 'O', kind: 'PART_R', qty: 100, dueMin: 10, at: 'ship' }];
+  assert.match(O.ruleGap(D.RULE.DUE, o, ['PART_R', 'PART_G']), /한 품종에만/);
+});
+
+t('두 품종에 납기가 다 걸리면 할 말이 없다 — 그때가 규칙이 온전히 도는 때다', () => {
+  const o = [
+    { uid: 'A', kind: 'PART_R', qty: 100, dueMin: 10, at: 'ship' },
+    { uid: 'B', kind: 'PART_G', qty: 100, dueMin: 30, at: 'ship' },
+  ];
+  assert.equal(O.ruleGap(D.RULE.DUE, o, ['PART_R', 'PART_G']), null);
+  /* 그리고 실제로 급한 쪽을 고른다 */
+  const info = O.orderInfoOf(o, {}, 0);
+  assert.equal(D.nextSlot(0, ['PART_R', 'PART_G'], D.RULE.DUE, info), 0);   // R 이 10분
+});
+
+t('오더가 아예 없으면 그것도 말한다', () => {
+  assert.match(O.ruleGap(D.RULE.DUE, [], ['PART_R']), /오더가 없습니다/);
+});
+
+t('차례대로는 오더를 안 보므로 할 말이 없다', () => {
+  assert.equal(O.ruleGap(D.RULE.ORDER, [], ['PART_R']), null);
+});
+
+t('화면이 그 말을 실제로 띄운다', () => {
+  assert.match(inspSrc, /ruleGap\(rule, state\.orders, kindNames\)/, '인스펙터가 안 묻는다');
+});

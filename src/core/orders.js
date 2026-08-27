@@ -126,6 +126,40 @@ export function orderInfoOf(orders, ctx = {}, elapsedSec = 0) {
   }
   return (kind) => by.get(kind) ?? null;
 }
+/**
+ * 이 규칙이 **이 도면에서 실제로 도는가** — 안 돌면 그 까닭을 말한다.
+ * ---------------------------------------------------------------------------
+ *  「납기 먼저」를 골라 두고 오더에 납기를 안 넣으면, 규칙은 아무것도 안 하고
+ *  조용히 「차례대로」가 된다. 라인은 잘 돌고 값도 그럴듯해서 **화면만 보고는
+ *  알 방법이 없다.** 실제로 그 상태로 한참 시험하다 「납기 먼저는 고장인가」로
+ *  이어졌다.
+ *
+ *  ── 왜 「밀린 것 먼저」는 되고 「납기 먼저」는 안 되나 ────────────────────
+ *  같은 오더인데 **한쪽만 읽을 값이 있어서**다. 납기를 안 정하면 남은 납기는
+ *  `Infinity` 라 견줄 수가 없어 아예 탈락한다(`dispatch.js`). 진척은 0 이라도
+ *  멀쩡한 값이라 견줘진다. 규칙이 고장 난 것이 아니라 **먹일 것이 없던 것**이다.
+ *
+ *  @param rule  RULE 중 하나
+ *  @param orders 도면의 오더 전부
+ *  @param kinds 이 설비가 만드는 종류들
+ *  @returns 사람에게 할 말 · 아무 문제 없으면 null
+ */
+export function ruleGap(rule, orders = [], kinds = []) {
+  if (rule !== 'due' && rule !== 'behind') return null;
+  const mine = normalizeOrders(orders).filter((o) => kinds.includes(o.kind));
+  if (!mine.length) {
+    return '이 설비가 만드는 품종에 걸린 오더가 없습니다 — 차례대로 돌아갑니다.';
+  }
+  if (rule === 'due' && !mine.some((o) => o.dueMin > 0)) {
+    return '오더에 납기가 없습니다 — 납기를 넣어야 이 규칙이 돕니다. 지금은 차례대로 돌아갑니다.';
+  }
+  if (mine.length === 1 && kinds.length > 1) {
+    /* 견줄 상대가 없다 — 틀린 것은 아니지만 「왜 늘 이것만 만들지」의 답이다 */
+    return '오더가 한 품종에만 걸려 있습니다 — 그것을 다 만들 때까지 그것만 만듭니다.';
+  }
+  return null;
+}
+
 export const progressOf = (order, done) =>
   (order?.qty > 0 ? Math.min(1, Math.max(0, done / order.qty)) : 0);
 
