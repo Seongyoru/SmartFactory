@@ -4481,7 +4481,27 @@ export default function Inspector() {
   const multi = selected.length > 1 ? selected : null;
 
   return (
-    <aside className="w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel">
+    /**
+     * **첫 구역을 위에 붙여 둔다.**
+     * -------------------------------------------------------------------------
+     *  아래로 내려가 손잡이를 만지다 보면 「지금 무엇을 고치고 있더라」를 잃는다.
+     *  이름이 맨 위에 있는데 그것이 제일 먼저 밀려 올라가기 때문이다. 게다가
+     *  첫 구역에는 **손잡이를 만지면 따라 바뀌는 값들**이 있다(카트의 「앞차에
+     *  막힘」, 설비의 처리량). 붙여 두면 아래에서 값을 바꾸며 위에서 결과를 본다.
+     *
+     *  패널들은 프래그먼트를 돌려주므로 **`Section` 들이 곧 이 `aside` 의 자식**이다.
+     *  그래서 첫 자식 하나만 짚으면 열두 패널에 한꺼번에 먹고, 나중에 패널을
+     *  하나 더 만들어도 따로 손댈 것이 없다.
+     *
+     *  `bg-panel` 을 다시 주는 이유는 붙은 요소가 **제 바탕을 안 가지면** 밑으로
+     *  지나가는 내용이 비쳐 보이기 때문이다.
+     */
+    <aside
+      className="w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel
+        [&>div:first-child]:sticky [&>div:first-child]:top-0 [&>div:first-child]:z-10
+        [&>div:first-child]:bg-panel [&>div:first-child]:shadow-[0_1px_0_var(--color-line)]
+        [&>div:first-child]:max-h-[45%] [&>div:first-child]:overflow-y-auto"
+    >
       {multi ? <MultiPanel items={multi} />
         : area ? <AreaPanel area={area} edge={sel.edge} />
         : wall ? <WallPanel wall={wall} />

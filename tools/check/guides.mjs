@@ -459,3 +459,44 @@ t('「만드는 것」이 한 벌만 있다 — 옮기다 두 벌이 되면 둘 
   const n = insp.split('<RecipeSection key={placed.uid}').length - 1;
   assert.equal(n, 1, `${n}벌`);
 });
+
+/* ---------- 오른쪽 패널의 머리 고정 ---------------------------------------- *
+ *  아래로 내려가 손잡이를 만지다 보면 「지금 무엇을 고치고 있더라」를 잃는다.
+ *  이름이 맨 위에 있는데 그것이 제일 먼저 밀려 올라가기 때문이다.
+ *
+ *  패널들은 프래그먼트를 돌려주므로 `Section` 들이 곧 `aside` 의 자식이다.
+ *  첫 자식 하나만 짚으면 열두 패널에 한꺼번에 먹는다 — 나중에 패널을 더
+ *  만들어도 따로 손댈 것이 없다. 그 성질에 기대고 있으므로 못 박아 둔다.
+ * -------------------------------------------------------------------------- */
+
+t('오른쪽 패널의 첫 구역이 위에 붙는다', () => {
+  assert.match(insp, /\[&>div:first-child\]:sticky/, '첫 구역이 안 붙는다');
+  assert.match(insp, /\[&>div:first-child\]:top-0/, '붙는 자리가 없다');
+});
+
+t('붙은 머리가 **제 바탕을 가진다** — 없으면 밑이 비쳐 보인다', () => {
+  assert.match(insp, /\[&>div:first-child\]:bg-panel/, '바탕이 없다 — 글자가 겹쳐 보인다');
+  assert.match(insp, /\[&>div:first-child\]:z-10/, '아래 내용이 머리 위로 지나간다');
+});
+
+t('머리가 패널을 다 먹지 않는다 — 낮은 창에서 볼 자리가 남아야 한다', () => {
+  /* 실측: 644px 패널에서 첫 구역이 275px(43%) 다. 상한이 없으면 창이 낮을수록
+     비율이 커져 정작 고칠 손잡이가 안 보인다. */
+  assert.match(insp, /\[&>div:first-child\]:max-h-\[\d+%\]/, '머리 높이에 상한이 없다');
+  assert.match(insp, /\[&>div:first-child\]:overflow-y-auto/, '상한에 걸리면 내용이 잘려 안 보인다');
+});
+
+t('모든 패널이 **구역으로 시작한다** — 이 방식이 기대는 성질이다', () => {
+  /* 어느 패널이 다른 것으로 시작하면 그 패널만 머리가 안 붙는다.
+     조건부(`{x && <Section`)로 시작해도 그 조건이 거짓일 때 어긋난다. */
+  const panels = [...insp.matchAll(/^function (\w*Panel|Summary)\(/gm)].map((m) => m[1]);
+  assert.ok(panels.length >= 10, `패널을 ${panels.length}개만 찾았다`);
+  for (const name of panels) {
+    const at = insp.indexOf(`function ${name}(`);
+    const body = insp.slice(at, at + 9000);
+    const ret = body.indexOf('return (');
+    assert.ok(ret > 0, `${name}: return 을 못 찾았다`);
+    const head = body.slice(ret, ret + 400);
+    assert.match(head, /<(Section|>)/, `${name} 이 구역으로 시작하지 않는다 — 머리가 안 붙는다`);
+  }
+});
