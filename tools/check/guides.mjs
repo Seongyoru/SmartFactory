@@ -518,3 +518,49 @@ t('모든 패널이 **구역으로 시작한다** — 이 방식이 기대는 �
     assert.match(head, /<(Section|>)/, `${name} 이 구역으로 시작하지 않는다 — 머리가 안 붙는다`);
   }
 });
+
+/* ---------- 머리를 붙일 패널을 **고르는 규칙** ------------------------------ *
+ *  붙이는 값은 「아래로 내려가도 무엇을 고치는지 알고, 손잡이를 만지며 위에서
+ *  결과를 보는 것」이다. 그러려면 아래에 만질 것이 많아야 한다. 짧은 패널에서는
+ *  얻는 것 없이 자리만 먹는다 — 붙은 머리가 패널의 45%까지 간다.
+ *
+ *  그래서 **「붙이는 목록」으로 적는다.** 빼는 쪽으로 적으면 패널을 새로 만들
+ *  때마다 여기 와서 빼 줘야 하고, 잊으면 짧은 패널이 조용히 붙는다. 붙이는
+ *  쪽으로 적으면 잊었을 때 **안 붙을 뿐**이다 — 틀리는 방향이 안전한 쪽이다.
+ * -------------------------------------------------------------------------- */
+
+/** 인스펙터의 판정을 그대로 떼어 와 값으로 굴린다 */
+const stickOf = (() => {
+  const body = cut(insp, '  const stickHead =', '  return (').replace(/\s*return \($/, '');
+  return new Function('multi', 'placed', 'cart', 'link', `${body}\n return stickHead;`);
+})();
+
+t('설비 · 카트 · 컨베이어에는 붙인다 — 길고 만질 것이 많다', () => {
+  assert.equal(stickOf(null, {}, null, null), true, '설비(선반·적치대 포함)');
+  assert.equal(stickOf(null, null, {}, null), true, '카트 · 트럭');
+  assert.equal(stickOf(null, null, null, {}), true, '컨베이어 · 연결장치');
+});
+
+t('짧은 패널에는 **안 붙인다** — 벽 · 기둥 · 개구부 · 구역 · 도면 요약', () => {
+  /* 이 패널들은 셋 중 어느 것도 아니라 판정이 전부 거짓으로 떨어진다 */
+  assert.equal(stickOf(null, null, null, null), false);
+});
+
+t('여럿 골랐을 때는 안 붙인다 — 첫 구역이 목록이라 붙일 것이 아니다', () => {
+  assert.equal(stickOf([1, 2], {}, null, null), false, '설비 여럿을 골라도 목록이 먼저다');
+});
+
+t('**빼는 목록이 아니라 붙이는 목록이다** — 잊었을 때 안 붙는 쪽으로 틀린다', () => {
+  /* 이 방향이 이 규칙의 요점이다. 부정으로 적기 시작하면 패널이 늘 때마다
+     여기를 손봐야 하고, 잊으면 짧은 패널이 조용히 붙는다. */
+  const body = cut(insp, '  const stickHead =', '  return (');
+  assert.match(body, /!!\(placed \|\| cart \|\| link\)/, '붙이는 목록이 아니다');
+  assert.equal(/wall|pillar|opening|zone|area/.test(body), false,
+    '빼는 쪽으로 적혀 있다 — 패널이 늘 때마다 손봐야 한다');
+});
+
+t('선반과 적치대는 **설비로 함께 걸린다** — 따로 적을 필요가 없다', () => {
+  /* 둘 다 `placed` 에서 갈라져 나온 것이라 placed 하나면 셋이 다 걸린다 */
+  assert.match(insp, /const shelf = placed && isShelf/);
+  assert.match(insp, /const stillage = placed && isStillage/);
+});

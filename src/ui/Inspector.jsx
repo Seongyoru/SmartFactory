@@ -4503,6 +4503,25 @@ export default function Inspector() {
   const selected = selItems(sel);
   const multi = selected.length > 1 ? selected : null;
 
+  /**
+   * 머리를 붙일 패널인가 — **내용이 길고 만질 것이 많은 곳만.**
+   * ---------------------------------------------------------------------------
+   *  붙이는 값은 「아래로 내려가도 무엇을 고치는지 알고, 손잡이를 만지며 위에서
+   *  결과를 보는 것」이다. 그러려면 **아래에 만질 것이 많아야** 한다. 짧은
+   *  패널에서는 얻는 것 없이 자리만 먹는다(붙은 머리가 패널의 45%까지 간다).
+   *
+   *  그래서 「빼는 목록」이 아니라 **「붙이는 목록」**으로 적는다. 빼는 쪽으로
+   *  적으면 패널을 새로 만들 때마다 여기 와서 빼 줘야 하고, 잊으면 짧은 패널이
+   *  조용히 붙는다. 붙이는 쪽으로 적으면 잊었을 때 **안 붙을 뿐**이다.
+   *
+   *      설비 · 선반 · 적치대   `placed` 하나로 셋이 다 걸린다
+   *      카트 · 트럭          `cart`
+   *      컨베이어 · 연결장치    `link`
+   *
+   *  여럿을 골랐을 때는 목록이 첫 구역이라 붙일 것이 아니다.
+   */
+  const stickHead = !multi && !!(placed || cart || link);
+
   return (
     /**
      * **첫 구역을 위에 붙여 둔다.**
@@ -4520,7 +4539,7 @@ export default function Inspector() {
      *  지나가는 내용이 비쳐 보이기 때문이다.
      */
     <aside
-      className={`w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel ${STUCK_HEAD}`}
+      className={`w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel ${stickHead ? STUCK_HEAD : ''}`}
     >
       {multi ? <MultiPanel items={multi} />
         : area ? <AreaPanel area={area} edge={sel.edge} />
