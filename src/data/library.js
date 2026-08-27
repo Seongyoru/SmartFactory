@@ -406,6 +406,43 @@ export const allowedOutOf = (item) => {
 export const isScrapKind = (kind) => PAYLOAD_ITEMS[kind]?.family === FAMILY.SCRAP;
 
 /**
+ * =============================================================================
+ *  묶음 — 「불량품 전체」처럼 **여러 종류를 하나로** 고르는 값
+ * =============================================================================
+ *  선반 줄에 종류를 정할 때, 불량품이 품종마다 따로 나온다(`불량품 (제작품 1)`
+ *  …). 「불량품을 받는 줄」을 만들려면 일곱 개를 일곱 줄에 나눠 적어야 한다 —
+ *  줄이 하나뿐이면 아예 못 한다.
+ *
+ *  ── **`PAYLOAD_ITEMS` 안에 넣지 않는다** ─────────────────────────────────
+ *  거기 넣으면 종류인 척하게 되어 레시피·카트·오더로 샌다. 모델도 한 벌 더
+ *  읽는다(`payload.js`). 묶음은 **고르는 값**이지 물건이 아니다.
+ *
+ *  그래서 밖에 따로 둔다. 이 값이 재고(`lots`)에 들어가는 일은 **절대 없어야
+ *  한다** — 들어가도 아무것도 안 터지고 화면에 생짜 문자열이 그려질 뿐이라,
+ *  조용히 오염된다.
+ */
+export const KIND_GROUP = {
+  SCRAP_ANY: {
+    name: '불량품 전체',
+    /* 견본색을 `PAYLOAD_ITEMS.SCRAP.color` 에서 가져오면 안 된다 — 실제 값이
+       `#d1d1d1` 이라 밝은 바탕에서 안 보인다. 여기서 직접 정한다. */
+    color: '#8a8a8a',
+    has: isScrapKind,
+  },
+};
+
+/** 이 묶음(또는 종류)이 그 종류를 받는가 */
+export const kindMatches = (want, kind) => (
+  KIND_GROUP[want] ? KIND_GROUP[want].has(kind) : want === kind
+);
+
+/** 「받을 종류」 고르개에 놓을 것들 — 묶음이 먼저, 그다음 종류 */
+export const rowKindOptions = () => [
+  ...Object.entries(KIND_GROUP).map(([value, g]) => ({ value, name: g.name, color: g.color, group: true })),
+  ...Object.entries(PAYLOAD_ITEMS).map(([value, it]) => ({ value, name: it.name, color: it.color, group: false })),
+];
+
+/**
  * 이 설비를 놓을 때 레시피의 산출물로 심어 줄 종류 — 갈래의 첫 번째.
  *  **놓는 순간 한 번만** 쓰인다. 그 뒤로는 도면(`placed.recipe.out`)이 사실이고,
  *  라이브러리는 위의 갈래 제약으로만 관여한다.

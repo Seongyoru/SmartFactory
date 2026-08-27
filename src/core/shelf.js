@@ -17,7 +17,7 @@
  */
 
 import { getSpec } from './modelStore.js';
-import { PAYLOAD_ITEM } from '../data/library.js';
+import { KIND_GROUP, PAYLOAD_ITEM, kindMatches } from '../data/library.js';
 
 /** 모델을 못 읽었을 때 쓰는 기본 규격(m) — 절차적으로 그릴 치수이기도 하다 */
 export const FALLBACK = {
@@ -212,8 +212,23 @@ export function rowKinds(p) {
  */
 export function rowGroupOf(p, kind) {
   const kinds = rowKinds(p);
+
+  /* ① 제 이름이 적힌 줄이 먼저다 — 「불량품 (제작품 1)」 줄이 따로 있으면
+        묶음보다 그쪽으로 간다. 좁게 적은 쪽이 사람의 뜻에 가깝다. */
   const mine = kinds.map((k, r) => (k === kind ? r : -1)).filter((r) => r >= 0);
   if (mine.length) return { id: `k:${kind}`, rows: mine };
+
+  /**
+   * ② 묶음 줄 — 「불량품 전체」처럼 여러 종류를 받는 줄.
+   *  **id 를 묶음 값으로 낸다**(`g:SCRAP_ANY`). 종류마다 다른 id 를 내면 일곱
+   *  종류가 각자 한 통씩 차지해 그 줄의 자리가 **일곱 배로 뻥튀기된다.**
+   */
+  const group = kinds
+    .map((k, r) => (k && KIND_GROUP[k] && kindMatches(k, kind) ? { k, r } : null))
+    .filter(Boolean);
+  if (group.length) return { id: `g:${group[0].k}`, rows: group.map((g) => g.r) };
+
+  /* ③ 안 정한 줄들 — 예전처럼 섞여 쌓인다 */
   const free = kinds.map((k, r) => (k == null ? r : -1)).filter((r) => r >= 0);
   return { id: 'shared', rows: free };
 }

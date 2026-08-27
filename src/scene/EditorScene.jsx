@@ -265,8 +265,35 @@ const CameraRig = React.memo(function CameraRig({ view }) {
   }
   return (
     <>
-      <PerspectiveCamera makeDefault position={[26, 20, 30]} fov={42} near={0.1} far={600} />
-      <OrbitControls makeDefault target={[0, 1, 0]} maxPolarAngle={Math.PI / 2.05} enableDamping dampingFactor={0.1} />
+      {/**
+        * 깊이 정밀도 — **멀리 물러났을 때 구역이 바닥과 다투던 것.**
+        * ---------------------------------------------------------------------
+        *  깊이 버퍼의 눈금은 `near` 에 몰려 있다. `near=0.1 · far=600` 이면
+        *  비가 6000 이라 먼 쪽이 성기고, 바닥 위 24 mm 에 깔린 구역이 같은
+        *  눈금으로 뭉개져 얼룩진다. 재 보니 **100~150 m 밖에서만** 났다 —
+        *  가까이서는 눈금이 수십에서 수백 개씩 남는다.
+        *
+        *  둘로 막는다.
+        *    · `near` 를 0.5 로 올린다 — 비가 6000 → 1200, 먼 쪽 눈금이 다섯 배
+        *    · **`maxDistance` 로 그 거리에 못 가게 한다** — 이쪽이 실제 수정이다
+        *
+        *  도면이 120 m 짜리라 170 m 면 이미 전체가 화면에 들어온다. 더 물러날
+        *  일이 없으므로 잘라도 잃는 것이 없다.
+        *
+        *  `minDistance` 는 `near` 상향의 짝이다 — 안 걸면 바싹 붙였을 때 설비가
+        *  잘려 사라진다. `maxPolarAngle` 은 **그대로 둔다**: 눕히는 쪽이 오히려
+        *  안전하다(광선이 두 면 사이를 더 길게 지나 분리가 커진다).
+        */}
+      <PerspectiveCamera makeDefault position={[26, 20, 30]} fov={42} near={0.5} far={600} />
+      <OrbitControls
+        makeDefault
+        target={[0, 1, 0]}
+        maxPolarAngle={Math.PI / 2.05}
+        minDistance={2}
+        maxDistance={170}
+        enableDamping
+        dampingFactor={0.1}
+      />
     </>
   );
 });

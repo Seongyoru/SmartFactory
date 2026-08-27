@@ -61,6 +61,7 @@ import {
 import { FIXED_RANGE, KW_RANGE, fixedOf, idleKwOf, normalizeRates, runKwOf, unitWon, won } from '../core/cost.js';
 import {
   PAYLOAD_ITEMS, isScrapKind, allowedOutOf, canonKind, isShelf, isStillage, isTruck, isUtility,
+  rowKindOptions,
 } from '../data/library.js';
 import {
   MAX_BAYS,
@@ -1665,15 +1666,20 @@ function ShelfPanel({ placed }) {
           `${rows} 줄 · 전체 깊이 ${shelfDepth(placed, spec).toFixed(2)} m`)}
         {rows > 1 && num('통로 폭', 'rowGap', MIN_ROW_GAP, MAX_ROW_GAP, 0.1, aisle, `${aisle.toFixed(2)} m`)}
 
-        {rows > 1 && (
-          <div className="mt-2">
+        {/* 줄이 하나여도 **받을 종류를 정할 수 있다.** 예전에는 여러 줄일 때만
+            띄웠는데, 「이 선반은 불량품만 받는다」는 줄 수와 상관없는 이야기다.
+            시뮬 쪽은 원래부터 한 줄에서도 제대로 돈다(rowGroupOf 는 줄 수를 안 본다). */}
+        <div className="mt-2">
             <p className="mb-1 text-[10.5px] leading-relaxed text-ink4">
-              줄마다 받을 종류를 정할 수 있습니다. <b className="text-ink3">안 정한 줄</b>은
-              지금처럼 섞어서 받고, 정한 줄은 그 종류만 받습니다.
+              {rows > 1
+                ? <>줄마다 받을 종류를 정할 수 있습니다. <b className="text-ink3">안 정한 줄</b>은 지금처럼 섞어서 받고, 정한 줄은 그 종류만 받습니다.</>
+                : <>이 선반이 받을 종류를 정할 수 있습니다. <b className="text-ink3">안 정하면</b> 지금처럼 섞어서 받습니다.</>}
             </p>
             {rowList.map((kind, r) => (
               <div key={r} className="mt-1 flex items-center gap-1.5">
-                <span className="w-10 shrink-0 text-[10.5px] tabular-nums text-ink4">{r + 1}번 줄</span>
+                <span className={`${rows > 1 ? 'w-10' : 'w-14'} shrink-0 text-[10.5px] tabular-nums text-ink4`}>
+                  {rows > 1 ? `${r + 1}번 줄` : '받을 종류'}
+                </span>
                 <select
                   value={kind ?? ''}
                   onChange={(e) => {
@@ -1684,14 +1690,14 @@ function ShelfPanel({ placed }) {
                   className="min-w-0 flex-1 rounded border border-edge bg-field px-1 py-0.5 text-[11px] text-ink outline-none focus:border-sky-500/60"
                 >
                   <option value="">안 정함 (섞어서)</option>
-                  {Object.entries(PAYLOAD_ITEMS).map(([k, it]) => (
-                    <option key={k} value={k}>{it.name}</option>
+                  {rowKindOptions().map((o) => (
+                    <option key={o.value} value={o.value}>{o.name}</option>
                   ))}
                 </select>
                 {kind && (
                   <i
                     className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-black/20"
-                    style={{ background: PAYLOAD_ITEMS[kind]?.color ?? '#94a3b8' }}
+                    style={{ background: rowKindOptions().find((o) => o.value === kind)?.color ?? '#94a3b8' }}
                   />
                 )}
               </div>
@@ -1702,8 +1708,7 @@ function ShelfPanel({ placed }) {
                 한 줄은 비워 두면 나머지가 섞여 들어갑니다.
               </p>
             )}
-          </div>
-        )}
+        </div>
       </Section>
 
       <Section title="수용량">

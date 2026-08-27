@@ -286,3 +286,90 @@ t('띠는 줄 수가 바뀌면 **바로** 다시 그려진다', () => {
     assert.ok(deps.includes(`placed.${k}`), `zones useMemo 가 ${k} 를 안 본다`);
   }
 });
+
+/* ---------- 줄이 하나여도 종류를 정한다 ------------------------------------ *
+ *  「이 선반은 불량품만 받는다」는 줄 수와 상관없는 이야기다. 그런데 고르개가
+ *  여러 줄일 때만 떴다. 시뮬 쪽은 원래부터 한 줄에서도 제대로 돌고 있었다 —
+ *  `rowGroupOf` 는 줄 수를 안 본다. 막고 있던 것은 화면 하나뿐이었다.
+ * -------------------------------------------------------------------------- */
+
+const L = await import(SRC + 'data/library.js');
+const inspSrc = await readSrc('ui/Inspector.jsx');
+
+t('한 줄 선반도 제 종류만 받는다', () => {
+  const p = { ...ONE, rowKinds: ['PART_R'] };
+  assert.deepEqual(S.rowGroupOf(p, 'PART_R').rows, [0]);
+  assert.deepEqual(S.rowGroupOf(p, 'PART_G').rows, [], '안 적은 종류가 들어간다');
+});
+
+t('한 줄이어도 안 정하면 예전처럼 섞어 받는다', () => {
+  const p = { ...ONE };
+  assert.equal(S.rowGroupOf(p, 'PART_R').id, 'shared');
+  assert.deepEqual(S.rowGroupOf(p, 'PART_R').rows, [0]);
+});
+
+t('화면이 **줄 수로 막지 않는다**', () => {
+  /* 이 한 조건이 기능 전부를 막고 있었다 */
+  assert.equal(/\{rows > 1 && \(\s*\n\s*<div className="mt-2">/.test(inspSrc), false,
+    '고르개가 아직 여러 줄일 때만 뜬다');
+  assert.match(inspSrc, /rowKindOptions\(\)\.map/, '고르개가 묶음 목록을 안 쓴다');
+});
+
+/* ---------- 불량품 전체 ----------------------------------------------------- *
+ *  불량품은 품종마다 따로 있다(`불량품 (제작품 1)` …). 「불량품을 받는 줄」을
+ *  만들려면 일곱 개를 일곱 줄에 나눠 적어야 했다 — 줄이 하나면 아예 못 했다.
+ * -------------------------------------------------------------------------- */
+
+const SCRAPS = Object.keys(L.PAYLOAD_ITEMS).filter((k) => L.isScrapKind(k));
+
+t('불량품은 일곱 가지다 — 아래 검사들의 전제', () => {
+  assert.equal(SCRAPS.length, 7, `${SCRAPS.length}가지 — 전제가 바뀌었으면 아래도 다시 볼 것`);
+});
+
+t('묶음 줄이 **모든 불량품**을 받는다', () => {
+  const p = { ...ONE, rowKinds: ['SCRAP_ANY'] };
+  for (const k of SCRAPS) {
+    assert.deepEqual(S.rowGroupOf(p, k).rows, [0], `${k} 가 안 들어간다`);
+  }
+});
+
+t('묶음 줄은 양품을 안 받는다', () => {
+  const p = { ...ONE, rowKinds: ['SCRAP_ANY'] };
+  assert.deepEqual(S.rowGroupOf(p, 'PART_R').rows, [], '양품이 불량품 줄에 들어간다');
+});
+
+t('**일곱 종이 한 통에 합쳐서 찬다** — 종류마다 세면 자리가 일곱 배가 된다', () => {
+  const p = { ...ONE, rowKinds: ['SCRAP_ANY'] };
+  const ids = SCRAPS.map((k) => S.rowGroupOf(p, k).id);
+  assert.equal(new Set(ids).size, 1, `통이 ${new Set(ids).size}개다 — 자리가 뻥튀기된다`);
+});
+
+t('제 이름으로 적은 줄이 **묶음보다 먼저**다 — 좁게 적은 쪽이 사람의 뜻이다', () => {
+  const p = { ...THREE, rowKinds: ['SCRAP_ANY', 'SCRAP_PART_R', null] };
+  assert.deepEqual(S.rowGroupOf(p, 'SCRAP_PART_R').rows, [1], '제 줄을 놔두고 묶음으로 간다');
+  assert.deepEqual(S.rowGroupOf(p, 'SCRAP_PART_G').rows, [0], '묶음 줄로 안 간다');
+});
+
+t('묶음 줄이 있어도 **안 정한 줄**은 그대로 공용이다', () => {
+  const p = { ...THREE, rowKinds: ['SCRAP_ANY', null, null] };
+  assert.equal(S.rowGroupOf(p, 'PART_R').id, 'shared');
+  assert.deepEqual(S.rowGroupOf(p, 'PART_R').rows, [1, 2]);
+});
+
+t('**묶음은 종류가 아니다** — 재고로 새면 안 터지고 조용히 오염된다', () => {
+  /* `PAYLOAD_ITEMS` 안에 넣으면 레시피·카트·오더로 샌다. 모델도 한 벌 더 읽는다 */
+  assert.equal(L.PAYLOAD_ITEMS.SCRAP_ANY, undefined, '묶음이 종류 표에 들어갔다');
+  assert.equal(L.canonKind('SCRAP_ANY'), null, '묶음이 종류로 통과된다');
+  assert.equal(/setStock\(placed\.uid, capacity, /.test(inspSrc), false,
+    '「가득 채우기」가 줄 값을 재고에 직결한다 — 묶음이 재고가 된다');
+});
+
+t('묶음 견본색이 따로 있다 — 불량품 색은 밝은 바탕에서 안 보인다', () => {
+  const opt = L.rowKindOptions().find((o) => o.value === 'SCRAP_ANY');
+  assert.ok(opt?.group, '묶음이 목록에 없다');
+  assert.notEqual(opt.color, L.PAYLOAD_ITEMS.SCRAP?.color);
+});
+
+t('묶음이 목록 **맨 앞**에 온다 — 종류 열세 개 밑에 묻히면 못 찾는다', () => {
+  assert.equal(L.rowKindOptions()[0].value, 'SCRAP_ANY');
+});
