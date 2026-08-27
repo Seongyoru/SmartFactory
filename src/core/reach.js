@@ -59,7 +59,15 @@ export function reachOf(d = {}) {
     if (!from || !to || from === to) return true;
     const seen = new Set([from]);
     const queue = [from];
+    /**
+     * 걸음 수를 묶어 둔다 — `seen` 이 순환을 막지만, 그 그물이 언젠가 찢어지면
+     * **검사가 실패하는 게 아니라 멈춘다**(실제로 겪었다). 멈추는 것보다는
+     * 「모르겠다」가 낫고, 모르면 이 파일의 방향대로 **닿는 것으로** 답한다.
+     */
+    let steps = 0;
+    const cap = links.length + 2;
     while (queue.length) {
+      if (++steps > cap) return true;
       const cur = queue.shift();
       /* 여기서부터는 어디로 가는지 모른다 — 닿는 것으로 본다 */
       if (murky.has(cur)) return true;
