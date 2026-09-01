@@ -143,3 +143,51 @@ t('가장 약한 고리가 여럿이면 **그 사실을 말한다**', () => {
   assert.ok(/chain\[0\]\?\.items\.length > 1/.test(inspector), '하나만 고쳐도 되는 것처럼 보인다');
   assert.ok(/하나만 고치면 하나도 안 오릅니다/.test(inspector), '경고 문구가 없다');
 });
+
+/* ---------- 배수가 **모든 산출 종류**를 본다 -------------------------------- *
+ *  배수를 세는 걸음이 `outputKindOf` 하나만 봤다 — **첫 레시피의 산출**이다.
+ *  그러면 제작품 1·2 를 만드는 설비가 제작품 **2** 를 먹는 조립기에 물려 있을 때
+ *  그 수요가 통째로 안 보이고 배수가 1 로 남는다. 하류가 두 개씩 먹는데도
+ *  「최종 1개당 1개」로 세어 **천장이 두 배 부푼다.**
+ *
+ *  **규칙과 무관한 별개 버그다** — 차례대로에서도 부푼다.
+ * -------------------------------------------------------------------------- */
+
+/** 한 설비가 두 품종을 내고, 조립기는 **둘째 것만** 먹는다 */
+const secondOnly = (recipes) => ({
+  placed: [
+    { uid: 'P1', itemId: M, name: '제작기', pos: [0, 0], cycleSec: 3, recipes },
+    { uid: 'A1', itemId: A, name: '조립기', pos: [6, 0], cycleSec: 6,
+      recipes: [{ out: 'ASM_Y', in: [{ kind: 'PART_G', qty: 2 }] }] },
+  ],
+  links: [{ uid: 'B1', itemId: 'CONVEYOR', name: '벨트', from: { uid: 'P1' }, to: { uid: 'A1' } }],
+  carts: [],
+  itemOf,
+});
+
+t('**둘째 품종을 먹는 하류도 배수에 든다**', () => {
+  const two = B.lineBalance(secondOnly([{ out: 'PART_R', in: [] }, { out: 'PART_G', in: [] }]));
+  const p = rowOf(two, '제작기');
+  assert.equal(p.mult, 2, `배수 ${p.mult} — 첫 레시피만 보고 있다`);
+});
+
+t('단품종이면 예전과 같다 — 이 고침이 흔한 도면을 안 건드린다', () => {
+  const one = B.lineBalance(secondOnly([{ out: 'PART_G', in: [] }]));
+  assert.equal(rowOf(one, '제작기').mult, 2);
+});
+
+t('배수가 천장을 실제로 낮춘다 — 세기만 하고 안 쓰면 헛일이다', () => {
+  /* 배수가 1 이면 천장이 두 배로 부푼다. 그 부풀림이 라인 천장까지 간다 */
+  const two = B.lineBalance(secondOnly([{ out: 'PART_R', in: [] }, { out: 'PART_G', in: [] }]));
+  const p = rowOf(two, '제작기');
+  near(p.capacity, p.own / p.mult);
+  assert.ok(two.capacity <= p.own, '배수를 안 나눈 값이 라인 천장이 됐다');
+});
+
+t('아무도 안 먹으면 배수는 1 — 최종 공정', () => {
+  const alone = {
+    placed: [{ uid: 'P1', itemId: M, name: '제작기', pos: [0, 0], cycleSec: 3, recipes: [{ out: 'PART_R', in: [] }] }],
+    links: [], carts: [], itemOf,
+  };
+  assert.equal(rowOf(B.lineBalance(alone), '제작기').mult, 1);
+});
