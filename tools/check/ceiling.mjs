@@ -22,7 +22,7 @@
  *  「실측이 천장을 안 넘는다」만은 **어떤 값이 나오든 참이어야 한다.**
  */
 import assert from 'node:assert/strict';
-import { SRC, group, t } from './_harness.mjs';
+import { SRC, group, readSrc, t } from './_harness.mjs';
 import { itemOf, loadModels, specOf as specById } from './_models.mjs';
 
 group('천장과 실측');
@@ -33,6 +33,7 @@ const Lu = await import(SRC + 'core/lineup.js');
 const R = await import(SRC + 'core/replicate.js');
 const St = await import(SRC + 'core/simStore.js');
 const LIB = await import(SRC + 'data/library.js');
+const lineupSrc2 = await readSrc('core/lineup.js');
 
 await loadModels(['MACHINE_1', 'STILLAGE', 'CONVEYOR']);
 const idByKey = new Map(LIB.BUILTIN_LIBRARY.filter((x) => x.modelKey).map((x) => [x.modelKey, x.id]));
@@ -124,8 +125,58 @@ t('**어느 규칙이든 실측이 천장을 안 넘는다** — 이것이 이 �
 /* ---------- 단위 ------------------------------------------------------------ */
 
 t('천장은 **품종당**, 실측 합계는 품종 전부 — 그냥 견주면 안 된다', () => {
-  /* 화면(`RunDock`)은 합계를 품종당 천장으로 나눠 「천장의 몇 %」라고 말한다.
-     2품종이면 차례대로에서도 180% 가 나온다 — 규칙과 무관한 별개의 어긋남이다. */
+  /* 한때 화면이 합계를 품종당 천장으로 나눠 「천장의 몇 %」라고 말했다.
+     2품종이면 차례대로에서도 180% 가 찍혔다 — 규칙과 무관한 별개의 어긋남이다.
+     지금은 합계 천장(`total`)과 견준다(아래 묶음). 이 검사는 **왜 나눠야
+     하는지**의 근거를 값으로 남겨 둔다. */
   assert.equal(r1(order.all), 14.4, `전체 ${r1(order.all)}`);
   assert.ok(order.all > order.cap * 1.5, '합계가 품종당 천장을 크게 넘지 않는다');
+});
+
+/* ---------- 합계 천장 ------------------------------------------------------- *
+ *  잰 값은 품종을 전부 더한 것인데 `capacity` 는 품종당이다. 그대로 나누면
+ *  2품종 라인에서 **차례대로인데도 180%** 가 찍힌다 — 천장을 넘었다는 말이라
+ *  도구가 거짓말을 한다. `total` 이 품종을 안 나눈 값이다.
+ * -------------------------------------------------------------------------- */
+
+const balOf = (rule) => {
+  const placed = [
+    {
+      uid: 'P1', name: '제작기', itemId: 'MACHINE_1', pos: [-6, 6], rot: 0,
+      outputCount: 3, cycleSec: 3, lotSize: 20, setupSec: 15, recipes: TWO, dispatch: rule,
+    },
+    { uid: 'S1', name: '적치대', itemId: 'STILLAGE', pos: [-6, 0], rot: 0, capacity: 400 },
+  ];
+  return B.lineBalance({ placed, links, carts: [], itemOf, specOf, beltSpeed: 0.6 });
+};
+
+t('합계 천장은 품종을 **안 나눈** 값이다', () => {
+  const b = balOf('order');
+  assert.equal(r1(b.capacity), 8, `품종당 ${r1(b.capacity)}`);
+  assert.equal(r1(b.total), 16, `합계 ${r1(b.total)}`);
+});
+
+t('**품종 합계는 합계 천장 안에 들어온다** — 180% 가 안 찍힌다', () => {
+  const b = balOf('order');
+  assert.ok(order.all <= b.total + 1e-9, `실측 합계 ${r1(order.all)} > 합계 천장 ${r1(b.total)}`);
+  assert.ok(order.all > b.capacity, '이 도면이 애초에 품종당 천장을 안 넘는다 — 검사가 헛돈다');
+});
+
+t('몰빵할 수 있는 규칙이면 둘이 같다 — 나눌 것이 없다', () => {
+  const b = balOf('due');
+  assert.equal(r1(b.capacity), r1(b.total), '품종당과 합계가 갈린다');
+});
+
+t('단품종이면 둘이 같다 — 흔한 도면이 안 바뀐다', () => {
+  const placed = [
+    { uid: 'P1', name: '제작기', itemId: 'MACHINE_1', pos: [-6, 6], rot: 0,
+      outputCount: 3, cycleSec: 3, lotSize: 20, setupSec: 15, recipes: [{ out: 'PART_R', in: [] }] },
+    { uid: 'S1', name: '적치대', itemId: 'STILLAGE', pos: [-6, 0], rot: 0, capacity: 400 },
+  ];
+  const b = B.lineBalance({ placed, links, carts: [], itemOf, specOf, beltSpeed: 0.6 });
+  assert.equal(r1(b.capacity), r1(b.total));
+});
+
+t('화면이 **합계 쪽**을 쓴다 — 값만 맞고 안 쓰면 그대로 180% 다', () => {
+  assert.match(lineupSrc2, /totalCapacity: lineBalance\(/, '천장을 안 내려보낸다');
 });
