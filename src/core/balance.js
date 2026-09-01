@@ -32,6 +32,7 @@ import {
   setupOf, spacingFor, unitCycleOf,
 } from './process.js';
 import { beltKinds } from './link.js';
+import { RULE, ruleOf } from './dispatch.js';
 import { recipesOf, sendKindsOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
@@ -136,7 +137,7 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
      *  **12초에 하나** 낸다 — 절반의 시간은 다른 것을 만든다. 안 나누면 천장이
      *  두 배로 부풀고, 돌려 본 결과가 절반으로 나온다.
      */
-    const many = Math.max(1, recipesOf(p).length);
+    const many = ruleOf(p, item) === RULE.ORDER ? Math.max(1, recipesOf(p).length) : 1;
     const own = perMinute(eff) / many;
     const m = mult.get(p.uid) ?? 1;
     rows.push({

@@ -205,7 +205,8 @@ function Replicate() {
 
   return (
     <>
-      <div className="flex items-end gap-1.5">
+      {/* 손잡이는 좁아도 된다 — 넓힌 것은 **결과**를 두 열로 펴려는 것이다 */}
+      <div className="flex max-w-[240px] items-end gap-1.5">
         <label className="flex-1">
           <span className="block text-[10px] text-ink4">판 수</span>
           <input
@@ -223,12 +224,22 @@ function Replicate() {
           />
         </label>
       </div>
-      <button type="button" onClick={go} disabled={busy} className={`${OUT_BTN} mt-1.5 w-full justify-center disabled:opacity-50`}>
+      <button type="button" onClick={go} disabled={busy} className={`${OUT_BTN} mt-1.5 w-full max-w-[240px] justify-center disabled:opacity-50`}>
         <Repeat size={13} /> {busy ? '돌리는 중…' : '여러 번 돌려 보기'}
       </button>
 
+      {/**
+        * **결과는 두 열로 편다.**
+        * -------------------------------------------------------------------
+        *  띠에 남는 높이는 270px 남짓인데 폭은 남는다. 세로로 쌓으면 아래쪽
+        *  문단이 잘리고, 잘린 것을 볼 방법이 없었다. 이 저장소가 같은 문제를
+        *  전에도 두 열로 풀었다(작동 시간 목록 · 단가).
+        *
+        *  스크롤도 걸어 두었지만 그건 **그물**이다. 폭이 남는데 세로로 쌓아 놓고
+        *  스크롤하게 만드는 것은 답이 아니다.
+        */}
       {out && (
-        <div className="mt-1.5 border-t border-line pt-1.5">
+        <div className="mt-1.5 grid grid-cols-2 gap-x-3 border-t border-line pt-1.5">
           {/**
             * **0 을 「0 ± 0」 이라고 하면 안 된다.**
             *  처리량은 **밖으로 나간 것**을 센다(app 의 다른 곳과 같은 정의다).
@@ -238,11 +249,16 @@ function Replicate() {
             */}
           {out.mean > 0 ? (
             <>
+              {/* 왼쪽 — 잰 값 */}
+              <div>
               <Line label="처리량" big>{ciText(out, 0)}<span className="text-[10px] text-ink4"> 개/시</span></Line>
               <p className="mt-0.5 text-[9.5px] leading-snug text-ink4">
                 {out.n}판 · 95% 구간 <b className="text-ink3">{out.lo.toFixed(0)} ~ {out.hi.toFixed(0)}</b>
                 {' · '}{Math.round(out.ms)}ms
               </p>
+              </div>
+              {/* 오른쪽 — 그 값을 어떻게 읽나 */}
+              <div>
               {/**
                 * **천장과 잰 값을 나란히 놓는다.**
                 * -----------------------------------------------------------
@@ -262,18 +278,19 @@ function Replicate() {
                 </p>
               )}
 
-          <p className="mt-1 text-[9.5px] leading-snug text-ink4">
-            <b className="text-ink3">± 가 큰 것은 배치가 나쁜 게 아니라</b> 그만큼 흔들린다는 뜻입니다.
-            판 수를 늘리면 구간이 좁아집니다.
-          </p>
+              <p className="mt-1 text-[9.5px] leading-snug text-ink4">
+                <b className="text-ink3">± 가 큰 것은 배치가 나쁜 게 아니라</b> 그만큼 흔들린다는 뜻입니다.
+                판 수를 늘리면 구간이 좁아집니다.
+              </p>
+              </div>
             </>
           ) : (
-            <p className="text-[10px] leading-relaxed text-ink4">
+            <p className="col-span-2 text-[10px] leading-relaxed text-ink4">
               {out.n}판을 돌렸지만 <b className="text-ink3">밖으로 나간 것이 없습니다</b>({Math.round(out.ms)}ms).
               처리량은 트럭이 개구부로 실어 낸 것을 셉니다 — 출하 경로를 놓아야 잡힙니다.
             </p>
           )}
-          <p className="mt-1 text-[9.5px] leading-snug text-amber-600">
+          <p className="col-span-2 mt-1 text-[9.5px] leading-snug text-amber-600">
             화면의 이번 실행은 <b>비워졌습니다</b> — 여러 판이 같은 자리를 쓰기 때문입니다.
           </p>
         </div>
@@ -1064,6 +1081,46 @@ export default function RunDock() {
 
   const ref = useRef(null);
   const [h, setH] = useState(MIN_H);
+  /**
+   * **사람이 잡아당긴 높이** — null 이면 계산에 맡긴다.
+   * ---------------------------------------------------------------------------
+   *  계산은 「씬을 16:9 로 남기고 나머지」다. 그런데 **화면이 16:9 면 나머지가
+   *  0 이다** — 그래서 흔한 모니터에서는 띠가 늘 최소 높이(190px)에 붙어 있었다.
+   *  안쪽 칸은 124px 밖에 안 되는데 민감도 결과는 328px 이라, 두 열로 펴도
+   *  안 들어간다. 잘리는 것을 스크롤로 덮어 온 셈이다.
+   *
+   *  폭은 남고 높이만 모자란다면, **얼마를 씬에 주고 얼마를 계기판에 줄지**는
+   *  사람이 정할 일이다. 잡아당기면 그 값을 쓰고, 손 안 댔으면 예전처럼 계산에
+   *  맡긴다 — 이미 그린 도면의 화면이 안 바뀐다.
+   */
+  const [pulled, setPulled] = useState(null);
+  const drag = useRef(null);
+
+  /**
+   * 위 모서리를 잡아 끈다 — 위로 끌면 커진다.
+   *  **`MAX_H` 를 넘어설 수 있다.** 그 상한은 「자동으로 계산할 때 계기판이
+   *  도면을 밀어내지 않게」 두는 것인데, 사람이 직접 끌었으면 그건 요청이다.
+   *  대신 화면의 70% 까지만 — 도면이 아예 안 보이게 되면 편집기가 아니다.
+   */
+  const onGrab = (e) => {
+    e.preventDefault();
+    const room = ref.current?.parentElement?.getBoundingClientRect().height ?? 0;
+    const cap = Math.max(MAX_H, Math.round(room * 0.7));
+    drag.current = { y: e.clientY, from: pulled ?? h };
+    const move = (ev) => {
+      const d = drag.current;
+      if (!d) return;
+      setPulled(Math.round(Math.min(cap, Math.max(MIN_H, d.from + (d.y - ev.clientY)))));
+    };
+    const up = () => {
+      drag.current = null;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   useLayoutEffect(() => {
     /* 부모(main)를 잰다. 띠는 그 안에 있으므로 띠가 커져도 부모는 안 흔들린다 —
        자기 자신을 재면 크기를 정하는 일이 되먹임으로 돌아 떨린다. */
@@ -1087,8 +1144,18 @@ export default function RunDock() {
     <div
       ref={ref}
       className="relative z-10 flex shrink-0 flex-col border-t border-line bg-panel"
-      style={open ? { height: h } : undefined}
+      style={open ? { height: pulled ?? h } : undefined}
     >
+      {/* 잡아당기는 모서리 — 띠 **위**에 걸쳐 둔다. 띠 안에 두면 그만큼 내용이
+          줄어들고, 아래 첫 줄과 자리를 다툰다. */}
+      {open && (
+        <div
+          onPointerDown={onGrab}
+          onDoubleClick={() => setPulled(null)}
+          title="끌어서 높이 조절 — 두 번 누르면 자동으로"
+          className="absolute inset-x-0 -top-1 z-20 h-2 cursor-ns-resize"
+        />
+      )}
       <div className="flex h-7 shrink-0 items-center gap-1 border-b border-line pr-2">
         <button
           type="button"
@@ -1180,7 +1247,7 @@ export default function RunDock() {
 
       {open && tab === 'reps' && (
         <div className="flex min-h-0 flex-1 divide-x divide-line overflow-x-auto">
-          <Col title="여러 번 돌려 보기" width={220}>
+          <Col title="여러 번 돌려 보기" width={480}>
             <Replicate />
           </Col>
           <Col title="왜 여러 번인가">
