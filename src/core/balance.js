@@ -32,7 +32,6 @@ import {
   setupOf, spacingFor, unitCycleOf,
 } from './process.js';
 import { beltKinds } from './link.js';
-import { RULE, ruleOf } from './dispatch.js';
 import { recipesOf, sendKindsOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
@@ -43,9 +42,26 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
 /**
  * 라인의 능력 — 사슬의 고리들을 한 단위로 세워 놓는다.
  *
+ *  ── **이 값이 무엇인지 못 박아 둔다** ──────────────────────────────────────
+ *  `capacity` 는 **품종 하나의** 개/분이고, **품종을 고르게 번갈아 만들 때**의
+ *  값이다. 두 가지를 헷갈리기 쉬워서 적어 둔다.
+ *
+ *  **① 품종당이지 합계가 아니다.** 2품종 라인의 실측 합계는 이 값의 두 배까지
+ *     나온다. 합계를 이 값으로 나눠 「천장의 몇 %」라고 말하면 180% 가 찍힌다.
+ *
+ *  **② 규칙이 「차례대로」가 아니면 상한이 아니라 가정이다.** 「납기 먼저」는
+ *     급한 품종 하나를 계속 만들 수 있어서 번갈지 않는다. 그때 그 품종의
+ *     산출은 이 값을 넘는다 — 실측 ×1.88 (`tools/check/ceiling.mjs` 가 그 값을
+ *     박아 두었다). 천장이 틀린 것이 아니라 **전제가 안 맞는 것**이다.
+ *
+ *  고치려면 품종별 몫(`share`)을 오더에서 끌어와야 하고, 그러면 「가장 약한
+ *  고리」가 수 하나가 아니라 영역이 되어 `improve.js`·`optimize.js` 까지 바뀐다.
+ *  작은 일이 아니라서 지금은 **뜻만 밝혀 둔다.**
+ *
  *  @returns {{ rows, capacity, neck }}
  *    rows      느린 순서. `{ kind, uid, name, own, mult, capacity, why }`
- *    capacity  라인 능력 (최종 개/분) — 가장 약한 고리
+ *    capacity  라인 능력 (**품종당** 최종 개/분) — 가장 약한 고리.
+ *              **고르게 번갈아 만들 때의 값**이다(위 ②)
  *    neck      그 고리
  */
 /**
@@ -137,7 +153,7 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
      *  **12초에 하나** 낸다 — 절반의 시간은 다른 것을 만든다. 안 나누면 천장이
      *  두 배로 부풀고, 돌려 본 결과가 절반으로 나온다.
      */
-    const many = ruleOf(p, item) === RULE.ORDER ? Math.max(1, recipesOf(p).length) : 1;
+    const many = Math.max(1, recipesOf(p).length);
     const own = perMinute(eff) / many;
     const m = mult.get(p.uid) ?? 1;
     rows.push({
