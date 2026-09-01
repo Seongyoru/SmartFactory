@@ -18,7 +18,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { SRC, group, readSrc, t } from './_harness.mjs';
+import { SRC, cut, group, readSrc, t } from './_harness.mjs';
 import { itemOf, loadModels, specOf as specById } from './_models.mjs';
 
 group('축적형 컨베이어');
@@ -284,4 +284,45 @@ t('**선 벨트도 쌓인 것은 내린다** — 안 그러면 영영 안 비워
   flow.move(1, { links: new Set(['C1']) });
   assert.equal(B.beltHeld(st), 0, '선 벨트가 쌓인 것을 안 내린다');
   assert.equal(St.getLots('S1').length, 4, '내린 것이 종점에 안 쌓였다');
+});
+
+/* ---------- 화면도 「다 찼나」를 돌려주는가 --------------------------------- *
+ *  헤드리스는 `lineup.js` 가 `fullOf` 를 넘겼다. 화면은 안 넘겼다 — 벨트 상태가
+ *  `BeltItems` 마다 따로 있어서 `EditorScene` 이 볼 수가 없었다.
+ *
+ *  `fullOf` 가 없으면 `?? false` 로 떨어져 **늘 건너뛴다.** 그래서 화면에서는
+ *  축적형 벨트가 영영 막힘으로 안 잡혔고, 같은 도면이 화면과 반복 실행에서
+ *  다르게 돌았다. **아무것도 안 터지는 종류**라 값이 아니라 배선을 못 박는다.
+ * -------------------------------------------------------------------------- */
+
+const beltSrc = await readSrc('scene/BeltItems.jsx');
+const storeSrc = await readSrc('core/simStore.js');
+
+t('화면의 정지 판정이 **다 찼나**를 받는다', () => {
+  assert.match(sceneSrc, /fullOf: isBeltFull/, '화면이 fullOf 를 안 넘긴다 — 축적형 벨트가 영영 안 선다');
+});
+
+t('벨트가 **그 값을 돌려준다** — 안 돌려주면 늘 「안 찼다」다', () => {
+  assert.match(beltSrc, /setBeltFull\(uid, beltFull\(belt\)\)/, '벨트가 다 찼는지 안 알린다');
+  assert.match(sceneSrc, /uid=\{link\.uid\}/, '벨트가 제 uid 를 모른다 — 누가 찼는지 못 적는다');
+});
+
+t('벨트가 사라지면 지운다 — 안 지우면 없는 벨트가 영영 막힘으로 남는다', () => {
+  assert.match(beltSrc, /forgetBelt\(uid\)/, '사라진 벨트를 안 지운다');
+});
+
+t('**뒤집힐 때만 알린다** — 매 프레임 알리면 60번/초로 리렌더가 돈다', () => {
+  assert.match(storeSrc, /if \(was === !!full\) return;/, '값이 같아도 알린다');
+});
+
+t('판정이 그 값에 매여 있다 — deps 에 없으면 옛 답을 계속 쓴다', () => {
+  const memo = cut(sceneSrc, '  const halted = useMemo(', '  );');
+  assert.match(memo, /beltFullMap\]/, '다 찼는지 바뀌어도 판정을 다시 안 한다');
+});
+
+t('주석이 코드와 **같은 말을 한다**', () => {
+  /* 한때 「안 주면 예전처럼 바로 선다」라고 반대로 적혀 있었고, 그 탓에 화면이
+     안 넘기는 것을 오래 못 봤다. 반대말이 적혀 있으면 아무도 코드를 안 본다. */
+  assert.equal(/안 주면 예전처럼 바로 선다/.test(haltSrc), false, '주석이 코드와 반대다');
+  assert.match(haltSrc, /안 주면 이 벨트는 영영 안 선다/, '무슨 일이 나는지 안 적혀 있다');
 });
