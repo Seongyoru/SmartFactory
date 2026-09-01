@@ -4,7 +4,7 @@
  *  전에 함부로 말하지 않는 것과 다 채운 것을 놓치지 않는 것이 둘 다 중요하다.
  */
 import assert from 'node:assert/strict';
-import { SRC, group, t } from './_harness.mjs';
+import { SRC, group, readSrc, t } from './_harness.mjs';
 
 group('생산 오더');
 
@@ -152,4 +152,56 @@ t('남은 시간을 사람이 읽는 단위로', () => {
   assert.equal(O.formatSpan(3600 * 3 + 60 * 20), '3시간 20분');
   assert.equal(O.formatSpan(null), '—');
   assert.equal(O.formatSpan(-5), '0초');
+});
+
+/* ---------- 모르는 종류를 조용히 바꾸지 않는다 ------------------------------ *
+ *  한때는 못 알아보면 기본 품종으로 떨어뜨렸다. 품목을 지우거나 이름을 바꾼
+ *  도면에서 **오더가 엉뚱한 종류로 옮겨 붙는데**, 아무것도 안 터진다.
+ *  「제작품 2 를 100개」라고 적어 둔 오더가 제작품 1 을 세고 있고, 화면에는
+ *  제작품 1 이라 적혀 있으니 읽는 사람은 자기가 그렇게 적은 줄 안다.
+ * -------------------------------------------------------------------------- */
+
+const dockSrc = await readSrc('ui/OrdersDock.jsx');
+
+t('**적힌 그대로 둔다** — 기본 품종으로 안 떨어뜨린다', () => {
+  const [row] = O.normalizeOrders([{ uid: 'X', kind: '없는품종', qty: 100 }]);
+  assert.equal(row.kind, '없는품종', '모르는 종류를 조용히 갈아치웠다');
+  assert.equal(row.unknown, true, '모른다는 표시가 없다');
+});
+
+t('아는 종류는 그대로 — 별칭도 편다', () => {
+  const [a] = O.normalizeOrders([{ kind: 'PART_G', qty: 1 }]);
+  assert.equal(a.kind, 'PART_G');
+  assert.equal(a.unknown, false);
+});
+
+t('아무것도 안 적으면 기본값으로 시작한다 — 새 오더', () => {
+  for (const bad of [undefined, null, '', '   ', 42]) {
+    const [row] = O.normalizeOrders([{ kind: bad, qty: 1 }]);
+    assert.ok(row.kind, `${JSON.stringify(bad)} 에서 종류가 비었다`);
+    assert.equal(row.unknown, false, `${JSON.stringify(bad)} 를 모르는 종류로 봤다`);
+  }
+});
+
+t('모르는 종류는 **영영 안 찬다** — 그것이 정직한 답이다', () => {
+  /* 그 종류를 만드는 설비가 없으므로 진척이 0 에 머문다. 억지로 다른 종류를
+     세어 「차고 있다」고 말하는 것보다 낫다. */
+  const [row] = O.normalizeOrders([{ kind: '없는품종', qty: 100 }]);
+  assert.equal(O.doneOf(row, { shipped: { PART_R: 500 } }), 0, '엉뚱한 종류를 세고 있다');
+});
+
+t('디스패칭도 그 오더에 안 끌려간다', () => {
+  const info = O.orderInfoOf([{ kind: '없는품종', qty: 100, dueMin: 10, at: 'ship' }], {}, 0)('M1');
+  assert.equal(info('PART_R'), null, '엉뚱한 종류가 그 오더에 끌려간다');
+});
+
+t('화면이 **그 종류를 보여 준다** — 안 보여 주면 첫 항목이 골라진 것처럼 보인다', () => {
+  assert.match(dockSrc, /o\.unknown && <option value=\{o\.kind\}>/,
+    '고르개에 안 넣는다 — 적힌 것과 보이는 것이 달라진다');
+});
+
+t('화면이 **왜 안 차는지** 말한다', () => {
+  /* 진척이 0 에 머무는 것만 보이면 라인이 잘못됐다고 읽는다 — 오더가 잘못됐다 */
+  assert.match(dockSrc, /\{o\.unknown && \(/, '까닭을 안 알린다');
+  assert.match(dockSrc, /영영 안 찹니다/, '무슨 일이 나는지 안 적혀 있다');
 });
