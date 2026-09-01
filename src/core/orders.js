@@ -71,15 +71,34 @@ const num = (v, fallback) => (Number.isFinite(Number(v)) ? Number(v) : fallback)
  */
 export function normalizeOrders(list) {
   if (!Array.isArray(list)) return [];
-  return list.map((o, i) => ({
-    uid: o?.uid ?? `O${i + 1}`,
-    name: typeof o?.name === 'string' ? o.name : '',
-    kind: canonKind(o?.kind) ?? DEFAULT_KIND,
-    qty: Math.max(1, Math.round(num(o?.qty, DEFAULT_ORDER.qty))),
-    dueMin: Math.max(0, num(o?.dueMin, 0)),
-    at: o?.at === DONE_AT.STORE ? DONE_AT.STORE : DONE_AT.SHIP,
-    atUid: o?.at === DONE_AT.STORE ? (o?.atUid ?? null) : null,
-  }));
+  return list.map((o, i) => {
+    /**
+     * **모르는 종류를 조용히 바꾸지 않는다.**
+     * -------------------------------------------------------------------------
+     *  한때는 못 알아보면 그냥 기본 품종으로 떨어뜨렸다. 그러면 품목을 지우거나
+     *  이름을 바꾼 도면에서 **오더가 엉뚱한 종류로 옮겨 붙는다** — 그리고
+     *  아무것도 안 터진다. 「제작품 2 를 100개」라고 적어 둔 오더가 어느 날
+     *  제작품 1 을 세고 있는데, 화면에는 제작품 1 이라고 적혀 있으니 읽는
+     *  사람은 자기가 그렇게 적은 줄 안다.
+     *
+     *  그래서 **적힌 그대로 둔다.** 그러면 그 종류를 만드는 설비가 없으므로
+     *  진척이 0 에 머물고, `unknown` 이 서서 화면이 그 까닭을 말해 준다.
+     *  아무것도 안 적었을 때만 기본값으로 시작한다(새 오더).
+     */
+    const raw = typeof o?.kind === 'string' ? o.kind.trim() : '';
+    const known = canonKind(raw);
+    return {
+      uid: o?.uid ?? `O${i + 1}`,
+      name: typeof o?.name === 'string' ? o.name : '',
+      kind: known ?? (raw || DEFAULT_KIND),
+      /** 라이브러리에 없는 종류를 적고 있다 — 화면이 이 값을 보고 알린다 */
+      unknown: !known && !!raw,
+      qty: Math.max(1, Math.round(num(o?.qty, DEFAULT_ORDER.qty))),
+      dueMin: Math.max(0, num(o?.dueMin, 0)),
+      at: o?.at === DONE_AT.STORE ? DONE_AT.STORE : DONE_AT.SHIP,
+      atUid: o?.at === DONE_AT.STORE ? (o?.atUid ?? null) : null,
+    };
+  });
 }
 
 /**

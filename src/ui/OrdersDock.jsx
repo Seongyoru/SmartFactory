@@ -132,6 +132,10 @@ export default function OrdersDock() {
             <div key={o.uid} className="mt-1.5 rounded-md border border-edge bg-field px-1.5 py-1 first:mt-0">
               <div className="flex items-center gap-1">
                 <select value={o.kind} onChange={(e) => set(i, { kind: e.target.value })} className={SEL}>
+                  {/* 라이브러리에 없는 종류가 적혀 있으면 **그것도 보여 준다.**
+                      안 넣으면 고르개가 첫 항목으로 보여서, 적힌 것과 보이는 것이
+                      달라진다 — 조용히 바꾸지 않으려던 뜻이 화면에서 무너진다. */}
+                  {o.unknown && <option value={o.kind}>{o.kind} (모르는 종류)</option>}
                   {Object.entries(PAYLOAD_ITEMS).map(([k, it]) => (
                     <option key={k} value={k}>{it.name}</option>
                   ))}
@@ -180,6 +184,15 @@ export default function OrdersDock() {
                 </span>
                 <span className="text-ink4">{Math.round(r.ratio * 100)}%</span>
               </div>
+
+              {/* 모르는 종류는 **왜 안 차는지**까지 말해 준다. 진척이 0 에 머무는
+                  것만 보이면 라인이 잘못됐다고 읽게 된다 — 오더가 잘못된 것이다. */}
+              {o.unknown && (
+                <p className="mt-1 rounded bg-amber-500/10 px-1.5 py-1 text-[10px] leading-snug text-amber-600 ring-1 ring-amber-500/25">
+                  <b>{o.kind}</b> 은(는) 지금 라이브러리에 없는 종류입니다 — 만드는 설비가 없어
+                  <b> 영영 안 찹니다.</b> 품목을 지웠거나 이름이 바뀐 도면입니다. 위에서 다시 골라 주세요.
+                </p>
+              )}
 
               <p className={`mt-0.5 text-[10px] leading-snug ${late ? 'text-rose-500' : 'text-ink4'}`}>
                 {done ? '다 채웠습니다.'
