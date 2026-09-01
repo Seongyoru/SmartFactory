@@ -202,6 +202,8 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own,
       mult: m,
       capacity: own / m,
+      /** 품종을 안 나눈 값 — 이 설비가 **다 합쳐** 낼 수 있는 최종 개/분 */
+      allCap: perMinute(eff) / m,
       why: whyOf({ cyc, batch, many, lot, setupSec, scrap, reworkSec, eff }),
     });
   }
@@ -240,6 +242,7 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own,
       mult: m,
       capacity: own / m,
+      allCap: own / m,
       why: `${v} m/s · 간격 ${gap.toFixed(2)} m`,
     });
   }
@@ -263,12 +266,20 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       own: h.perMinute,
       mult: 1,
       capacity: h.perMinute,
+      allCap: h.perMinute,
       why: `${c.count ?? 1}대 · 한 바퀴 ${Math.round(h.lapSec)}초`,
     });
   }
 
   rows.sort((a, b) => a.capacity - b.capacity);
-  return { rows, capacity: rows.length ? rows[0].capacity : 0, neck: rows[0] ?? null };
+  /**
+   * **합계 천장** — 품종을 안 나눈 값.
+   *  `capacity` 는 품종당이라, 품종을 전부 더한 실측과 그냥 견주면 안 된다
+   *  (2품종이면 차례대로에서도 180% 가 찍힌다). 화면이 「천장의 몇 %」를
+   *  말할 때 쓰는 것은 이쪽이다.
+   */
+  const total = rows.length ? Math.min(...rows.map((r) => r.allCap ?? r.capacity)) : 0;
+  return { rows, capacity: rows.length ? rows[0].capacity : 0, total, neck: rows[0] ?? null };
 }
 
 /** 능력이 이 안쪽으로 붙어 있으면 **같은 고리**로 본다 (1%) */

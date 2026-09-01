@@ -172,7 +172,7 @@ function Knob({ label, value, unit, onChange, min, max, step, hardMax }) {
  *  남는 것보다 낫고, 말없이 비우면 「내 기록이 왜 사라졌지」가 된다.
  */
 function Replicate() {
-  const { world, flow, ready, capacity } = useLineWorld();
+  const { world, flow, ready, capacity, totalCapacity } = useLineWorld();
   const [reps, setReps] = useState(10);
   const [mins, setMins] = useState(30);
   const [busy, setBusy] = useState(false);
@@ -270,10 +270,17 @@ function Replicate() {
                 *  천장이 0 이면 (벨트가 안 물려 계산이 안 되는 도면) 안 그린다 —
                 *  「0% 」 는 잰 값이 있는데도 아무 말도 못 하는 것보다 나쁘다.
                 */}
-              {capacity > 0 && (
+              {/**
+                * **품종을 안 나눈 천장과 견준다.**
+                *  잰 값(`out.mean`)은 품종을 전부 더한 개/시다. 그런데 `capacity`
+                *  는 **품종당**이라, 그대로 나누면 2품종 라인에서 차례대로인데도
+                *  180% 가 찍힌다 — 천장을 넘었다는 말이 되어 도구가 거짓말한다.
+                *  `totalCapacity` 가 품종을 안 나눈 값이다(`balance.js` 의 total).
+                */}
+              {totalCapacity > 0 && (
                 <p className="mt-1 text-[9.5px] leading-snug text-ink4">
-                  천장 <b className="text-ink3">{(capacity * 60).toFixed(0)} 개/시</b> 의{' '}
-                  <b className="text-ink2">{Math.round((out.mean / (capacity * 60)) * 100)}%</b> 입니다 —
+                  천장 <b className="text-ink3">{(totalCapacity * 60).toFixed(0)} 개/시</b> 의{' '}
+                  <b className="text-ink2">{Math.round((out.mean / (totalCapacity * 60)) * 100)}%</b> 입니다 —
                   나머지는 고장 · 굶음 · 막힘으로 샌 것입니다.
                 </p>
               )}

@@ -384,17 +384,25 @@ t('천장도 **같은 자리**에서 낸다 — 도면이 하나여야 견줄 �
 });
 
 t('여러 판 결과가 천장의 몇 %인지 말한다', () => {
-  assert.ok(dockSrc2.includes('capacity } = useLineWorld();'), '천장을 안 받는다');
-  assert.ok(dockSrc2.includes('(out.mean / (capacity * 60)) * 100'), '견주는 계산이 없다');
+  assert.ok(dockSrc2.includes('capacity, totalCapacity } = useLineWorld();'), '천장을 안 받는다');
+  assert.ok(dockSrc2.includes('(out.mean / (totalCapacity * 60)) * 100'), '견주는 계산이 없다');
   assert.ok(dockSrc2.includes('고장 · 굶음 · 막힘으로 샌 것입니다'), '차이가 무엇인지 안 말한다');
 });
 
 t('천장이 0 이면 견주지 않는다 — 「0%」 는 아무 말도 아니다', () => {
-  assert.ok(dockSrc2.includes('{capacity > 0 && ('), '0 으로 나눈다');
+  assert.ok(dockSrc2.includes('{totalCapacity > 0 && ('), '0 으로 나눈다');
 });
 
-t('단위를 맞춰서 견준다 — 천장은 개/분, 잰 값은 개/시', () => {
+t('단위를 맞춰서 견준다 — **시간과 품종 둘 다**', () => {
   /* 이 도구에서 단위를 안 맞춰 놓고 한 표에 더한 적이 있다(물류 동선의
-     벨트 300 vs 카트 926). 같은 실수를 두 번 하지 않게 못 박는다. */
-  assert.ok(dockSrc2.includes('{(capacity * 60).toFixed(0)} 개/시'), '천장을 개/시로 안 바꾼다');
+     벨트 300 vs 카트 926). 같은 실수를 두 번 하지 않게 못 박는다.
+
+     ── 그런데 이 검사가 **시간 단위만** 보고 있었다 ────────────────────────
+     제목은 「단위를 맞춘다」인데 개/분↔개/시만 봤다. 정작 **품종 단위**가
+     어긋나 있었다 — 천장은 품종당인데 잰 값은 품종 합계라, 2품종 라인에서
+     차례대로인데도 180% 가 찍혔다. 검사 제목이 넓고 내용이 좁으면 그 사이가
+     통째로 빈다. 이제 둘 다 본다. */
+  assert.ok(dockSrc2.includes('{(totalCapacity * 60).toFixed(0)} 개/시'), '천장을 개/시로 안 바꾼다');
+  assert.equal(/\(capacity \* 60\)/.test(dockSrc2), false,
+    '품종당 천장을 품종 합계와 견준다 — 2품종에서 180% 가 찍힌다');
 });

@@ -281,8 +281,14 @@ export function worldOf(d = {}) {
     machines,
     /** { sec, fill, slow, cycle } — 화면이 「왜 그만큼 기다리나」를 적는다 */
     warmup,
-    /** **돌리기 전에** 계산으로 나오는 천장 (개/분) — 잰 값과 나란히 놓으라고 있다 */
+    /** **돌리기 전에** 계산으로 나오는 천장 (**품종당** 개/분) */
     capacity: lineBalance({ placed, links, carts, itemOf, specOf, beltSpeed }).capacity,
+    /**
+     * 품종을 **안 나눈** 합계 천장 — 잰 값과 견줄 때는 이쪽이다.
+     *  실측 처리량은 품종을 전부 더한 값이라, 품종당 천장으로 나누면 2품종
+     *  라인에서 차례대로인데도 180% 가 찍힌다.
+     */
+    totalCapacity: lineBalance({ placed, links, carts, itemOf, specOf, beltSpeed }).total,
     world: lineWorld({
       beltFlows, machines, placed, itemOf, crew, equips,
       downMap: getDown,
