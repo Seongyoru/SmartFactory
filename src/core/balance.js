@@ -32,6 +32,7 @@ import {
   setupOf, spacingFor, unitCycleOf,
 } from './process.js';
 import { beltKinds } from './link.js';
+import { RULE, ruleOf } from './dispatch.js';
 import { recipesOf, sendKindsOf } from './bom.js';
 import { isShelf, isStillage, isTruck, isUtility } from '../data/library.js';
 import { cartPath, cartStations, haulPerMinute } from './cart.js';
@@ -42,26 +43,28 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
 /**
  * 라인의 능력 — 사슬의 고리들을 한 단위로 세워 놓는다.
  *
- *  ── **이 값이 무엇인지 못 박아 둔다** ──────────────────────────────────────
- *  `capacity` 는 **품종 하나의** 개/분이고, **품종을 고르게 번갈아 만들 때**의
- *  값이다. 두 가지를 헷갈리기 쉬워서 적어 둔다.
+ *  ── **이 값은 상한이다** ───────────────────────────────────────────────────
+ *  `capacity` 는 **품종 하나의** 개/분이고, **넘을 수 없는 값**이다. 실측이
+ *  이것을 넘으면 화면이 「천장의 180%」 같은 말을 하게 된다.
  *
  *  **① 품종당이지 합계가 아니다.** 2품종 라인의 실측 합계는 이 값의 두 배까지
- *     나온다. 합계를 이 값으로 나눠 「천장의 몇 %」라고 말하면 180% 가 찍힌다.
+ *     나온다. 합계를 이 값으로 나눠 「천장의 몇 %」라고 말하면 안 된다.
+ *     (`RunDock` 이 아직 그렇게 한다 — 별개로 고칠 것)
  *
- *  **② 규칙이 「차례대로」가 아니면 상한이 아니라 가정이다.** 「납기 먼저」는
- *     급한 품종 하나를 계속 만들 수 있어서 번갈지 않는다. 그때 그 품종의
- *     산출은 이 값을 넘는다 — 실측 ×1.88 (`tools/check/ceiling.mjs` 가 그 값을
- *     박아 두었다). 천장이 틀린 것이 아니라 **전제가 안 맞는 것**이다.
+ *  **② 규칙이 「차례대로」가 아니면 안 나눈다.** 「납기 먼저」·「밀린 것 먼저」는
+ *     급한 품종 하나에 몰빵할 수 있어서 「고르게 번갈아」가 안 통한다. 나눈
+ *     값을 천장이라 부르면 실측이 넘는다 — 실측 8.00 대 15.00 이었다.
+ *     그래서 몰빵할 수 있는 규칙이면 안 나눈다(`concentrates`).
  *
- *  고치려면 품종별 몫(`share`)을 오더에서 끌어와야 하고, 그러면 「가장 약한
- *  고리」가 수 하나가 아니라 영역이 되어 `improve.js`·`optimize.js` 까지 바뀐다.
- *  작은 일이 아니라서 지금은 **뜻만 밝혀 둔다.**
+ *     대신 헐거워진다. 두 품종을 다 요구하는 도면에서는 동시에 닿을 수 없는
+ *     값이다. **상한으로서는 맞고 예상치로서는 헐겁다** — 예상치가 필요하면
+ *     그건 다른 값이고, 천장에 그 일을 시키면 넘는 것을 못 막는다.
+ *
+ *  `tools/check/ceiling.mjs` 가 세 규칙의 「천장 대 실측」을 값으로 박아 둔다.
  *
  *  @returns {{ rows, capacity, neck }}
  *    rows      느린 순서. `{ kind, uid, name, own, mult, capacity, why }`
- *    capacity  라인 능력 (**품종당** 최종 개/분) — 가장 약한 고리.
- *              **고르게 번갈아 만들 때의 값**이다(위 ②)
+ *    capacity  라인 능력 (**품종당** 최종 개/분) — 가장 약한 고리. **상한**이다
  *    neck      그 고리
  */
 /**
@@ -76,6 +79,28 @@ const makes = (item) => !!item && !isShelf(item) && !isStillage(item) && !isUtil
  */
 /** 이 설비가 내보내는 종류들 — 품종을 여럿 들면 여럿이다 */
 const outKindsOf = (p, item) => sendKindsOf(p, item, scrapToOf(p, item) === SCRAP_TO.OUT);
+
+/**
+ * 이 설비가 **한 품종에 몰빵할 수 있는가.**
+ * ---------------------------------------------------------------------------
+ *  천장은 상한이다 — 넘을 수 없어야 뜻이 있다. 「차례대로」는 로트마다 다음
+ *  품종으로 넘어가므로 한 품종의 몫이 정확히 `1/품종수` 다. 그런데 「납기
+ *  먼저」·「밀린 것 먼저」는 **급한 것 하나를 계속 고를 수 있다.** 그러면 그
+ *  품종의 산출이 나눈 값을 넘는다.
+ *
+ *  실측으로 확인했다(2품종·로트20·전환15초): 천장 8.00 인데 「납기 먼저」가
+ *  15.00 을 냈다 — ×1.88. 길게 돌려도 안 사라진다(900초에서 13.33).
+ *
+ *  **오더 비율로 나누는 쪽은 답이 아니다.** 오더가 R·G 각 500개면 몫이 반반
+ *  이라 천장이 그대로 8 인데, 규칙은 급한 쪽부터 몰아 만들므로 그 구간에서
+ *  여전히 넘는다. 몫은 **예상치**이고 천장은 **상한**이라 서로 다른 값이다.
+ *
+ *  그래서 몰빵할 수 있는 규칙이면 안 나눈다. 대신 천장이 헐거워진다 — 두
+ *  품종을 다 요구하는 도면에서는 동시에 닿을 수 없는 값이다. 상한으로서는
+ *  맞고 예상치로서는 헐겁다. **넘는 것보다 헐거운 쪽이 낫다** — 넘으면
+ *  「천장의 180%」 같은 말이 화면에 찍힌다.
+ */
+const concentrates = (p, item) => ruleOf(p, item) !== RULE.ORDER;
 
 export function whyOf({ cyc, batch = 1, many = 1, lot = 0, setupSec = 0, scrap = 0, reworkSec = 0, eff }) {
   const parts = [`공정 ${cyc}초`];
@@ -102,7 +127,15 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     if (seen.has(uid)) return 1;                       // 고리 — 여기서 끊는다
     const p = byUid.get(uid);
     if (!p) return 1;
-    const kind = outputKindOf(p, itemOf(p.itemId));
+    /**
+     * **내가 내는 종류를 전부 본다.**
+     *  한때는 `outputKindOf` 하나만 봤다 — **첫 레시피의 산출**이다. 그러면
+     *  제작품 1·2 를 만드는 설비가 제작품 **2** 를 먹는 조립기에 물려 있을 때
+     *  그 수요가 통째로 안 보이고, 배수가 1 로 남는다. 하류가 두 개씩 먹는데도
+     *  「최종 1개당 1개」로 세어 **천장이 두 배로 부푼다.**
+     *  규칙과 무관한 어긋남이다 — 차례대로에서도 그렇다.
+     */
+    const kinds = outKindsOf(p, itemOf(p.itemId));
 
     /* 내 산출물을 먹는 설비들 — 그중 가장 많이 드는 길을 따른다.
        (여러 갈래로 나가면 그중 무거운 쪽이 이 설비의 부담을 정한다) */
@@ -112,7 +145,11 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
       if (e.from !== uid) continue;
       const eater = byUid.get(e.to);
       if (!eater) continue;
-      const need = (recipeOf(eater)?.in ?? []).find((x) => x.kind === kind)?.qty ?? 0;
+      /* 먹는 쪽도 레시피가 여럿일 수 있다 — 같은 이유로 전부 본다 */
+      let need = 0;
+      for (const r of recipesOf(eater) ?? []) {
+        for (const x of r?.in ?? []) if (kinds.includes(x.kind)) need = Math.max(need, x.qty ?? 0);
+      }
       if (!need) continue;
       m = Math.max(m, need * walk(e.to, next));
     }
@@ -148,12 +185,14 @@ export function lineBalance({ placed = [], links = [], carts = [], itemOf, specO
     const reworkSec = reworkOf(p, item);
     const eff = effectiveCycle(cyc, lot, setupSec, batch, { scrap, reworkSec });
     /**
-     * **품종이 여럿이면 한 품종의 몫은 그만큼 준다.**
+     * **번갈아 만드는 설비만 나눈다.**
      *  20개씩 두 품종을 번갈아 만드는 설비는 제작품 1을 「6초에 하나」가 아니라
-     *  **12초에 하나** 낸다 — 절반의 시간은 다른 것을 만든다. 안 나누면 천장이
-     *  두 배로 부풀고, 돌려 본 결과가 절반으로 나온다.
+     *  **12초에 하나** 낸다 — 절반의 시간은 다른 것을 만든다.
+     *
+     *  다만 그 「번갈아」는 **「차례대로」 규칙일 때만** 참이다. 몰빵할 수 있는
+     *  규칙이면 안 나눈다(`concentrates` 참고 — 왜 그런지 값과 함께 적어 두었다).
      */
-    const many = Math.max(1, recipesOf(p).length);
+    const many = concentrates(p, item) ? 1 : Math.max(1, recipesOf(p).length);
     const own = perMinute(eff) / many;
     const m = mult.get(p.uid) ?? 1;
     rows.push({
