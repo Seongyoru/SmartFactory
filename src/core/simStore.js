@@ -45,6 +45,48 @@ const subscribe = (f) => {
 export const getStock = (uid) => stock[uid] ?? 0;
 export const getAllStock = () => stock;
 
+/* --------------------------------------------------------------------------
+ *  축적형 벨트가 다 찼나 — **화면이 굴리는 값을 정지 판정에 되돌려 준다**
+ * --------------------------------------------------------------------------
+ *  막혀도 안 서고 끝에 쌓이는 벨트는, **쌓인 것이 한도에 닿았을 때만** 선다.
+ *  그 「쌓인 양」은 굴리는 쪽만 아는 값이라 도면에서 못 읽는다.
+ *
+ *  헤드리스는 `lineFlow` 가 벨트 상태를 다 들고 있어서 바로 답한다. 그런데
+ *  화면은 벨트 상태가 **`BeltItems` 마다 따로** 있어서 `EditorScene` 이 못 본다.
+ *  그래서 화면에서는 정지 판정이 이 값을 못 받았고, 축적형 벨트가 **영영 안
+ *  섰다** — 화면에서 본 라인과 반복 실행이 또 갈렸다.
+ *
+ *  ── **바뀔 때만 알린다** ─────────────────────────────────────────────────
+ *  이 값은 프레임마다 계산되지만 실제로 뒤집히는 일은 드물다. 매번 알리면
+ *  60번/초로 리렌더가 돈다. 그래서 **참↔거짓이 뒤집힐 때만** 알린다.
+ * ------------------------------------------------------------------------ */
+let beltFullMap = {};
+
+/** 벨트 하나의 「다 찼나」를 적는다 — 뒤집힐 때만 알린다 */
+export function setBeltFull(uid, full) {
+  if (!uid) return;
+  const was = !!beltFullMap[uid];
+  if (was === !!full) return;
+  beltFullMap = { ...beltFullMap, [uid]: !!full };
+  emit();
+}
+
+/** 벨트가 사라지면 지운다 — 안 지우면 없는 벨트가 영영 「다 찼다」로 남는다 */
+export function forgetBelt(uid) {
+  if (!uid || !(uid in beltFullMap)) return;
+  const next = { ...beltFullMap };
+  delete next[uid];
+  beltFullMap = next;
+  emit();
+}
+
+export const isBeltFull = (uid) => !!beltFullMap[uid];
+export const getBeltFull = () => beltFullMap;
+
+/** 정지 판정이 다시 돌아야 하는 시점을 화면에 알린다 */
+export const useBeltFull = () =>
+  useSyncExternalStore(subscribe, () => beltFullMap, () => beltFullMap);
+
 /** 자리별 종류 목록 (아래에서부터). 없으면 빈 배열 — 참조는 항상 같은 것을 준다 */
 export const getLots = (uid) => lots[uid] ?? EMPTY;
 

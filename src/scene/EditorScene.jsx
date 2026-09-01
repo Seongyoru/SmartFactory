@@ -88,8 +88,8 @@ import { shelfBBox, shelfCapacity } from '../core/shelf.js';
 import { stillageCapacity } from '../core/stillage.js';
 import {
   addLotsShared, addMade, addStock, arrivedOf, dropAtSink, getLots, getMade, getStock, shippedTotal,
-  takeEach, takeMade,
-  useAllStock, useShipped, takeBundles,
+  isBeltFull, takeEach, takeMade,
+  useAllStock, useBeltFull, useShipped, takeBundles,
 } from '../core/simStore.js';
 import { cycleOf, outputCapFor, runMachine, shapeOf as varShapeOf, spacingFor, varOf } from '../core/process.js';
 import { isClosed, rawStep, setShifts, tick, useElapsed } from '../core/clock.js';
@@ -655,6 +655,8 @@ function SceneContent() {
   const version = useModelsVersion();
   /* 재고가 바뀔 때마다 "가득 찼는가" 를 다시 본다 */
   const stockVersion = useAllStock();
+  /* 축적형 벨트가 다 찼나 — 뒤집힐 때만 새 객체가 와서 정지 판정이 다시 돈다 */
+  const beltFullMap = useBeltFull();
   /* 고장 난 설비 — 250ms 마다만 알려 오므로 이걸로 다시 그려도 부담이 없다 */
   const downMap = useFaults();
   const { view, tool, gridSize, placed, links, carts, selected, connectFrom, ghostRot, pathDraft } = state;
@@ -970,8 +972,14 @@ function SceneContent() {
    *  **재고**뿐이다. 그 경계가 반복 실행의 속도를 정한다.
    */
   const halted = useMemo(
-    () => haltState({ beltFlows, machines, placed, itemOf, downMap, crew }),
-    [beltFlows, machines, placed, itemOf, stockVersion, downMap, crew],
+    () => haltState({
+      beltFlows, machines, placed, itemOf, downMap, crew,
+      /* 축적형 벨트는 **다 찼을 때만** 선다. 그 값은 벨트를 굴리는
+         BeltItems 만 아는 것이라 simStore 를 거쳐 돌아온다. 안 주면
+         `halt.js` 가 「안 찼다」로 보고 그 벨트가 영영 안 선다. */
+      fullOf: isBeltFull,
+    }),
+    [beltFlows, machines, placed, itemOf, stockVersion, downMap, crew, beltFullMap],
   );
 
   /* ---- 카트 경로 + 정차역 ------------------------------------------------ */
@@ -2334,6 +2342,7 @@ function SceneContent() {
       {beltFlows.map(({ link, path, owner, sink, outKind, layers, speed, gap, kinds, accumulate }) => (
         <BeltItems
           key={`f${link.uid}`}
+          uid={link.uid}
           path={path}
           speed={speed}
           gap={gap}

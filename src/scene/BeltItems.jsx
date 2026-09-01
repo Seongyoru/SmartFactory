@@ -27,8 +27,9 @@ import { useFrame } from '@react-three/fiber';
 import { cloneScene, useModelSpec } from '../core/modelStore.js';
 import { usePayloadSpecs } from '../core/payload.js';
 import { simStep } from '../core/clock.js';
-import { beltCount, beltHas, beltHeld, beltKind, beltLoad, beltOffset, makeBelt } from '../core/belt.js';
+import { beltCount, beltFull, beltHas, beltHeld, beltKind, beltLoad, beltOffset, makeBelt } from '../core/belt.js';
 import { runBelt } from '../core/sim.js';
+import { forgetBelt, setBeltFull } from '../core/simStore.js';
 import { PAYLOAD_ITEM } from '../data/library.js';
 
 /**
@@ -36,6 +37,8 @@ import { PAYLOAD_ITEM } from '../data/library.js';
  *                무엇이 흐를지는 **내보내는 설비**가 정한다(library 의 payload).
  */
 export default function BeltItems({
+  /** 이 벨트의 연결 uid — 「다 찼나」를 정지 판정에 돌려줄 때 쓴다 */
+  uid = null,
   path,
   speed = 0.6,
   gap = 3,
@@ -109,6 +112,9 @@ export default function BeltItems({
   /* 칸 수·간격·층수가 바뀌면 줄을 처음부터 다시 세운다 (반쯤 걸친 물건이 남지 않도록) */
   const belt = useMemo(() => makeBelt(count, layers), [count, step, layers]);
   useEffect(() => { slotsRef.current = slots; }, [slots]);
+  /* 벨트가 사라지면 지운다 — 안 지우면 없는 벨트가 영영 「다 찼다」로 남아
+     그 자리의 설비가 계속 막힌 것으로 잡힌다 */
+  useEffect(() => () => forgetBelt(uid), [uid]);
 
   useFrame((_, dt) => {
     const list = slotsRef.current;
@@ -131,6 +137,15 @@ export default function BeltItems({
        *  이번에 도착한 것이 없어도 불러야 한다.
        */
       if (got.n > 0 || beltHeld(belt)) arriveRef.current?.(got.byKind ?? {}, belt);
+
+      /**
+       * **쌓인 것이 한도에 닿았나** — 정지 판정에 돌려준다.
+       *  축적형 벨트는 이 값이 참일 때만 선다. 화면은 벨트 상태를 여기서만
+       *  들고 있어서, 안 돌려주면 `haltState` 가 영영 「안 찼다」로 보고
+       *  그 벨트가 **영영 안 선다**(simStore 의 setBeltFull 참고).
+       *  뒤집힐 때만 알리므로 매 프레임 불러도 리렌더가 안 돈다.
+       */
+      setBeltFull(uid, beltFull(belt));
     }
 
     const head = beltOffset(belt, step);
