@@ -36,7 +36,8 @@ import {
   BATCH_RANGE, BATCH_WAIT_RANGE, CYCLE_RANGE, LOT_RANGE, MIN_GAP, REWORK_RANGE, SCRAP_TO,
   SCRAP_TO_LABEL, SETUP_RANGE, VAR_MAX, scrapToOf,
   batchOf, batchWaitOf, beltPerMinute, cycleOf, effectiveCycle,
-  lotOf, outputCapFor, perMinute, reworkOf, setupOf, shapeOf, spacingClamped, spacingFor, varOf,
+  lotOf, outputCapFor, perMinute, reworkOf, setupOf, shapeOf, slotWaste, spacingClamped,
+  spacingFor, varOf,
 } from '../core/process.js';
 import {
   CREW_RANGE, HEADCOUNT_RANGE, MINUTES_RANGE,
@@ -1086,6 +1087,25 @@ function EquipmentPanel({ placed }) {
             step={LOT_RANGE[2]}
             onChange={(v) => dispatch({ type: 'UPDATE_PLACED', uid: placed.uid, patch: { lotSize: v } })}
           />
+          {/**
+            * **로트가 덩어리를 어중간하게 쪼갤 때** 알린다.
+            * -----------------------------------------------------------------
+            *  품종이 바뀌면 만들던 것을 끊고 실어 보낸다. 남은 것이 한 덩어리를
+            *  못 채우면 **1개짜리도 벨트 칸을 통째로** 쓴다. 로트 4 · 3개씩이면
+            *  4개를 보내는 데 칸 두 개가 든다 — 실측 78개 → 63개, 19% 손해다.
+            *
+            *  「배수가 아니다」로 알리지 않는다 — 로트 5 도 배수가 아니지만
+            *  로트 3 과 같은 값이 나온다. **얼마나 헤픈가**로 재야 맞는다
+            *  (`slotWaste`). 조금 헤픈 것까지 알리면 잔소리가 된다.
+            */}
+          {slotWaste(lot, bundle) >= 1.25 && (
+            <p className="mt-1 rounded bg-amber-500/10 px-2 py-1 text-[10.5px] leading-relaxed text-amber-600 ring-1 ring-amber-500/25">
+              로트 <b>{lot}</b> 개는 <b>{bundle}</b> 개씩 내보내는 것과 안 맞아, 마지막 덩어리가
+              <b> {lot % bundle}개짜리</b>로 나갑니다 — 그것도 벨트 칸 하나를 통째로 씁니다.
+              벨트가 빠듯하면 처리량이 깎입니다. <b>{Math.ceil(lot / bundle) * bundle}</b> 개나{' '}
+              <b>{Math.floor(lot / bundle) * bundle || bundle}</b> 개로 맞추면 딱 떨어집니다.
+            </p>
+          )}
           {lot > 0 && (
             <Slider
               label={kinds > 1 ? '품종 전환 시간' : '전환 시간'}

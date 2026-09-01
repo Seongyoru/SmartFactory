@@ -31,6 +31,7 @@ const B = await import(SRC + 'core/balance.js');
 const A = await import(SRC + 'core/area.js');
 const Lu = await import(SRC + 'core/lineup.js');
 const R = await import(SRC + 'core/replicate.js');
+const inspSrc2 = await readSrc('ui/Inspector.jsx');
 const LIB = await import(SRC + 'data/library.js');
 
 /* ---------- ① 옛 도면이 그대로 ------------------------------------------- */
@@ -353,4 +354,52 @@ t('설비를 바꾸면 **고른 품종도 처음으로** 돌아간다', () => {
   /* key 가 없으면 앞 설비에서 2번 품종을 보던 상태가 그대로 남아, 다른 설비를
      골랐는데 2번 품종이 열린다 — 그 설비에 2번이 없으면 더 헷갈린다 */
   assert.ok(inspSrc.includes('<RecipeSection key={placed.uid}'), '고른 품종이 설비를 따라 안 바뀐다');
+});
+
+/* ---------- 자투리 덩어리가 **처리량을 깎는다** ------------------------------ *
+ *  품종이 바뀌면 만들던 것을 끊고 실어 보낸다. 남은 것이 한 덩어리를 못 채우면
+ *  **1개짜리도 벨트 칸을 통째로** 쓴다. 벨트가 빠듯하면 그만큼 깎인다.
+ *
+ *  ── 처음에는 「안 깎인다」고 적었다가 이 검사에 걸렸다 ────────────────────
+ *  긴 벨트로 재 보고 손해가 0% 이길래 「이 앱에서는 공짜」라고 결론지었다.
+ *  그런데 이 파일의 짧은 도면에서는 **78 → 63, 19% 깎인다.** 벨트가 병목이냐
+ *  아니냐가 갈랐다. 한 도면에서 안 났다고 없는 문제가 아니었다.
+ * -------------------------------------------------------------------------- */
+
+t('**로트가 덩어리를 어중간하게 쪼개면 깎인다** — 실측', () => {
+  /* 로트 4 · 3개씩이면 `R×3 R×1` 이라 4개에 칸 두 개가 든다 */
+  const even = run(TWO, 3, 5).lots.length;
+  const odd = run(TWO, 4, 5).lots.length;
+  assert.equal(even, 78, `배수 ${even}`);
+  assert.equal(odd, 63, `자투리 ${odd}`);
+  assert.ok(odd < even, '자투리가 공짜가 됐다 — 좋은 일이지만 화면 경고를 다시 볼 것');
+});
+
+t('배수로 맞추면 회복된다 — 경고가 시키는 대로', () => {
+  assert.equal(run(TWO, 6, 5).lots.length, 96, '로트 6');
+  assert.equal(run(TWO, 9, 5).lots.length, 108, '로트 9');
+});
+
+t('**「배수가 아니다」로 알리면 틀린다** — 로트 5 는 멀쩡하다', () => {
+  /* 로트 5 도 3의 배수가 아니지만 로트 3 과 같은 값이 나온다. 조건을 「배수인가」
+     로 잡으면 멀쩡한 도면에 잔소리를 한다 — 「얼마나 헤픈가」로 재야 맞는다. */
+  assert.equal(run(TWO, 5, 5).lots.length, 78, '로트 5');
+});
+
+t('헤픔이 그 차이를 설명한다', () => {
+  const w = (lot) => Math.round(P.slotWaste(lot, 3) * 100) / 100;
+  assert.equal(w(3), 1, '로트 3');
+  assert.equal(w(4), 1.5, '로트 4 — 가장 헤프다');
+  assert.equal(w(5), 1.2, '로트 5');
+  assert.equal(w(6), 1, '로트 6');
+  assert.equal(w(0), 1, '로트를 안 쓰면 쪼갤 것이 없다');
+  assert.equal(P.slotWaste(4, 1), 1, '한 개씩 보내면 쪼갤 것이 없다');
+});
+
+t('화면이 **헤플 때만** 알린다 — 로트 5 에는 잔소리하지 않는다', () => {
+  const src = inspSrc2;
+  assert.match(src, /slotWaste\(lot, bundle\) >= 1\.25/, '헤픔으로 안 재고 있다');
+  /* 1.25 는 로트 4(1.50)를 잡고 로트 5(1.20)를 놓아 주는 자리다 */
+  assert.ok(P.slotWaste(4, 3) >= 1.25, '로트 4 를 놓친다');
+  assert.ok(P.slotWaste(5, 3) < 1.25, '로트 5 에 잔소리한다');
 });
