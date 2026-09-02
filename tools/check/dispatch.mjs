@@ -329,5 +329,61 @@ t('차례대로는 오더를 안 보므로 할 말이 없다', () => {
 });
 
 t('화면이 그 말을 실제로 띄운다', () => {
-  assert.match(inspSrc, /ruleGap\(rule, state\.orders, kindNames\)/, '인스펙터가 안 묻는다');
+  assert.match(inspSrc, /ruleGap\(rule, state\.orders, kindNames, feedsAll\)/, '인스펙터가 안 묻는다');
+});
+
+/* ---------- 하류가 두 품종을 **함께** 먹을 때 ------------------------------- *
+ *  「납기 먼저」는 남은 납기가 급한 것을 고른다. 그런데 만든다고 납기가 늘지
+ *  않는다 — 두 오더의 남은 납기가 **같은 속도로 줄어 격차가 영영 안 좁혀진다.**
+ *  그래서 규칙의 답이 **상수**가 된다.
+ *
+ *  그 자체는 EDD 가 원래 그런 것이라 틀리지 않았다. 문제는 하류가 두 품종을
+ *  함께 먹을 때다 — 한쪽이 영영 안 만들어지니 조립기가 영영 굶는다.
+ *  실측: 조립품 차례대로 66개 · 납기 먼저 **0개**, 600초 내내 100% 굶음.
+ * -------------------------------------------------------------------------- */
+
+t('**납기 먼저의 답이 상수다** — 이 경고의 근거', () => {
+  /* R 5분 · G 60분. 만들어도 남은 납기는 시간에만 매여 있어 격차가 3300초로
+     고정이다. 그래서 시각과 지금 자리에 상관없이 늘 같은 것을 고른다. */
+  const two = [
+    { uid: 'A', kind: 'PART_R', qty: 5000, dueMin: 5, at: 'ship' },
+    { uid: 'B', kind: 'PART_G', qty: 5000, dueMin: 60, at: 'ship' },
+  ];
+  const pair = ['PART_R', 'PART_G'];
+  for (const sec of [0, 60, 300, 600, 3600]) {
+    const info = O.orderInfoOf(two, { shipped: {} }, sec)('M1');
+    for (const cur of [0, 1]) {
+      assert.equal(D.nextSlot(cur, pair, D.RULE.DUE, info), 0,
+        `t=${sec} cur=${cur} 에서 답이 달라졌다 — 좋은 일이지만 이 경고를 다시 볼 것`);
+    }
+  }
+});
+
+t('하류가 함께 먹으면 **고르는 자리에서** 알린다', () => {
+  const say = O.ruleGap(D.RULE.DUE, [], ['PART_R', 'PART_G'], true);
+  assert.ok(say, '아무 말도 안 한다');
+  assert.match(say, /영영 굶을 수 있습니다/);
+  assert.match(say, /차례대로/, '어떻게 하라는 말이 없다');
+});
+
+t('밀린 것 먼저도 알리되 **다른 말**을 한다 — 까닭이 다르다', () => {
+  const say = O.ruleGap(D.RULE.BEHIND, [], ['PART_R', 'PART_G'], true);
+  assert.ok(say);
+  assert.equal(/납기 먼저/.test(say), false, '엉뚱한 규칙 이름을 댄다');
+});
+
+t('차례대로에는 안 알린다 — 번갈아 만드니 안 굶는다', () => {
+  assert.equal(O.ruleGap(D.RULE.ORDER, [], ['PART_R', 'PART_G'], true), null);
+});
+
+t('하류가 하나만 먹으면 안 알린다 — 잔소리가 되면 안 읽는다', () => {
+  const say = O.ruleGap(D.RULE.DUE, [], ['PART_R', 'PART_G'], false);
+  assert.equal(/영영 굶을 수 있습니다/.test(say ?? ''), false);
+});
+
+t('화면이 **도면을 보고** 그 조건을 센다', () => {
+  /* 재고가 아니라 도면에서 나오는 값이라, 돌리기 전에 알 수 있고 같은 도면이면
+     늘 같은 답이 나온다 — 되풀이 가능성이 안 깨진다 */
+  assert.match(inspSrc, /const feedsAll = useMemo\(/, '조건을 안 센다');
+  assert.match(inspSrc, /wants\.length >= 2/, '한 레시피가 둘 이상 먹는지를 안 본다');
 });

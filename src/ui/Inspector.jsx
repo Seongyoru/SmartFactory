@@ -848,6 +848,26 @@ function EquipmentPanel({ placed }) {
   const kinds = recipesOf(placed).length;
   /** 이 설비가 만드는 종류들 — 규칙이 도는지 따질 때 쓴다 */
   const kindNames = recipesOf(placed).map((r) => outKindOf(r, item)).filter(Boolean);
+  /**
+   * **이 설비가 먹이는 곳이 여러 품종을 함께 먹는가.**
+   *  그렇다면 한 품종만 몰아 만드는 규칙은 그쪽을 굶긴다 — 실측으로 조립품이
+   *  0개까지 떨어졌다. 도면만 보고 알 수 있는 것이라 돌리기 전에 말해 준다.
+   */
+  const feedsAll = useMemo(() => {
+    if (kindNames.length < 2) return false;
+    const byUid = new Map(state.placed.map((p) => [p.uid, p]));
+    for (const l of state.links) {
+      if (l?.from?.uid !== placed.uid || !l?.to?.uid) continue;
+      const eater = byUid.get(l.to.uid);
+      if (!eater) continue;
+      for (const r of recipesOf(eater) ?? []) {
+        const wants = (r?.in ?? []).filter((x) => kindNames.includes(x.kind));
+        if (wants.length >= 2) return true;          // 한 레시피가 둘 이상을 함께 먹는다
+      }
+    }
+    return false;
+  }, [state.placed, state.links, placed.uid, kindNames.join('|')]);
+
   /** 로트를 채웠을 때 다음 품종을 무엇으로 고르나 (dispatch.js) */
   const rule = ruleOf(placed, item);
   /**
@@ -1147,9 +1167,9 @@ function EquipmentPanel({ placed }) {
               <span className="mt-1 block text-[9.5px] leading-snug text-ink4">{RULE_HINT[rule]}</span>
               {/* 규칙이 **먹일 것 없이** 돌고 있으면 그 사실을 말한다. 라인은 잘 돌고
                   값도 그럴듯해서 화면만 보고는 알 방법이 없다. */}
-              {ruleGap(rule, state.orders, kindNames) && (
+              {ruleGap(rule, state.orders, kindNames, feedsAll) && (
                 <span className="mt-1 block rounded border border-amber-500/40 bg-amber-500/10 px-1.5 py-1 text-[9.5px] leading-snug text-ink2">
-                  {ruleGap(rule, state.orders, kindNames)}
+                  {ruleGap(rule, state.orders, kindNames, feedsAll)}
                 </span>
               )}
             </label>
