@@ -17,7 +17,7 @@ import {
 } from '../core/simStore.js';
 import { formatElapsed, useElapsed, useSimSpeed } from '../core/clock.js';
 import { resetRun } from '../core/sim.js';
-import { blockChain, chainText, storeCapOf } from '../core/diagnose.js';
+import { blockChain, chainText, starveChain, storeCapOf } from '../core/diagnose.js';
 import { bottleneckChain, lineBalance, rateText } from '../core/balance.js';
 import { deltaText, improvePlan } from '../core/improve.js';
 import { gainText, searchLayout } from '../core/optimize.js';
@@ -577,6 +577,18 @@ function RecipeSection({ placed, item }) {
   const lots = useLots(placed.uid);
   const stock = useStock(placed.uid);
 
+  /**
+   * 누가 대줘야 하는데 못 대주나 — **굶고 있을 때만** 센다.
+   *  도면에서 나오는 값이라 돌리기 전에도 답이 나온다. 재고를 안 보므로
+   *  같은 도면이면 늘 같은 사슬이다.
+   */
+  const starve = useMemo(
+    () => starveChain(placed.uid, {
+      placed: state.placed, links: state.links, carts: state.carts, itemOf,
+    }),
+    [state.placed, state.links, state.carts, placed.uid, itemOf],
+  );
+
   /* 산출물은 **이 기계의 갈래 안에서만** 고른다 — 제작기는 제작품, 조립기는
      조립품. 갈래는 그 기계가 하는 일 자체라 자리마다 달라질 값이 아니다. */
   const outKeys = allowedOutOf(item);
@@ -811,6 +823,29 @@ function RecipeSection({ placed, item }) {
               {unitWord}({per}개)를 만들 재료가 모자랍니다 —{' '}
               {short.map(([k, n]) => `${PAYLOAD_ITEMS[k]?.name ?? k} ${n}개`).join(' · ')} 부족.
               이 설비는 <b>굶어서</b> 서 있습니다.
+              {/**
+                * **누가 대줘야 하는데 못 대주나.**
+                * -------------------------------------------------------------
+                *  위 줄은 「무엇이 모자란가」까지만 말한다. 그런데 고치려면
+                *  **어디를 손대야 하는지**를 알아야 한다 — 앞 공정이 느린 것인지,
+                *  아예 대주는 것이 없는지, 카트가 나르는 것인지.
+                *
+                *  `starveChain` 이 그 사슬을 낸다. 오래전부터 있었는데 **화면이
+                *  한 번도 안 불렀다** — 계산해 놓고 안 보여 주고 있었다.
+                */}
+              {starve?.steps?.length > 1 && (
+                <>
+                  <br />
+                  <span className="mt-1 block text-[10px] text-amber-600/90">
+                    {chainText(starve.steps)}
+                  </span>
+                  {starve.culprit && (
+                    <span className="mt-0.5 block text-[10px]">
+                      → <b>{starve.culprit.name}</b> 이(가) 못 따라옵니다.
+                    </span>
+                  )}
+                </>
+              )}
             </p>
           )}
         </>

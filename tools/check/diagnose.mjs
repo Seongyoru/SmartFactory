@@ -5,7 +5,7 @@
  *  한참을 헤맸다.
  */
 import assert from 'node:assert/strict';
-import { SRC, group, t } from './_harness.mjs';
+import { SRC, group, readSrc, t } from './_harness.mjs';
 
 group('원인 사슬');
 
@@ -161,4 +161,43 @@ t('빼가는 카트 칸에도 uid 가 실린다 — 안 실으면 누를 수가 
     haulOf: () => [{ uid: 'K', name: '카트', perMinute: 5 }],
   });
   assert.equal(r.steps[r.steps.length - 1].uid, 'K');
+});
+
+/* ---------- 굶는 사슬을 **화면이 부른다** ----------------------------------- *
+ *  `starveChain` 은 오래전부터 있었는데 `src/ui`·`src/scene` 어디서도 안 불렀다.
+ *  「무엇이 없어서 굶는가」를 계산해 놓고 **한 번도 안 보여 주고 있었다.**
+ *
+ *  화면은 「무엇이 모자란가」까지만 말했다. 그런데 고치려면 **어디를 손대야
+ *  하는지**를 알아야 한다 — 앞 공정이 느린지, 아예 대주는 것이 없는지.
+ * -------------------------------------------------------------------------- */
+
+const inspectorSrc = await readSrc('ui/Inspector.jsx');
+
+t('화면이 굶는 사슬을 **부른다**', () => {
+  assert.match(inspectorSrc, /starveChain,/, '가져오지 않는다');
+  assert.match(inspectorSrc, /starveChain\(placed\.uid, \{/, '안 부른다');
+});
+
+t('그 사슬을 **그린다** — 부르기만 하고 안 그리면 그대로다', () => {
+  assert.match(inspectorSrc, /chainText\(starve\.steps\)/, '사슬을 안 그린다');
+  assert.match(inspectorSrc, /starve\.culprit/, '누가 못 따라오는지 안 말한다');
+});
+
+t('**굶고 있을 때만** 보여 준다 — 멀쩡한 설비에 사슬을 들이밀지 않는다', () => {
+  /* 「재료가 모자랍니다」 문단 안에 들어 있어야 한다. 밖으로 나오면 잘 도는
+     설비에도 늘 뜬다 — 잔소리가 되면 아무도 안 읽는다. */
+  const at = inspectorSrc.indexOf('만들 재료가 모자랍니다');
+  const chain = inspectorSrc.indexOf('chainText(starve.steps)');
+  assert.ok(at > 0 && chain > at, '굶음 문단 밖에 있다');
+  assert.ok(chain - at < 1200, '굶음 문단에서 너무 멀다 — 다른 자리에 붙었을 수 있다');
+});
+
+t('사슬이 **재고를 안 본다** — 도면만 보므로 늘 같은 답이다', () => {
+  /* 재고를 물리면 같은 도면이 매번 다른 사슬을 낸다. 돌리기 전에도 답이
+     나와야 「고치려면 어디를 손대나」에 쓸모가 있다. */
+  const at = inspectorSrc.indexOf('const starve = useMemo(');
+  assert.ok(at > 0, '사슬을 안 센다');
+  const body = inspectorSrc.slice(at, at + 400);
+  assert.equal(/getStock|useStock|lots/.test(body), false, '재고를 물렸다');
+  assert.match(body, /state\.placed, state\.links, state\.carts/, '도면을 안 넘긴다');
 });
