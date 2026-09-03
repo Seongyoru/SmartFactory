@@ -469,3 +469,34 @@ t('두 번 누르면 자동으로 되돌아간다', () => {
 t('손 안 댔으면 **예전 그대로** — 이미 그린 도면의 화면이 안 바뀐다', () => {
   assert.match(dock, /pulled \?\? h/, '끌지 않았는데도 다른 높이를 쓴다');
 });
+
+/* ---------- 좁은 창에서 **버튼에 손이 닿는가** ------------------------------ *
+ *  툴바 한 줄의 내용은 1476px 로 고정이다(실측). 그보다 좁은 창에서는 오른쪽
+ *  끝부터 잘리는데, `index.css` 의 `body { overflow: hidden }` 때문에 스크롤로도
+ *  못 닿았다 — 1280px 노트북에서 **네 개(CAD 반입 · 공용 도면 · 공유 · 초기화)가
+ *  통째로 손이 안 닿는 자리**에 있었다. 1440px 에서도 초기화가 36px 잘린다.
+ *
+ *  실측: 1280px 에서 밀기 전 화면 밖 4개 → 민 뒤 0개. 1920px 은 넘침 0.
+ * -------------------------------------------------------------------------- */
+
+const toolbarSrc = await readSrc('ui/Toolbar.jsx');
+const indexCss = await readSrc('index.css');
+
+t('툴바가 넘치면 **옆으로 밀린다** — 잘려서 못 누르면 안 된다', () => {
+  const head = toolbarSrc.match(/<header className="[^"]*"/)?.[0] ?? '';
+  assert.match(head, /overflow-x-auto/, '넘친 만큼이 손에 안 닿는다');
+  assert.match(head, /h-12 shrink-0/, '툴바가 줄어들어 다른 것을 밀어낸다');
+});
+
+t('스크롤 막대를 숨긴다 — 48px 줄에 막대가 뜨면 버튼을 덮는다', () => {
+  const head = toolbarSrc.match(/<header className="[^"]*"/)?.[0] ?? '';
+  assert.match(head, /scrollbar-width:none/, '막대가 버튼을 덮는다');
+});
+
+t('**몸통은 여전히 안 스크롤한다** — 툴바만 민다', () => {
+  /* `body { overflow: hidden }` 은 앱 껍데기를 잡아 두는 것이라 그대로 둔다.
+     그걸 풀면 화면 전체가 밀려 계기판과 도면이 같이 흔들린다. */
+  assert.ok(indexCss, "index.css 를 못 읽었다");
+  const css = indexCss;
+  assert.match(css, /body\s*\{[^}]*overflow:\s*hidden/, '몸통이 스크롤한다');
+});

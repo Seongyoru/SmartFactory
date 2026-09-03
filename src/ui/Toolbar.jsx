@@ -486,8 +486,20 @@ export default function Toolbar() {
     }
   };
 
+  /**
+   * **넘치면 옆으로 민다.**
+   * ---------------------------------------------------------------------------
+   *  이 줄의 내용은 **1476px** 로 고정이다(실측). 그보다 좁은 창에서는 오른쪽
+   *  끝부터 잘리는데, `index.css` 의 `body { overflow: hidden }` 때문에
+   *  **스크롤로도 못 닿았다** — 1280px 노트북에서 「CAD 반입 · 공용 도면 · 공유 ·
+   *  초기화」 넷이 통째로 손이 안 닿는 자리에 있었다. 1440px 에서도 초기화가
+   *  36px 잘린다.
+   *
+   *  넓은 창에서는 아무것도 안 바뀐다 — 넘칠 때만 스크롤이 생긴다.
+   *  스크롤 막대는 숨긴다. 높이 48px 짜리 줄에 막대가 뜨면 버튼을 덮는다.
+   */
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-head px-3">
+    <header className="flex h-12 shrink-0 items-center gap-3 overflow-x-auto border-b border-line bg-head px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       <div className="flex items-center gap-2 pr-1">
         <span className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-sky-500 to-cyan-400 text-[11px] font-black text-slate-950">
           E
