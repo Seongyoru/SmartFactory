@@ -12,6 +12,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useInsertionEffect, useMemo, useReducer, useRef } from 'react';
 import { clampUiScale } from './uiScale.js';
+import { withReadOnly } from './readOnly.js';
 import { DEFAULT_GRID, clean } from './grid.js';
 import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
@@ -40,12 +41,14 @@ import {
   getModelBuffer,
   layoutSnapshot,
   loadAppearance,
+  loadReadOnly,
   loadUiScale,
   loadGuidePhase,
   loadScenarios,
   loadLayout,
   loadUserLibrary,
   saveAppearance,
+  saveReadOnly,
   saveUiScale,
   saveGuidePhase,
   saveScenarios,
@@ -128,6 +131,8 @@ const initialState = {
   appearance: loadAppearance(),
   /** 화면 배율 — 4K 나 작은 노트북에서 사람이 직접 고른다 */
   uiScale: loadUiScale(),
+  /** 보기 전용 — 고치지 않고 보기만 한다(core/readOnly.js). 사람이 켜고 끈다 */
+  readOnly: loadReadOnly(),
   gridSize: DEFAULT_GRID,
   snapEdge: true,
   showPorts: true,
@@ -1330,7 +1335,15 @@ function withHistory(base) {
   };
 }
 
-const historyReducer = withHistory((state, action) => keepEditShape(reducer(state, action)));
+/**
+ * **검문은 맨 바깥이다.** 되돌리기(withHistory) 안쪽에 두면 「막힌 편집」 이
+ * 되돌리기 기록에 한 칸을 남긴다 — 아무 일도 안 했는데 Ctrl+Z 가 생긴다.
+ * sameDoc·docOf 를 넘겨 주는 이유는 readOnly.js 에 적어 두었다.
+ */
+const historyReducer = withReadOnly(
+  withHistory((state, action) => keepEditShape(reducer(state, action))),
+  { sameDoc, docOf },
+);
 
 export function EditorProvider({ children }) {
   const [state, dispatch] = useReducer(historyReducer, initialState);
@@ -1409,6 +1422,16 @@ export function EditorProvider({ children }) {
   /* 기억하는 일은 급하지 않으니 보통 자리에서 — 배율을 거는 일과 붙여 두면
      저장이 늦어지는 게 아니라, 위 갈고리가 무거워진다 */
   useEffect(() => { saveUiScale(clampUiScale(state.uiScale)); }, [state.uiScale]);
+
+  /* ---- 보기 전용: 기억하고, 들어갈 때 손에 든 것을 놓는다 ---------------
+   *  안 놓으면 「클릭해서 놓기」 안내가 화면에 남아 거짓말을 한다 — 눌러도
+   *  아무 일도 안 일어나는데 화면은 계속 시키고 있다. SET_TOOL 이 초안을 다
+   *  비우므로 그것 하나면 된다. 루트에도 표시해서 CSS 가 읽게 한다. */
+  useEffect(() => {
+    saveReadOnly(state.readOnly);
+    document.documentElement.dataset.readonly = state.readOnly ? '1' : '';
+    if (state.readOnly) dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT, itemId: null });
+  }, [state.readOnly]);
 
   /* ---- 따라 하기: 어디까지 왔는지 이 브라우저에 남긴다 -------------------
    *  'welcome' 일 때는 저장하지 않는다. 아직 아무것도 고르지 않은 상태라,

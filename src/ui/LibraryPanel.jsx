@@ -256,6 +256,7 @@ function BuildTools() {
 
 export default function LibraryPanel({ mode = 'side' }) {
   const { state, dispatch } = useEditor();
+  const readOnly = !!state.readOnly;
   const [tab, setTab] = useState(CATEGORY.EQUIPMENT);
   const [importing, setImporting] = useState(false);
 
@@ -270,6 +271,23 @@ export default function LibraryPanel({ mode = 'side' }) {
 
   return (
     <aside className={`flex flex-col border-r border-line bg-panel ${panelClass('lib', mode)}`}>
+      {/**
+        * 보기 전용에서는 **놓는 자리를 통째로 걷는다.**
+        * -------------------------------------------------------------------
+        *  이 패널은 처음부터 끝까지 「무엇을 놓을까」 다 — 탭도, 목록도, 아래
+        *  안내 문구도(「클릭해서 배치하고 R로 90° 회전」). 목록만 감추면 그
+        *  안내가 남아 **할 수 없는 일을 시킨다.**
+        *
+        *  대신 생산 오더는 남긴다. 그건 놓는 일이 아니라 **보는 일**이다 —
+        *  지금 몇 개까지 왔고 납기를 맞추는가.
+        */}
+      {readOnly ? (
+        <div className="flex-1 overflow-y-auto p-4 text-[11px] leading-relaxed text-ink4">
+          <p className="mb-1.5 font-medium text-ink3">보기 전용입니다</p>
+          <p>도면을 밀고 확대해서 볼 수 있고, 무엇이든 눌러 값을 확인할 수 있습니다.</p>
+          <p className="mt-2">고치려면 툴바의 자물쇠를 다시 누르세요.</p>
+        </div>
+      ) : (
       <div className="flex min-h-0 flex-1 flex-col">
       {/* 탭 — 아이콘 위, 이름 아래 */}
       <div className="flex border-b border-line">
@@ -357,6 +375,7 @@ export default function LibraryPanel({ mode = 'side' }) {
       </div>
 
       </div>
+      )}
 
       {/**
         * 생산 오더 — **왼쪽 아래 절반**에 붙박이로 둔다.

@@ -13,6 +13,12 @@ group('도면 나눠 쓰기');
 const G = await import(SRC + 'core/gallery.js');
 const S = await import(SRC + 'core/share.js');
 
+/* 값은 검사 밖에서 받아 둔다 — 하네스가 async 검사를 막는다(그러면 조용히 통과한다) */
+const apiGone = await import('node:fs/promises')
+  .then((fs) => fs.readFile(new URL('../../api/share.js', import.meta.url)))
+  .then(() => false)
+  .catch(() => true);
+
 const LAYOUT = { placed: [{ uid: 'E1' }], areas: [], links: [] };
 
 /* ---------- 갤러리 — 저장소에 담아 둔 것 ---------------------------------- */
@@ -54,7 +60,9 @@ const res = (status, body) => async () => ({ ok: status < 400, status, json: asy
 const failed = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, res(500, { error: '터졌습니다' })).catch((e) => e);
 const offErr = await S.shareLayout(
   LAYOUT, { name: 'A라인', note: '2단 조립' },
-  res(501, { error: '공유 저장소가 아직 연결되지 않았습니다', how: 'Vercel → Storage → Blob' }),
+  /* `how` 는 **서버가 준 말**이다. 여기 적힌 것은 그것을 그대로 옮기는지
+     보려고 넣은 시험용 값일 뿐, 특정 서비스를 뜻하지 않는다. */
+  res(501, { error: '공유 저장소가 아직 연결되지 않았습니다', how: '저장소를 연결하세요' }),
 ).catch((e) => e);
 const noId = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, res(200, {})).catch((e) => e);
 let sentBody = null;
@@ -96,7 +104,7 @@ t('못 올렸으면 **던진다** — 올린 줄 알고 링크를 보내면 낭�
 });
 t('**아직 안 켠 것**은 실패와 갈라서 켜는 법까지 옮긴다', () => {
   assert.equal(offErr.code, S.SHARE_OFF, '「안 켰다」 를 못 가려낸다');
-  assert.match(offErr.message, /Vercel → Storage → Blob/, '켜는 방법이 사라졌다');
+  assert.match(offErr.message, /저장소를 연결하세요/, '켜는 방법이 사라졌다');
 });
 t('id 를 안 주면 성공으로 치지 않는다', () => {
   assert.match(noId.message, /링크를 안 줬습니다/);
@@ -116,7 +124,6 @@ t('받아 올 때도 서버 말을 그대로 옮긴다', () => {
 
 const toolbar = await readSrc('ui/Toolbar.jsx');
 const app = await readSrc('App.jsx');
-const api = await readSrc('../api/share.js');
 const store = await readSrc('core/store.jsx');
 const shareSrc = await readSrc('core/share.js');
 const inspectorSrc = await readSrc('ui/Inspector.jsx');
@@ -139,16 +146,19 @@ t('열고 나면 주소에서 지운다 — 새로고침마다 원본으로 돌�
   assert.ok(app.includes('searchParams.delete(SHARE_PARAM)'), '주소에 계속 남는다');
   assert.ok(app.includes('history.replaceState'), '뒤로 가기 기록이 더러워진다');
 });
-t('서버는 **안 켰으면 501** — 500 으로 뱉으면 고장처럼 보인다', () => {
-  assert.ok(api.includes('BLOB_READ_WRITE_TOKEN'), '토큰을 안 본다');
-  assert.ok(/return json\(res, 501/.test(api), '안 켠 것을 안 가려낸다');
-  assert.ok(api.includes('how:'), '켜는 방법을 안 알려 준다');
-});
-t('서버도 도면인지 보고, 너무 크면 받지 않는다', () => {
-  assert.ok(api.includes('looksLikeLayout'), '아무 JSON 이나 받는다');
-  assert.ok(/MAX_BYTES/.test(api) && /413/.test(api), '크기 한도가 없다');
-  assert.ok(/\^\[a-z0-9\]\{4,32\}\$/.test(api), 'id 를 그대로 믿는다');
-});
+/**
+ * **서버 쪽 검사는 지웠다** — 서버가 없어졌기 때문이다.
+ * ---------------------------------------------------------------------------
+ *  api/share.js(239줄)는 Vercel 시절의 함수였다. GitHub Pages 는 정적이라
+ *  `/api/*` 가 영영 안 뜨고, vite build 산출물에도 안 들어가고, @vercel/blob 은
+ *  package.json 에 아예 없었다 — **어디에서도 실행되지 않는 코드**였다.
+ *  그런데 개발 서버에서는 앱이 뜰 때마다 그 파일을 모듈로 변환하려다 실패해
+ *  오류 오버레이로 화면을 덮었다.
+ *
+ *  아래에 남은 것은 **서버가 있든 없든 뜻이 있는 것들**이다 — 클라이언트가
+ *  서버 말을 그대로 옮기는가, 주소를 제대로 거르는가, 화면이 무엇을 말하는가.
+ *  서버를 다시 붙이면(VITE_SHARE_API) 그 검사들이 그대로 다시 값을 한다.
+ */
 
 /* dev 서버에는 함수가 아예 없다 — 「404」 만 보여 주면 뭘 해야 할지 모른다 */
 const noServer = await S.shareLayout(LAYOUT, { name: 'A라인', note: '2단 조립' }, async () => ({
@@ -182,21 +192,13 @@ t('목록을 못 읽으면 **빈 배열** — 안 쓰는 배포가 오류를 띄
   assert.deepEqual(listOff, []);
   assert.deepEqual(listBroke, []);
 });
-t('서버가 목록을 낸다', () => {
-  assert.ok(/req\.query\?\.list/.test(api), '목록 길이 없다');
-  assert.ok(api.includes('MAX_INDEX'), '목록이 무한정 길어진다');
-  /* 「깨지면 다시 세운다」 는 아래 「스스로 아문다」 가 더 넓게 본다 */
-});
-t('썸네일은 **도면으로 그린다** — 화면 캡처가 아니다', () => {
-  assert.ok(api.includes('draw.layoutThumbSVG(data)'), '서버가 썸네일을 안 그린다');
-  /* 맨 위 import 로 두면 그림 모듈 하나 때문에 함수가 통째로 안 뜬다 */
-  assert.equal(/^import .*thumb.js/m.test(api), false, '썸네일 모듈을 맨 위에서 불러온다');
-  assert.ok(/image\/svg\+xml/.test(api), 'SVG 로 안 올린다');
-  /* 썸네일이 실패해도 도면은 올라가야 한다 — 그림 때문에 공유가 죽으면 안 된다 */
-  assert.ok(/catch \(e\) \{\s*console\.error\('\[share\] 썸네일 실패'/.test(api), '썸네일 실패가 올리기를 죽인다');
-});
 t('화면이 두 곳을 **한 목록**으로 보여 준다', () => {
-  assert.ok(/Promise\.all\(\[loadGalleryIndex\(\), listShared\(\)\]\)/.test(toolbar), '올라온 것이 목록에 안 뜬다');
+  /* 서버가 없으면 **부르지도 않는다** — 예전에는 앱이 뜰 때마다 죽은 요청을
+     한 번씩 쏘았고, 개발 서버에서는 그것이 오류 오버레이로 화면을 덮었다.
+     그래도 갤러리와 한 목록으로 합치는 구조는 그대로다. */
+  assert.ok(/shareOn\(\) \? listShared\(\) : Promise\.resolve\(\[\]\)/.test(toolbar),
+    '서버가 없을 때도 죽은 요청을 쏜다');
+  assert.ok(/Promise\.all\(\[\s*loadGalleryIndex\(\),/.test(toolbar), '두 곳을 한 목록으로 안 합친다');
   assert.ok(toolbar.includes("from: 'share'") && toolbar.includes("from: 'repo'"), '어디서 온 것인지 안 가린다');
   assert.ok(toolbar.includes('<LayoutCard'), '카드로 안 보여 준다');
   assert.ok(/row\.thumb/.test(toolbar), '썸네일을 안 쓴다');
@@ -291,38 +293,17 @@ t('멈춘 이유와 **다시 도는 길**을 같이 말한다', () => {
   assert.ok(/다시 돌리기/.test(toolbar), '버튼 설명이 그대로다');
 });
 
-/* ---------- 실제로 났던 버그: 목록이 첫 번째에서 멈췄다 -------------------- */
+/* ---------- 실제로 났던 버그(서버) ----------------------------------------
+ *  「목록이 첫 번째에서 멈췄다」 · 「목록이 스스로 아문다」 · 「덮어쓰기」 —
+ *  셋 다 api/share.js 를 짚던 검사였다. 서버와 함께 지웠다. 다시 붙일 때는
+ *  git 기록(이 커밋의 부모)에서 그대로 되살릴 수 있다.
+ */
 
-t('**덮어쓰기를 켠다** — put 은 기본적으로 거부하고 던진다', () => {
-  /* @vercel/blob 의 put 은 같은 경로가 이미 있으면 던진다(allowOverwrite 기본 false).
-     목록 파일은 매번 같은 경로에 다시 써야 하는데 그것을 빠뜨려서, 첫 번째만
-     성공하고 두 번째부터 조용히 실패했다 — Blob 은 늘어나는데 목록은 하나였다. */
-  const idx = api.slice(api.indexOf('await put(INDEX'), api.indexOf('await put(INDEX') + 300);
-  assert.ok(idx.includes('allowOverwrite: true'), '목록을 덮어쓸 수 없어 두 번째부터 실패한다');
-  assert.ok(idx.includes('cacheControlMaxAge: 0'), 'CDN 이 옛 목록을 물고 있을 수 있다');
-});
-t('도면 파일은 **덮어쓰지 않는다** — id 가 겹치면 남의 도면이 날아간다', () => {
-  const one = api.slice(api.indexOf(`put(\`\${SHARES}`), api.indexOf(`put(\`\${SHARES}`) + 220);
-  assert.equal(/allowOverwrite/.test(one), false, '도면까지 덮어쓰게 열어 두었다');
-});
-t('목록은 **스스로 아문다** — 장부가 틀려도 도면이 안 숨는다', () => {
-  /* 있는 것이 안 보이는 것이 가장 나쁜 고장이다. 사실은 파일 쪽에 있으므로
-     늘 실제 목록을 같이 훑어서 장부에 없는 것을 끼워 넣는다. */
-  assert.ok(/const known = await readJson\(INDEX\)/.test(api), '장부만 읽는다');
-  assert.ok(/for \(const b of found\.blobs/.test(api), '실제 파일을 안 훑는다');
-  assert.ok(/seen\.has\(id\)/.test(api), '같은 것이 두 번 뜬다');
-  assert.ok(/rows\.sort/.test(api), '섞인 뒤 순서가 뒤죽박죽이 된다');
-});
-t('목록에 못 넣었으면 **말한다** — 없어진 줄 알고 또 올리게 된다', () => {
-  assert.ok(/listed = true/.test(api) && /\{ id, listed \}/.test(api), '서버가 안 알려 준다');
-  assert.ok(/listed: listed !== false/.test(shareSrc), '클라이언트가 안 받는다');
-  assert.ok(/state\.listed === false/.test(toolbar), '화면이 안 말해 준다');
-});
 t('올릴 때 **이름과 설명**을 받는다', () => {
   assert.ok(/placeholder="도면 이름/.test(toolbar), '이름 칸이 없다');
   assert.ok(/placeholder="설명 —/.test(toolbar), '설명 칸이 없다');
-  assert.ok(/const note = cleanName\(body\?\.note/.test(api), '서버가 설명을 안 받는다');
-  assert.ok(/\{ id, name, note,/.test(api), '설명이 목록에 안 남는다');
+  assert.ok(/JSON\.stringify\(\{ name, note, layout: data \}\)/.test(shareSrc),
+    '이름과 설명을 안 싣는다');
 });
 t('보고서·CSV 버튼이 **눈에 띈다** — 들고 나가는 유일한 길이다', () => {
   assert.ok(/ring-sky-500\/40/.test(inspectorSrc), '테두리가 없다');
@@ -421,4 +402,44 @@ t('고르면 **미리 읽어** 속을 보여 준다 — 열 때 쓸 그 파일�
 t('속을 못 읽어도 **창은 산다** — 목록까지 죽으면 안 된다', () => {
   assert.ok(/setDetail\(\{ row, error:/.test(toolbar), '못 읽은 것을 안 알린다');
   assert.ok(/error\}/.test(toolbar) && /text-rose-500/.test(toolbar), '오류가 안 보인다');
+});
+
+/* ---------- 서버가 없다는 것을 **정직하게** 말한다 ------------------------- */
+
+t('공유 주소는 **빌드 때 받는다** — 뿌리 절대경로를 박지 않는다', () => {
+  /* 예전에는 `'/api/share'` 였는데, 그건 이 저장소가 못 박은 「하위 경로 배포」
+     결정(vite.config.js 의 base: './')을 혼자 어기는 자리였다. …/SmartFactory/
+     에서 열어도 요청은 계정 뿌리로 나갔다 — 서버를 붙여도 안 닿았다. */
+  assert.ok(!/SHARE_API = '\/api\/share'/.test(shareSrc), '뿌리 절대경로를 다시 박았다');
+  assert.match(shareSrc, /import\.meta\.env\?\.VITE_SHARE_API \|\| null/, '환경변수에서 안 받는다');
+});
+
+t('**기본값은 꺼짐이다** — 지금 이 배포에는 서버가 없다', () => {
+  assert.match(shareSrc, /export const shareOn = \(\) => !!SHARE_API;/, '켜졌는지 묻는 길이 없다');
+  assert.equal(S.shareOn(), false, '검사 환경에서 켜져 있다 — 기본값이 꺼짐이 아니다');
+});
+
+t('안 켰으면 **누르자마자** 말한다 — 다 적게 해 놓고 무르지 않는다', () => {
+  assert.match(toolbar, /state === 'ask' && !shareOn\(\)/, '서버가 없을 때의 갈래가 없다');
+  const at = toolbar.indexOf("state === 'ask' && !shareOn()");
+  const off = toolbar.slice(at, toolbar.indexOf("state === 'ask' && shareOn()", at));
+  assert.match(off, /SHARE_OFF_TEXT/, '무엇이 없는지 안 말한다');
+  assert.ok(!/placeholder="도면 이름/.test(off), '서버가 없는데 이름을 받는다');
+});
+
+t('안 켰으면 **링크로 들어와도 요청을 안 한다** — 그래도 주소는 치운다', () => {
+  assert.match(app, /if \(!shareOn\(\)\) \{/, '서버가 없을 때도 부른다');
+  const at = app.indexOf('if (!shareOn()) {');
+  const off = app.slice(at, at + 400);
+  assert.match(off, /searchParams\.delete\(SHARE_PARAM\)/, '주소를 안 치운다 — 새로고침마다 같은 말이 뜬다');
+  assert.match(off, /SHARE_OFF_TEXT/, '왜 안 되는지 안 말한다');
+});
+
+t('서버가 없다는 말이 **한 곳에** 있다 — 화면마다 다르게 말하면 안 된다', () => {
+  assert.match(shareSrc, /export const SHARE_OFF_TEXT =/, '문구가 상수가 아니다');
+  assert.match(shareSrc, /내보내기/, '무엇을 대신 쓰라는지 안 말한다');
+});
+
+t('**서버 파일이 사라졌다** — 배포도 안 되면서 개발 서버만 어지럽혔다', () => {
+  assert.ok(apiGone, 'api/share.js 가 아직 있다 — 정적 배포에서는 영영 안 돈다');
 });

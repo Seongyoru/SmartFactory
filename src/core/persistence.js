@@ -16,6 +16,7 @@ const LAYOUT_KEY = 'factory.layout.v1';
 const LIB_KEY = 'factory.userlib.v1';
 const THEME_KEY = 'factory.appearance';
 const SCALE_KEY = 'factory.uiscale';
+const READONLY_KEY = 'factory.readonly';
 const GUIDE_KEY = 'factory.guide.v1';
 const SCENARIO_KEY = 'factory.scenarios.v1';
 const DB_NAME = 'factory';
@@ -131,6 +132,27 @@ export function loadUiScale() {
 export function saveUiScale(value) {
   try {
     localStorage.setItem(SCALE_KEY, String(value));
+  } catch { /* 무시 */ }
+}
+
+/**
+ * 보기 전용인가.
+ * ---------------------------------------------------------------------------
+ *  **저장값이 없으면 꺼짐이다 — 폭을 보고 켜지 않는다.** 배율과 같은 원칙이다
+ *  (core/uiScale.js): 브라우저는 이 화면을 누가 어떻게 쓰는지 모른다. 태블릿을
+ *  들고 도면을 고치려는 사람에게 「편집이 막혔다」 를 들이미는 쪽이, 폰에서
+ *  편집 단추가 좀 빽빽한 쪽보다 훨씬 나쁘다.
+ */
+export function loadReadOnly() {
+  try {
+    return localStorage.getItem(READONLY_KEY) === '1';
+  } catch { /* 무시 */ }
+  return false;
+}
+
+export function saveReadOnly(on) {
+  try {
+    localStorage.setItem(READONLY_KEY, on ? '1' : '0');
   } catch { /* 무시 */ }
 }
 

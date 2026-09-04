@@ -28,6 +28,8 @@ import {
   Trash2,
   Undo2,
   Upload,
+  Lock,
+  Unlock,
   X,
   ZoomIn,
 } from 'lucide-react';
@@ -38,7 +40,9 @@ import { TOOL, VIEW, useEditor } from '../core/store.jsx';
 import { GRID_SIZES } from '../core/grid.js';
 import { downloadJSON, layoutSnapshot } from '../core/persistence.js';
 import { loadGalleryIndex, loadGalleryLayout } from '../core/gallery.js';
-import { SHARE_OFF, copyText, fetchShared, listShared, shareLayout } from '../core/share.js';
+import {
+  SHARE_OFF, SHARE_OFF_TEXT, copyText, fetchShared, listShared, shareLayout, shareOn,
+} from '../core/share.js';
 import { layoutSummary, layoutThumbSVG } from '../core/thumb.js';
 import { layoutInfo } from '../core/layoutInfo.js';
 import { PAYLOAD_ITEMS } from '../data/library.js';
@@ -202,7 +206,14 @@ function GalleryButton({ onPick, onExport }) {
   const cache = useRef(new Map());
 
   const reload = async () => {
-    const [repo, up] = await Promise.all([loadGalleryIndex(), listShared()]);
+    /* **서버가 없으면 안 부른다.** 예전에는 앱이 뜰 때마다 죽은 요청을 한 번씩
+       쏘았고, 개발 서버에서는 그것이 오류 오버레이로 화면을 덮었다
+       (Vite 가 `/api/share?list=1` 을 모듈 요청으로 보고 api/share.js 를
+       변환하려다 실패했다). 갤러리는 정적 파일이라 늘 살아 있다. */
+    const [repo, up] = await Promise.all([
+      loadGalleryIndex(),
+      shareOn() ? listShared() : Promise.resolve([]),
+    ]);
     /* 올라온 것이 위 — 방금 올린 것을 바로 찾을 수 있어야 한다 */
     setRows([
       ...up.map((r) => ({ ...r, from: 'share' })),
@@ -399,7 +410,27 @@ function ShareButton({ snapshot }) {
         <>
           <div className="fixed inset-0 z-20" onClick={() => setState(null)} />
           <div className="absolute right-0 top-full z-30 mt-1 w-[290px] rounded-lg bg-panel p-2.5 shadow-xl ring-1 ring-edge">
-            {state === 'ask' && (
+            {/**
+              * **서버가 없으면 여기서 끝난다.**
+              *  예전에는 이름과 설명을 다 받고 「누구나 볼 수 있습니다」 경고까지
+              *  읽힌 뒤에야 「올리지 못했습니다」 라고 말했다. 할 수 없는 일을
+              *  시켜 놓고 마지막에 무르는 화면이었다.
+              */}
+            {state === 'ask' && !shareOn() && (
+              <>
+                <p className="text-[11.5px] leading-relaxed text-ink2">
+                  {SHARE_OFF_TEXT}
+                </p>
+                <p className="mt-1.5 text-[10.5px] leading-snug text-ink4">
+                  「공용 도면」 에는 저장소에 담아 둔 도면이 그대로 나옵니다 —
+                  받는 쪽은 그것으로 열 수 있습니다.
+                </p>
+                <div className="mt-2 flex justify-end">
+                  <Btn onClick={() => setState(null)}>닫기</Btn>
+                </div>
+              </>
+            )}
+            {state === 'ask' && shareOn() && (
               <>
                 <p className="text-[11.5px] leading-relaxed text-ink2">
                   지금 도면을 올립니다. <b className="text-ink">링크</b>가 나오고,
@@ -474,6 +505,8 @@ export default function Toolbar() {
   const elapsed = useElapsed();
   const fileRef = useRef(null);
   const [cadOpen, setCadOpen] = useState(false);
+  /** 보기 전용 — 여기서는 「연장을 내놓을까」 만 정한다. 막는 일은 리듀서가 한다 */
+  const ro = !!state.readOnly;
 
   const setView = (view) => dispatch({ type: 'SET', patch: { view } });
   const setTool = (tool) => dispatch({ type: 'SET_TOOL', tool });
@@ -535,6 +568,15 @@ export default function Toolbar() {
         </button>
       </div>
 
+      {/**
+        * 보기 전용에서는 **연장을 안 내놓는다.**
+        * -------------------------------------------------------------------
+        *  막는 일은 리듀서가 한다(core/readOnly.js) — 여기서 감추는 것은
+        *  「눌러도 아무 일도 안 일어나는 단추」 를 없애기 위해서다. 감추기와
+        *  막기를 같은 것으로 착각하면 안 된다: 감춰도 단축키는 살아 있다.
+        */}
+      {!ro && (
+      <>
       {/* 도구 */}
       <div className="flex items-center gap-1">
         <IconBtn title="선택 / 이동 (Esc)" active={state.tool === TOOL.SELECT} onClick={() => setTool(TOOL.SELECT)}>
@@ -583,6 +625,8 @@ export default function Toolbar() {
           <Redo2 size={14} />
         </IconBtn>
       </div>
+      </>
+      )}
 
       <div className="mx-1 h-6 w-px bg-kbd" />
 
@@ -709,6 +753,16 @@ export default function Toolbar() {
         {state.appearance === 'light' ? <Moon size={14} /> : <Sun size={14} />}
       </IconBtn>
 
+      {/* 보기 전용 — 고치지 않고 보기만 한다. **자동으로 안 켠다**(배율과 같은
+          원칙): 브라우저는 이 화면을 누가 어떻게 쓰는지 모른다 */}
+      <IconBtn
+        title={ro ? '보기 전용 — 눌러서 편집으로' : '보기 전용으로 — 고치지 않고 보기만'}
+        active={ro}
+        onClick={() => dispatch({ type: 'SET', patch: { readOnly: !ro } })}
+      >
+        {ro ? <Lock size={14} /> : <Unlock size={14} />}
+      </IconBtn>
+
       {/* 화면 배율 — 4K 100% 배율에서 글자가 절반이 되고, 작은 노트북에서는
           툴바가 자리를 다 먹는다. 화면이 몇 인치인지는 브라우저가 모르니
           사람이 고른다(uiScale.js). */}
@@ -753,13 +807,17 @@ export default function Toolbar() {
       >
         <Download size={13} /> 내보내기
       </Btn>
-      <Btn onClick={() => fileRef.current?.click()}>
-        <Upload size={13} /> 불러오기
-      </Btn>
+      {!ro && (
+        <Btn onClick={() => fileRef.current?.click()}>
+          <Upload size={13} /> 불러오기
+        </Btn>
+      )}
       {/* 저장소에 담아 둔 공용 도면 — 담긴 것이 없으면 버튼도 안 나온다 */}
-      <Btn onClick={() => setCadOpen(true)} title="CAD 도면(DXF)에서 벽·바닥·기둥을 가져옵니다">
-        <DraftingCompass size={13} /> CAD 반입
-      </Btn>
+      {!ro && (
+        <Btn onClick={() => setCadOpen(true)} title="CAD 도면(DXF)에서 벽·바닥·기둥을 가져옵니다">
+          <DraftingCompass size={13} /> CAD 반입
+        </Btn>
+      )}
       {cadOpen && (
         <CadDialog
           onClose={() => setCadOpen(false)}
@@ -770,8 +828,9 @@ export default function Toolbar() {
         onPick={(data) => dispatch({ type: 'LOAD_LAYOUT', data })}
         onExport={() => downloadJSON(layoutSnapshot(state), `layout-${new Date().toISOString().slice(0, 10)}.json`)}
       />
-      {/* 올리기 — 링크 하나로 서로 테스트. 올리기 전에 반드시 묻는다 */}
-      <ShareButton snapshot={() => layoutSnapshot(state)} />
+      {/* 올리기 — 보기 전용에서는 감춘다. 「보기만」 인 화면에 올리기가 있으면
+          뜻이 어긋난다 */}
+      {!ro && <ShareButton snapshot={() => layoutSnapshot(state)} />}
       <input
         ref={fileRef}
         type="file"
@@ -779,14 +838,19 @@ export default function Toolbar() {
         className="hidden"
         onChange={(e) => importLayout(e.target.files?.[0])}
       />
-      <Btn
-        danger
-        onClick={() => {
-          if (window.confirm('배치를 모두 지울까요? (라이브러리는 유지됩니다)')) dispatch({ type: 'CLEAR' });
-        }}
-      >
-        <Trash2 size={13} /> 초기화
-      </Btn>
+      {/* **초기화는 반드시 감춘다.** 남겨 두면 「배치를 모두 지울까요?」 를 먼저
+          묻고, 사람이 「예」 를 누른 뒤에 리듀서가 조용히 버린다 — 지웠다고
+          믿게 만드는 화면이 된다. 막는 것만으로는 모자란 유일한 자리다. */}
+      {!ro && (
+        <Btn
+          danger
+          onClick={() => {
+            if (window.confirm('배치를 모두 지울까요? (라이브러리는 유지됩니다)')) dispatch({ type: 'CLEAR' });
+          }}
+        >
+          <Trash2 size={13} /> 초기화
+        </Btn>
+      )}
     </header>
   );
 }

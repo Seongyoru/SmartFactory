@@ -176,8 +176,10 @@ t('마우스 조작 조건이 **글자 그대로** 남아 있다 — 터치를 �
  */
 
 const coarseAt = css.indexOf('@media (pointer: coarse)');
-/* 이 블록은 파일의 맨 끝에 둔다 — 뒤에 다른 규칙이 붙으면 여기를 같이 고칠 것 */
-const coarse = coarseAt < 0 ? '' : css.slice(coarseAt);
+/* 미디어 블록의 **닫는 괄호까지만** 자른다. 파일 끝까지 자르면 뒤에 규칙이
+   하나 붙는 순간 검사가 엉뚱한 것을 보기 시작한다 — 실제로 한 번 그랬다. */
+const coarseEnd = coarseAt < 0 ? -1 : css.indexOf('\n}', coarseAt);
+const coarse = coarseAt < 0 ? '' : css.slice(coarseAt, coarseEnd + 2);
 
 t('**`pointer: coarse` 다 — `any-pointer` 가 아니다.** 마우스 쓰는 사람의 밀도를 지킨다', () => {
   assert.ok(coarseAt > 0, '(pointer: coarse) 블록이 없다');

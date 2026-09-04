@@ -14,7 +14,7 @@
 import React, { useEffect } from 'react';
 import {
   Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ruler, Truck,
+  Lock, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ruler, Truck,
 } from 'lucide-react';
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { getSpec, loadModel, modelOptions } from './core/modelStore.js';
@@ -25,7 +25,9 @@ import { formatElapsed } from './core/clock.js';
 import { blockChain, stepTarget } from './core/diagnose.js';
 import { normalizeOrders } from './core/orders.js';
 import { focusOn } from './core/focusStore.js';
-import { SHARE_PARAM, fetchShared, sharedIdOf } from './core/share.js';
+import {
+  SHARE_OFF_TEXT, SHARE_PARAM, fetchShared, shareOn, sharedIdOf,
+} from './core/share.js';
 import { BUILTIN_LIBRARY, PAYLOAD_ITEMS, isShelf, isUtility } from './data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './core/shelf.js';
 import EditorScene from './scene/EditorScene.jsx';
@@ -59,6 +61,15 @@ function useShortcuts() {
     const onKey = (e) => {
       const tag = e.target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      /**
+       * 보기 전용에서는 **여기서 끊는다.**
+       *  리듀서가 이미 막고 있지만(core/readOnly.js), 거기까지 보내면 Ctrl+Z 나
+       *  Delete 를 눌렀을 때 아무 일도 안 일어나는 채로 조용하다 — 눌린 것이
+       *  먹혔는지 안 먹혔는지 알 수가 없다. 뷰 전환(Tab)과 선택 풀기(Esc)만
+       *  남긴다. 그 둘은 보는 일이다.
+       */
+      if (state.readOnly && e.key !== 'Tab' && e.key !== 'Escape') return;
 
       /* 되돌리기 — 글자 입력 중에는 위에서 이미 빠져나가므로 이름 필드의
          네이티브 실행 취소를 가로채지 않는다.
@@ -483,7 +494,7 @@ function ViewOptions() {
 }
 
 function StatusBar() {
-  const { state } = useEditor();
+  const { state, dispatch } = useEditor();
   const cursor = useCursor();
   const toolName =
     state.tool === TOOL.PLACE ? '배치' : state.tool === TOOL.CONNECT ? '연결' : state.tool === TOOL.ERASE ? '지우개' : '선택';
@@ -503,7 +514,22 @@ function StatusBar() {
       <span>{state.snapEdge ? '면 맞춤 ON' : '면 맞춤 OFF'}</span>
       <div className="flex-1" />
       <span>설비 {state.placed.length} · 연결 {state.links.length}</span>
-      <span className="text-ink4">자동 저장됨</span>
+      {/**
+        * **보기 전용이면 그렇다고 말하고, 나가는 길을 같이 준다.**
+        *  모드에 갇혀서 「왜 아무것도 안 되지」 로 끝나는 것이 이 기능의 가장
+        *  흔한 실패다. 상태바는 배율과 서랍에 상관없이 늘 자리를 지키므로
+        *  여기가 그 말을 놓을 자리다.
+        */}
+      {state.readOnly ? (
+        <button
+          onClick={() => dispatch({ type: 'SET', patch: { readOnly: false } })}
+          className="flex items-center gap-1.5 rounded px-1.5 text-amber-500 transition-colors hover:bg-raiseh"
+        >
+          <Lock size={11} /> 보기 전용 — 눌러서 편집으로
+        </button>
+      ) : (
+        <span className="text-ink4">자동 저장됨</span>
+      )}
     </footer>
   );
 }
@@ -522,6 +548,22 @@ function useSharedLayout() {
   useEffect(() => {
     const id = sharedIdOf(window.location.search);
     if (!id) return;
+
+    /**
+     * **서버가 없으면 부르지 않는다.** 어차피 404 라서, 부르면 「공유 도면을 못
+     * 열었습니다 — 서버가 …」 라는 소음만 남는다. 옛 링크를 들고 온 사람에게는
+     * 무엇이 왜 안 되는지 한 줄로 말해 주는 편이 낫다.
+     *
+     * 주소 청소는 **그래도 한다** — 안 지우면 새로고침할 때마다 같은 말이 뜬다.
+     */
+    if (!shareOn()) {
+      dispatch({ type: 'SET', patch: { hint: SHARE_OFF_TEXT } });
+      const u0 = new URL(window.location.href);
+      u0.searchParams.delete(SHARE_PARAM);
+      window.history.replaceState({}, '', u0.toString());
+      return;
+    }
+
     let alive = true;
     fetchShared(id)
       .then((data) => {

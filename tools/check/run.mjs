@@ -57,6 +57,7 @@ await import('./camera.mjs');
 await import('./ceiling.mjs');
 await import('./scale.mjs');
 await import('./touch.mjs');
+await import('./readonly.mjs');
 await import('./divert.mjs');
 await import('./inspect.mjs');
 await import('./calibrate.mjs');
