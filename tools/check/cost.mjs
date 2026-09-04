@@ -503,14 +503,23 @@ t('손 안 댔으면 **예전 그대로** — 이미 그린 도면의 화면이 
 const toolbarSrc = await readSrc('ui/Toolbar.jsx');
 const indexCss = await readSrc('index.css');
 
+/**
+ * 여는 태그의 **className 값만** 뽑는다.
+ *  `<header[^>]*>` 로 잡으면 안 된다 — 클래스 안의 `[&>*]:shrink-0` 에 `>` 가
+ *  들어 있어서 거기서 잘린다. 잘린 조각에도 앞쪽 클래스는 남아 있어서 검사가
+ *  **통과해 버린다** — 실제로 그렇게 조용히 지나갔다.
+ */
+const classOf = (src, tag) =>
+  src.match(new RegExp(`<${tag}[^]*?className="([^"]*)"`))?.[1] ?? '';
+
 t('툴바가 넘치면 **옆으로 밀린다** — 잘려서 못 누르면 안 된다', () => {
-  const head = toolbarSrc.match(/<header className="[^"]*"/)?.[0] ?? '';
+  const head = classOf(toolbarSrc, 'header');
   assert.match(head, /overflow-x-auto/, '넘친 만큼이 손에 안 닿는다');
   assert.match(head, /h-12 shrink-0/, '툴바가 줄어들어 다른 것을 밀어낸다');
 });
 
 t('스크롤 막대를 숨긴다 — 48px 줄에 막대가 뜨면 버튼을 덮는다', () => {
-  const head = toolbarSrc.match(/<header className="[^"]*"/)?.[0] ?? '';
+  const head = classOf(toolbarSrc, 'header');
   assert.match(head, /scrollbar-width:none/, '막대가 버튼을 덮는다');
 });
 
@@ -520,4 +529,58 @@ t('**몸통은 여전히 안 스크롤한다** — 툴바만 민다', () => {
   assert.ok(indexCss, "index.css 를 못 읽었다");
   const css = indexCss;
   assert.match(css, /body\s*\{[^}]*overflow:\s*hidden/, '몸통이 스크롤한다');
+});
+
+/* ---------- 가로줄이 **찌그러지지 않는다** --------------------------------- *
+ *  `overflow-x-auto` 만으로는 모자랐다. flex 는 넘치기 **전에** 항목부터 줄이는데
+ *  (기본 `flex-shrink: 1`), 그 바닥값은 min-content 다. 한글은 단어 사이가 아니라
+ *  **아무 글자 사이에서나** 줄이 바뀌므로 min-content 가 한 글자다 — 그래서
+ *  「내보내 기」 「탑뷰 · 배 치」 「반복 실 행」 처럼 글자 단위로 깨졌다.
+ *
+ *  실측(창 1920): 툴바 자연 폭 2052px · 두 줄이 된 항목 8개
+ *                 → `[&>*]:shrink-0` 을 주니 **0개**, 자식 최대 높이 45→32px
+ *  실측(창 2560): 넘침 0 · 그늘 없음      실측(창 1366): 넘침 582 · 오른쪽 그늘
+ * -------------------------------------------------------------------------- */
+
+/* 위에서 이미 받아 둔 것들을 쓴다 — app · dockSrc */
+
+t('**가로줄의 항목이 안 줄어든다** — 한글은 아무 글자 사이에서나 깨진다', () => {
+  const bars = [
+    ['툴바', classOf(toolbarSrc, 'header')],
+    ['상태바', classOf(app, 'footer')],
+    ['띠 탭 줄', dockSrc.match(/className="(flex h-7 shrink-0 items-center gap-1[^"]*)"/)?.[1]],
+  ];
+  for (const [name, tag] of bars) {
+    assert.ok(tag, `${name} 을 못 찾았다`);
+    assert.match(tag, /\[&>\*\]:shrink-0/, `${name} 의 항목이 찌그러진다`);
+    assert.match(tag, /overflow-x-auto/, `${name} 이 넘친 만큼을 못 보여 준다`);
+  }
+});
+
+t('**넘친 쪽에 그늘을 드리운다** — 막대를 숨겼으니 잘린 줄을 알 길이 없다', () => {
+  assert.match(toolbarSrc, /edge\.right && \(/, '오른쪽 그늘이 없다');
+  assert.match(toolbarSrc, /edge\.left && \(/, '왼쪽 그늘이 없다');
+  /* 늘 켜 두면 안 된다 — 다 보이는데 그늘이 있으면 없는 것을 있다고 말하는 셈 */
+  assert.match(toolbarSrc, /max - el\.scrollLeft > 1/, '오른쪽에 남은 것이 있는지 안 본다');
+  assert.match(toolbarSrc, /el\.scrollLeft > 1/, '왼쪽으로 밀렸는지 안 본다');
+  assert.match(toolbarSrc, /pointer-events-none/, '그늘이 밑의 단추를 먹는다');
+});
+
+t('그늘을 **다시 재는 길이 넷** — 스크롤 · 창 · 배율 · 한 프레임 뒤', () => {
+  const at = toolbarSrc.indexOf('const barRef = useRef(null);');
+  assert.ok(at > 0, '툴바를 재는 자리를 못 찾았다');
+  const body = toolbarSrc.slice(at, toolbarSrc.indexOf('}, [ro]);', at));
+  assert.match(body, /addEventListener\('scroll', measure/, '밀어도 그늘이 안 바뀐다');
+  assert.match(body, /addEventListener\('resize', measure/, '창을 줄여도 안 바뀐다');
+  /* 배율은 루트 style 로 걸린다 — ResizeObserver 는 안 그리는 동안 안 온다 */
+  assert.match(body, /attributeFilter: \['style'\]/, '배율이 바뀌어도 안 바뀐다');
+  /* 붙자마자 재면 아직 폭이 안 정해져 있다 — 실제로 넘침 0 을 받았다 */
+  assert.match(body, /requestAnimationFrame\(measure\)/, '한 프레임 뒤에 다시 안 잰다');
+  assert.match(body, /cancelAnimationFrame\(raf\)/, '떼어낼 때 프레임 예약을 안 거둔다');
+});
+
+t('여백을 줄여 자리를 도로 찾았다 — 항목이 28개라 여백만 264px 이었다', () => {
+  const head = classOf(toolbarSrc, 'header');
+  assert.match(head, /gap-2/, '툴바 여백이 다시 벌어졌다');
+  assert.ok(!/gap-3/.test(head), 'gap-3 으로 되돌아갔다 — 104px 을 도로 내준다');
 });

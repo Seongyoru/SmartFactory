@@ -1176,7 +1176,9 @@ export default function RunDock() {
           className="absolute inset-x-0 -top-1 z-20 h-2 cursor-ns-resize"
         />
       )}
-      <div className="flex h-7 shrink-0 items-center gap-1 border-b border-line pr-2">
+      {/* 툴바와 같은 이유로 자식을 안 줄인다(Toolbar 의 header 주석 참고) —
+          좁은 화면에서 「반복 실행」 이 넉 줄이 됐다 */}
+      <div className="flex h-7 shrink-0 items-center gap-1 overflow-x-auto border-b border-line pr-2 [scrollbar-width:none] [&>*]:shrink-0 [&::-webkit-scrollbar]:hidden">
         <button
           type="button"
           onClick={() => dispatch({ type: 'SET', patch: { showRunDock: !open } })}

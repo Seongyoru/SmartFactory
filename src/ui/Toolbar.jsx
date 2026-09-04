@@ -508,6 +508,43 @@ export default function Toolbar() {
   /** 보기 전용 — 여기서는 「연장을 내놓을까」 만 정한다. 막는 일은 리듀서가 한다 */
   const ro = !!state.readOnly;
 
+  /**
+   * 툴바에서 **지금 안 보이는 쪽**이 어디인가 — 그늘을 드리울 자리(아래 참고).
+   * ---------------------------------------------------------------------------
+   *  깨우는 길을 셋 둔다. 스크롤은 당연하고, 창 크기와 **배율**도 봐야 한다 —
+   *  ResizeObserver 는 창이 안 그려지는 동안 한 번도 안 오는데(App.jsx 의
+   *  useNarrowRow 에 같은 주석이 있다), 배율은 바로 그 상황에서 바뀐다.
+   */
+  const barRef = useRef(null);
+  const [edge, setEdge] = useState({ left: false, right: false });
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return undefined;
+    const measure = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      /* 1px 은 반올림 찌꺼기다 — 그것 때문에 그늘이 늘 켜져 있으면 안 된다 */
+      setEdge({ left: el.scrollLeft > 1, right: max - el.scrollLeft > 1 });
+    };
+    measure();
+    /* **한 프레임 뒤에 한 번 더.** 붙자마자 재면 아직 폭이 안 정해져 있어
+       「넘친 것이 없다」 가 나온다(글꼴이 늦게 오면 더 어긋난다). 실제로 첫
+       측정에서 넘침 0 을 받아 그늘이 안 뜬 것을 봤다. */
+    const raf = requestAnimationFrame(measure);
+    const ro2 = new ResizeObserver(measure);
+    ro2.observe(el);
+    const mo = new MutationObserver(measure);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    el.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro2.disconnect();
+      mo.disconnect();
+      el.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+    };
+  }, [ro]);
+
   const setView = (view) => dispatch({ type: 'SET', patch: { view } });
   const setTool = (tool) => dispatch({ type: 'SET_TOOL', tool });
 
@@ -533,8 +570,26 @@ export default function Toolbar() {
    *  넓은 창에서는 아무것도 안 바뀐다 — 넘칠 때만 스크롤이 생긴다.
    *  스크롤 막대는 숨긴다. 높이 48px 짜리 줄에 막대가 뜨면 버튼을 덮는다.
    */
+  /**
+   * **가로줄의 항목은 찌그러지지 않는다 — 넘치면 밀려난다.**
+   * -------------------------------------------------------------------------
+   *  위의 `overflow-x-auto` 만으로는 모자랐다. flex 는 넘치기 **전에** 항목부터
+   *  줄이는데(기본 `flex-shrink: 1`), 그 바닥값은 min-content 다. 한글은 단어
+   *  사이가 아니라 **아무 글자 사이에서나** 줄이 바뀌므로 min-content 가 한
+   *  글자다 — 그래서 「내보내 기」 「탑뷰 · 배 치」 처럼 글자 단위로 깨졌다.
+   *  실측: 자연 폭 2052px 인 툴바를 1920 에 넣으면 8개가 두 줄이 됐고,
+   *  `[&>*]:shrink-0` 을 주니 0개가 됐다.
+   *
+   *  **자식 전부**에 건다(`[&>*]`). 하나씩 붙이면 다음에 단추를 더할 때 빠뜨린다 —
+   *  실제로 이 줄에 배율과 자물쇠를 더하다가 이 사고가 났다.
+   *  빈칸(`flex-1`)은 grow 가 살아 있어 그대로 민다(재서 확인했다).
+   *
+   *  `gap-3` 을 `gap-2` 로 줄인 것도 같은 이유다. 항목이 28개라 여백만 264px 을
+   *  먹고 있었다 — 4px 씩 줄여 104px 을 도로 찾았다.
+   */
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 overflow-x-auto border-b border-line bg-head px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="relative shrink-0">
+      <header ref={barRef} className="flex h-12 shrink-0 items-center gap-2 overflow-x-auto border-b border-line bg-head px-3 [scrollbar-width:none] [&>*]:shrink-0 [&::-webkit-scrollbar]:hidden">
       <div className="flex items-center gap-2 pr-1">
         <span className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-sky-500 to-cyan-400 text-[11px] font-black text-slate-950">
           E
@@ -851,6 +906,22 @@ export default function Toolbar() {
           <Trash2 size={13} /> 초기화
         </Btn>
       )}
-    </header>
+      </header>
+
+      {/**
+        * **숨은 쪽에 그늘을 드리운다.**
+        *  스크롤 막대를 숨겼기 때문에(위 주석), 넘친 것이 있어도 화면에 아무
+        *  표시가 없었다 — 1920 에서 「초기화」 가 28px 잘리고, 1366 에서는
+        *  580px 이 통째로 사라지는데 **잘린 줄을 모른다.** 그늘이 있으면
+        *  「저쪽에 더 있다」 가 눈에 보이고, 밀면 사라진다.
+        *  `pointer-events-none` 이라 그늘 밑의 단추도 그대로 눌린다.
+        */}
+      {edge.left && (
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-6 bg-gradient-to-r from-head to-transparent" />
+      )}
+      {edge.right && (
+        <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-head to-transparent" />
+      )}
+    </div>
   );
 }

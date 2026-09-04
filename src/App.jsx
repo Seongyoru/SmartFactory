@@ -499,8 +499,10 @@ function StatusBar() {
   const toolName =
     state.tool === TOOL.PLACE ? '배치' : state.tool === TOOL.CONNECT ? '연결' : state.tool === TOOL.ERASE ? '지우개' : '선택';
 
+  /* 툴바와 같은 이유로 자식을 안 줄인다(Toolbar 의 header 주석 참고) —
+     좁은 화면에서 「자동 저장됨」 이 글자 단위로 깨졌다 */
   return (
-    <footer className="flex h-7 shrink-0 items-center gap-4 border-t border-line bg-head px-3 text-[10.5px] text-ink4">
+    <footer className="flex h-7 shrink-0 items-center gap-4 overflow-x-auto border-t border-line bg-head px-3 text-[10.5px] text-ink4 [scrollbar-width:none] [&>*]:shrink-0 [&::-webkit-scrollbar]:hidden">
       <span className="flex items-center gap-1.5">
         <Crosshair size={11} />
         <b className="text-ink2 tabular-nums">
