@@ -596,3 +596,45 @@ t('여백을 줄여 자리를 도로 찾았다 — 항목이 28개라 여백만 
   assert.match(head, /gap-2/, '툴바 여백이 다시 벌어졌다');
   assert.ok(!/gap-3/.test(head), 'gap-3 으로 되돌아갔다 — 104px 을 도로 내준다');
 });
+
+/* ---------- 툴바 안의 팝오버는 **잘리지 않는다** --------------------------- *
+ *  툴바가 가로 스크롤을 하려면 `overflow-x: auto` 여야 하는데, 한 축이 visible 이
+ *  아니면 브라우저가 나머지 축도 `auto` 로 만든다 — 그래서 **세로로도 잘라낸다.**
+ *  툴바 밑으로 내려가는 팝오버는 `absolute` 로 두면 통째로 안 보인다.
+ *
+ *  실측: 공유 팝오버가 계속 그랬다(rect 는 top 34·bottom 162 인데 그 자리에
+ *  elementFromPoint 가 아무것도 못 잡았다). 뒷배경만 fixed 라 멀쩡해서, 눌러도
+ *  아무 일도 안 일어나는 것처럼 보였다.
+ *  `fixed top-12` 는 배율 0.8·1.5·2 에서도 툴바 바닥에 정확히 붙는다(재 봤다).
+ * -------------------------------------------------------------------------- */
+
+t('**툴바 팝오버가 fixed 다** — absolute 면 툴바가 세로로 잘라내 안 보인다', () => {
+  const panels = [...toolbarSrc.matchAll(/className="((?:fixed|absolute)[^"]*z-30[^"]*)"/g)].map((m) => m[1]);
+  assert.ok(panels.length >= 2, `팝오버 판을 ${panels.length}개만 찾았다 — 공유와 설정 둘은 있어야 한다`);
+  for (const cls of panels) {
+    assert.match(cls, /^fixed /, `팝오버가 absolute 다 — 잘린다: ${cls.slice(0, 60)}`);
+    /* 툴바 높이(h-12)와 같은 값이어야 바로 밑에 붙는다 */
+    assert.match(cls, /top-12/, `팝오버가 툴바 바닥에 안 붙는다: ${cls.slice(0, 60)}`);
+  }
+});
+
+t('설정 팝오버에 **셋이 다 들어 있다** — 테마 · 배율 · 보기 전용', () => {
+  const at = toolbarSrc.indexOf('function SettingsButton(');
+  assert.ok(at > 0, 'SettingsButton 을 못 찾았다');
+  const body = toolbarSrc.slice(at, toolbarSrc.indexOf('\nexport default function Toolbar', at));
+  assert.match(body, /patch: \{ appearance:/, '테마가 없다');
+  assert.match(body, /patch: \{ uiScale: Number\(e\.target\.value\) \}/, '배율이 없다');
+  assert.match(body, /patch: \{ readOnly: !ro \}/, '보기 전용이 없다');
+  /* 접어 두면 「지금 보기 전용인가」 가 안 보인다 — 단추가 그것을 말해야 한다 */
+  assert.match(body, /active=\{open \|\| ro\}/, '접힌 상태에서 보기 전용인지 알 수 없다');
+});
+
+t('셋을 툴바에서 **걷어냈다** — 안 걷으면 접은 보람이 없다', () => {
+  /* 툴바 줄(return 뒤)에 그 셋이 다시 나오면 안 된다. 실측: 셋이 115px 을 먹어
+     1920 에서 28px 넘쳤고, 접으니 넘침 0 이 됐다. */
+  const row = toolbarSrc.slice(toolbarSrc.indexOf('<header'));
+  assert.match(row, /<SettingsButton \/>/, '툴바에 설정 단추가 없다');
+  assert.ok(!/UI_SCALES\.map/.test(row), '배율 고르는 칸이 아직 툴바 줄에 있다');
+  assert.ok(!/patch: \{ appearance:/.test(row), '테마 단추가 아직 툴바 줄에 있다');
+  assert.ok(!/patch: \{ readOnly: !ro \}/.test(row), '자물쇠가 아직 툴바 줄에 있다');
+});

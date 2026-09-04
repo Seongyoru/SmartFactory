@@ -23,6 +23,7 @@ import {
   Redo2,
   RotateCw,
   Ruler,
+  Settings,
   Share2,
   Sun,
   Trash2,
@@ -31,7 +32,6 @@ import {
   Lock,
   Unlock,
   X,
-  ZoomIn,
 } from 'lucide-react';
 import { SPEEDS, formatElapsed, setSpeed, useElapsed, useSimSpeed } from '../core/clock.js';
 import { resetRun } from '../core/sim.js';
@@ -409,7 +409,16 @@ function ShareButton({ snapshot }) {
       {state && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setState(null)} />
-          <div className="absolute right-0 top-full z-30 mt-1 w-[290px] rounded-lg bg-panel p-2.5 shadow-xl ring-1 ring-edge">
+          {/**
+            * **`fixed` 다 — `absolute` 로 두면 통째로 안 보인다.**
+            *  툴바는 가로 스크롤 때문에 `overflow-x: auto` 인데, 한 축이 visible 이
+            *  아니면 브라우저가 나머지 축도 `auto` 로 만든다 — 그래서 **세로로도
+            *  잘라낸다.** 툴바 밑으로 내려간 이 팝오버가 계속 잘려 나가고 있었다
+            *  (뒷배경은 fixed 라 멀쩡해서, 눌러도 아무것도 없는 것처럼 보였다).
+            *  `top-12` 는 툴바 높이(h-12)와 같은 값이다. 배율 0.8·1.5·2 에서도
+            *  툴바 바닥에 정확히 붙는 것을 재서 확인했다.
+            */}
+          <div className="fixed right-3 top-12 z-30 w-[290px] rounded-lg bg-panel p-2.5 shadow-xl ring-1 ring-edge">
             {/**
               * **서버가 없으면 여기서 끝난다.**
               *  예전에는 이름과 설명을 다 받고 「누구나 볼 수 있습니다」 경고까지
@@ -491,6 +500,104 @@ function ShareButton({ snapshot }) {
                   <Btn onClick={() => setState(null)}>닫기</Btn>
                 </div>
               </>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 설정 팝오버 한 줄 — 왼쪽에 이름과 설명, 오른쪽에 손잡이 */
+function SettingRow({ label, hint, children }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5">
+      <div className="min-w-0">
+        <div className="text-[11.5px] text-ink2">{label}</div>
+        <div className="text-[10px] leading-snug text-ink4">{hint}</div>
+      </div>
+      <div className="shrink-0">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * 설정 — **이 화면을 어떻게 볼까**.
+ * ---------------------------------------------------------------------------
+ *  테마 · 배율 · 보기 전용 셋을 한 자리에 접었다. 셋 다 도면이 아니라 「보는
+ *  방식」 을 정하는 것이고, 한 번 정하면 한참 안 건드린다 — 그런 것이 툴바에
+ *  늘 나와 있으면 자주 쓰는 단추의 자리를 뺏는다.
+ *
+ *  실제로 뺏고 있었다. 셋이 115px 을 먹어서 1920px 화면에서 툴바가 28px 넘쳤고,
+ *  「초기화」 가 화면 밖으로 밀려났다. 접으니 1920 에서 넘침이 사라진다.
+ *
+ *  **보기 전용은 나가는 길을 하나 더 둔다.** 팝오버 안에 접어 두면 「어떻게
+ *  빠져나오지」 가 되기 쉬운데, 상태바가 늘 「보기 전용 — 눌러서 편집으로」 를
+ *  띄우고 있어서(App.jsx) 그쪽으로도 풀린다.
+ */
+function SettingsButton() {
+  const { state, dispatch } = useEditor();
+  const [open, setOpen] = useState(false);
+  const ro = !!state.readOnly;
+  const light = state.appearance === 'light';
+
+  return (
+    <div className="relative">
+      <IconBtn
+        title="설정 — 테마 · 화면 배율 · 보기 전용"
+        active={open || ro}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Settings size={14} />
+      </IconBtn>
+      {open && (
+        <>
+          {/* 바깥을 누르면 닫힌다 — 공유·공용 도면 팝오버와 같은 방식 */}
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          {/* fixed 인 이유는 공유 팝오버 쪽 주석에 적어 두었다 — 툴바가 세로로도 잘라낸다 */}
+          <div className="fixed right-3 top-12 z-30 w-[268px] rounded-lg bg-panel p-2.5 shadow-xl ring-1 ring-edge">
+            <SettingRow label="테마" hint="눈이 편한 쪽으로">
+              <Btn onClick={() => dispatch({ type: 'SET', patch: { appearance: light ? 'dark' : 'light' } })}>
+                {light ? <Moon size={13} /> : <Sun size={13} />}
+                {light ? '다크' : '라이트'}
+              </Btn>
+            </SettingRow>
+
+            <div className="my-1 h-px bg-line" />
+
+            <SettingRow label="화면 배율" hint="글자와 단추를 통째로">
+              <select
+                value={clampUiScale(state.uiScale)}
+                onChange={(e) => dispatch({ type: 'SET', patch: { uiScale: Number(e.target.value) } })}
+                className="cursor-pointer rounded border border-edge bg-field px-1.5 py-1 text-[11px] text-ink outline-none transition-colors hover:border-sky-500/60 hover:bg-raiseh focus:border-sky-500"
+              >
+                {UI_SCALES.map((z) => (
+                  <option key={z} value={z}>
+                    {uiScaleLabel(z)}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+            <p className="mb-1 text-[10px] leading-snug text-ink4">
+              4K 를 100% 로 쓰면 글자가 절반이 되고, 작은 노트북에서는 툴바가 자리를 다 먹습니다.
+              화면이 몇 인치인지는 브라우저가 모르니 직접 고릅니다.
+            </p>
+
+            <div className="my-1 h-px bg-line" />
+
+            <SettingRow label="보기 전용" hint="고치지 않고 보기만">
+              <Btn
+                active={ro}
+                onClick={() => dispatch({ type: 'SET', patch: { readOnly: !ro } })}
+              >
+                {ro ? <Lock size={13} /> : <Unlock size={13} />}
+                {ro ? '켜짐' : '꺼짐'}
+              </Btn>
+            </SettingRow>
+            {ro && (
+              <p className="mb-1 text-[10px] leading-snug text-amber-600">
+                편집이 막혀 있습니다. 아래 상태바에서도 풀 수 있습니다.
+              </p>
             )}
           </div>
         </>
@@ -799,42 +906,9 @@ export default function Toolbar() {
         <GraduationCap size={14} />
       </IconBtn>
 
-      <IconBtn
-        title={state.appearance === 'light' ? '다크 모드로' : '라이트 모드로'}
-        onClick={() =>
-          dispatch({ type: 'SET', patch: { appearance: state.appearance === 'light' ? 'dark' : 'light' } })
-        }
-      >
-        {state.appearance === 'light' ? <Moon size={14} /> : <Sun size={14} />}
-      </IconBtn>
-
-      {/* 보기 전용 — 고치지 않고 보기만 한다. **자동으로 안 켠다**(배율과 같은
-          원칙): 브라우저는 이 화면을 누가 어떻게 쓰는지 모른다 */}
-      <IconBtn
-        title={ro ? '보기 전용 — 눌러서 편집으로' : '보기 전용으로 — 고치지 않고 보기만'}
-        active={ro}
-        onClick={() => dispatch({ type: 'SET', patch: { readOnly: !ro } })}
-      >
-        {ro ? <Lock size={14} /> : <Unlock size={14} />}
-      </IconBtn>
-
-      {/* 화면 배율 — 4K 100% 배율에서 글자가 절반이 되고, 작은 노트북에서는
-          툴바가 자리를 다 먹는다. 화면이 몇 인치인지는 브라우저가 모르니
-          사람이 고른다(uiScale.js). */}
-      <label className="flex items-center gap-1.5 text-[11px] text-ink3" title="화면 배율 — 글자와 단추를 통째로 키우고 줄인다">
-        <ZoomIn size={13} />
-        <select
-          value={clampUiScale(state.uiScale)}
-          onChange={(e) => dispatch({ type: 'SET', patch: { uiScale: Number(e.target.value) } })}
-          className="cursor-pointer rounded border border-edge bg-field px-1.5 py-1 text-[11px] text-ink outline-none transition-colors hover:border-sky-500/60 hover:bg-raiseh focus:border-sky-500"
-        >
-          {UI_SCALES.map((z) => (
-            <option key={z} value={z}>
-              {uiScaleLabel(z)}
-            </option>
-          ))}
-        </select>
-      </label>
+      {/* 테마 · 배율 · 보기 전용 — 셋 다 「이 화면을 어떻게 볼까」 다.
+          툴바에 늘어놓으니 115px 을 먹어 1920 에서 초기화가 밀려났다(SettingsButton). */}
+      <SettingsButton />
 
       <div className="flex-1" />
 

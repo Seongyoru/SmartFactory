@@ -141,14 +141,35 @@ t('툴바에 배율 고르는 칸이 있고 uiScale 로 이어져 있다', () =>
     '고른 값이 uiScale 로 안 간다');
 });
 
-t('**툴바가 쓰는 이름을 다 들여왔다** — vite build 는 이걸 안 잡는다', () => {
+t('**툴바가 그리는 것을 다 들여왔다** — vite build 는 이걸 안 잡는다', () => {
   /* 들여오기 구문만 모아 놓고 그 안에서 찾는다. 본문에서 쓰는 것만 보면
-     「쓰기는 쓰는데 안 들여왔다」 는 바로 그 사고를 못 잡는다. */
+     「쓰기는 쓰는데 안 들여왔다」 는 바로 그 사고를 못 잡는다.
+
+     **이름 목록을 손으로 적지 않는다.** 예전에는 `['ZoomIn', …]` 이라고 적어
+     두었는데, 그 아이콘을 안 쓰게 되자 검사가 「툴바가 ZoomIn 를 안 쓴다」 며
+     깨졌다 — 검사의 뜻은 「저 아이콘을 써라」 가 아니라 「쓰는 것은 다 들여와라」
+     다. 그래서 실제로 그리는 것을 소스에서 훑는다. */
   const imported = (toolbar.match(/^import[\s\S]*?from '[^']+';/gm) ?? []).join('\n');
   assert.ok(imported.length > 0, '들여오기 구문을 하나도 못 찾았다');
-  for (const name of ['ZoomIn', 'UI_SCALES', 'uiScaleLabel', 'clampUiScale']) {
+
+  /* 이 파일 안에서 만든 것은 들여올 필요가 없다 */
+  const local = new Set([
+    ...[...toolbar.matchAll(/^function (\w+)/gm)].map((m) => m[1]),
+    ...[...toolbar.matchAll(/^const (\w+) = /gm)].map((m) => m[1]),
+  ]);
+  const used = new Set([...toolbar.matchAll(/<([A-Z]\w*)/g)].map((m) => m[1]));
+  assert.ok(used.size >= 10, `그리는 것을 ${used.size}개만 찾았다 — 정규식이 안 맞는다`);
+
+  for (const name of used) {
+    if (local.has(name)) continue;
+    assert.ok(new RegExp(`\\b${name}\\b`).test(imported),
+      `<${name}> 을 그리는데 안 들여왔다 — 화면이 통째로 멈춘다`);
+  }
+  /* 배율을 다루는 값 셋은 이름으로 짚는다 — 이건 「무엇을 쓰는가」 가 아니라
+     「배율이 툴바에 이어져 있는가」 라서 위 훑기로는 안 잡힌다 */
+  for (const name of ['UI_SCALES', 'uiScaleLabel', 'clampUiScale']) {
     assert.ok(toolbar.includes(name), `툴바가 ${name} 를 안 쓴다`);
-    assert.ok(imported.includes(name), `${name} 를 들여오지 않았다 — 화면이 통째로 멈춘다`);
+    assert.ok(imported.includes(name), `${name} 를 들여오지 않았다`);
   }
 });
 
