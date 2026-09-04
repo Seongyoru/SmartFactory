@@ -89,6 +89,16 @@ t('부팅 복원이 그 둘을 실제로 쏜다 — 통과 목록의 근거가 �
 
 t('**구역 감추기는 통과한다** — 보기 기능인데 도면을 건드린다', () => {
   assert.equal(isZoneHide({ type: 'UPDATE_ZONE', patch: { hidden: true } }), true);
+  /* **검문을 통과하는지 값으로 확인한다.** 판정 함수만 시험하면, 검문이 그
+     판정을 안 쓰게 되어도 검사는 통과한다 — 실제로 그 구멍이 있었다.
+     그래서 zones 를 진짜로 바꾸는 리듀서에 태워 본다. */
+  const hides = (s, a) => (a.type === 'UPDATE_ZONE' ? { ...s, zones: ['감춘것'] } : s);
+  const g = withReadOnly(hides, { sameDoc, docOf });
+  const out = g(S(true), { type: 'UPDATE_ZONE', patch: { hidden: true } });
+  assert.deepEqual(out.zones, ['감춘것'], '보기 전용에서 구역을 감출 수 없다');
+  /* 같은 리듀서인데 편집 액션이면 막혀야 한다 — 통과가 액션에 달렸다는 증거 */
+  const blocked = g(S(true), { type: 'UPDATE_ZONE', patch: { name: '새 이름' } });
+  assert.deepEqual(blocked.zones, [], '이름을 고치는 것까지 통과했다');
 });
 
 t('구역을 **고치는** UPDATE_ZONE 은 막힌다 — 이름·색을 같이 보내면 편집이다', () => {
