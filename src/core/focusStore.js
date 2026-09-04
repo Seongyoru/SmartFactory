@@ -65,6 +65,19 @@ export function focusOn(at, { look = false } = {}) {
   subs.forEach((f) => f(req));
 }
 
+/**
+ * **가던 것을 멈춘다** — 손가락 두 개가 화면에 닿았을 때 부른다.
+ *  들여다보기는 몇 프레임에 걸쳐 카메라를 목표로 당긴다. 그동안 사람이 직접
+ *  밀거나 확대하면 매 프레임 덮어써져 **안 움직이는 것처럼 보인다.** 사람 손이
+ *  먼저다 — 목표를 버린다.
+ *
+ *  `at` 이 없는 요청으로 알린다. 받는 쪽은 그것을 「목표를 지워라」 로 읽는다.
+ */
+export function cancelFocus() {
+  req = null;
+  subs.forEach((f) => f({ at: null, look: false, seq: ++seq }));
+}
+
 export function subscribeFocus(fn) {
   subs.add(fn);
   return () => subs.delete(fn);

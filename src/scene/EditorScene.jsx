@@ -16,6 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { zoomOf } from '../core/uiScale.js';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Grid, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
@@ -64,7 +65,7 @@ import {
 } from '../core/grid.js';
 import { getSpec, subscribeModels } from '../core/modelStore.js';
 import { publishCursor } from '../core/cursorStore.js';
-import { LOOK_ZOOM, ORBIT_RATE, orbitAzimuth, orbitPose, subscribeFocus } from '../core/focusStore.js';
+import { cancelFocus, LOOK_ZOOM, ORBIT_RATE, orbitAzimuth, orbitPose, subscribeFocus } from '../core/focusStore.js';
 import { allPorts, autoLayer, layerLift, linkPath, nearestPort } from '../core/link.js';
 import { buildConnectorPath, buildFreePath } from '../core/routing.js';
 import { rotateXZ } from '../core/grid.js';
@@ -180,63 +181,145 @@ function useModelsVersion() {
  *  - 휠      : 커서 기준 확대/축소 (커서 밑 좌표가 고정된다)
  *  - 우/휠클릭 드래그 : 평행 이동
  */
-function TopControls({ zoomRef }) {
+function TopControls({ zoomRef, cancelRef }) {
   const { gl, camera, size } = useThree();
 
   useEffect(() => {
     const el = gl.domElement;
     let panning = false;
     let last = null;
+    /**
+     * 화면 배율(core/uiScale.js). **제스처가 시작될 때 한 번만** 잰다.
+     *  clientX 는 배율이 곱해진 값이고 카메라 좌표는 안 곱해진 값이라, 안 나누면
+     *  배율 2 에서 손을 1cm 움직일 때 도면이 2cm 씩 따라온다. 배율 1 이면 1 이라
+     *  **지금까지의 마우스 조작과 값이 완전히 같다**.
+     *  매 move 마다 재면 getBoundingClientRect 가 프레임마다 레이아웃을 강제한다.
+     */
+    let uiZ = 1;
 
-    const onWheel = (e) => {
-      e.preventDefault();
-      const r = el.getBoundingClientRect();
-      const nx = ((e.clientX - r.left) / r.width) * 2 - 1;
-      const ny = -((e.clientY - r.top) / r.height) * 2 + 1;
-
+    /** 화면의 한 점(NDC)을 붙든 채 확대만 바꾼다 — 휠과 핀치가 **같은 식**을 쓴다 */
+    const zoomAt = (nx, ny, want) => {
       const z0 = camera.zoom;
       const wx = camera.position.x + (nx * size.width) / (2 * z0);
       const wz = camera.position.z - (ny * size.height) / (2 * z0);
-
-      const z1 = Math.min(120, Math.max(2, z0 * Math.exp(-e.deltaY * 0.0012)));
+      const z1 = Math.min(120, Math.max(2, want));
       camera.zoom = z1;
       camera.position.x = wx - (nx * size.width) / (2 * z1);
       camera.position.z = wz + (ny * size.height) / (2 * z1);
       camera.updateProjectionMatrix();
+      /* 뷰를 오갈 때 확대를 기억하는 통로 — 이 줄을 빼면 3D 로 갔다 오는 순간
+         확대가 CameraRig 의 초기값으로 되돌아간다 */
       if (zoomRef) zoomRef.current = z1;
     };
 
+    /** 화면 좌표 → NDC. rect 와 clientX 를 **같이** 쓴다(둘 다 배율이 곱해진 값) */
+    const ndc = (cx, cy) => {
+      const r = el.getBoundingClientRect();
+      return [((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1];
+    };
+
+    const onWheel = (e) => {
+      e.preventDefault();
+      const [nx, ny] = ndc(e.clientX, e.clientY);
+      zoomAt(nx, ny, camera.zoom * Math.exp(-e.deltaY * 0.0012));
+    };
+
+    /* ---- 손가락 -----------------------------------------------------------
+     *  **한 손가락은 건드리지 않는다.** 그 자리는 이미 설비를 놓고 끌고 마키로
+     *  고르는 데 쓰이고 있다(PointerDriver 가 pointerType 을 안 보므로 손가락이
+     *  마우스 왼쪽 버튼과 똑같이 취급된다). 한 손가락을 팬으로 돌리면 터치에서
+     *  편집이 통째로 불가능해진다.
+     *
+     *  그래서 **두 손가락**에 팬과 핀치를 같이 준다 — 벌리면 확대, 같이 움직이면
+     *  평행 이동. 지도 앱과 같은 손버릇이다.
+     */
+    const pts = new Map();
+    let pinch = null;
+
+    /** 두 손가락의 거리와 중점 */
+    const spread = () => {
+      const [a, b] = [...pts.values()];
+      return { d: Math.hypot(a[0] - b[0], a[1] - b[1]), mx: (a[0] + b[0]) / 2, my: (a[1] + b[1]) / 2 };
+    };
+
     const onDown = (e) => {
+      if (e.pointerType === 'touch') {
+        pts.set(e.pointerId, [e.clientX, e.clientY]);
+        if (pts.size === 2) {
+          const s = spread();
+          pinch = { d0: s.d, z0: camera.zoom, mx: s.mx, my: s.my };
+          uiZ = zoomOf(el);
+          /* **두 번째 손가락이 닿는 순간 편집을 취소한다.** 안 하면 첫 손가락이
+             잡고 있던 설비가 핀치하는 내내 딸려 온다 — 이 기능에서 제일 눈에
+             띄는 사고다. */
+          cancelRef?.current?.();
+        }
+        return;
+      }
       if (e.button === 1 || e.button === 2) {
         panning = true;
         last = [e.clientX, e.clientY];
+        uiZ = zoomOf(el);
         el.setPointerCapture?.(e.pointerId);
       }
     };
+
     const onMove = (e) => {
+      if (e.pointerType === 'touch') {
+        if (!pts.has(e.pointerId)) return;
+        pts.set(e.pointerId, [e.clientX, e.clientY]);
+        if (pts.size !== 2 || !pinch) return;
+        const s = spread();
+        const [nx, ny] = ndc(s.mx, s.my);
+        /* 확대는 **제스처 시작 기준**이다. 매번 직전 값에 곱하면 오차가 쌓여
+           손가락을 제자리로 되돌려도 확대가 안 돌아온다. */
+        zoomAt(nx, ny, pinch.z0 * (s.d / pinch.d0));
+        camera.position.x -= (s.mx - pinch.mx) / (camera.zoom * uiZ);
+        camera.position.z -= (s.my - pinch.my) / (camera.zoom * uiZ);
+        pinch.mx = s.mx;
+        pinch.my = s.my;
+        return;
+      }
       if (!panning || !last) return;
       const dx = e.clientX - last[0];
       const dy = e.clientY - last[1];
       last = [e.clientX, e.clientY];
-      camera.position.x -= dx / camera.zoom;
-      camera.position.z -= dy / camera.zoom;
+      camera.position.x -= dx / (camera.zoom * uiZ);
+      camera.position.z -= dy / (camera.zoom * uiZ);
     };
-    const onUp = () => { panning = false; last = null; };
+
+    /**
+     * **pointercancel 도 같이 듣는다.** 손가락은 pointerup 없이 사라질 수 있다 —
+     * 브라우저나 OS 가 제스처를 거둬 가면(화면 가장자리 스와이프 등) cancel 만
+     * 온다. 안 들으면 pts 에 유령 손가락이 남아 다음 한 손가락 조작이 핀치로
+     * 오인되고, 마우스 쪽은 panning 이 true 로 굳는다.
+     */
+    const onUp = (e) => {
+      if (e?.pointerType === 'touch') {
+        pts.delete(e.pointerId);
+        if (pts.size < 2) pinch = null;
+        return;
+      }
+      panning = false;
+      last = null;
+    };
     const onCtx = (e) => e.preventDefault();
 
     el.addEventListener('wheel', onWheel, { passive: false });
     el.addEventListener('pointerdown', onDown);
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
     el.addEventListener('contextmenu', onCtx);
     return () => {
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('pointerdown', onDown);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
       el.removeEventListener('contextmenu', onCtx);
     };
-  }, [gl, camera, size.width, size.height, zoomRef]);
+  }, [gl, camera, size.width, size.height, zoomRef, cancelRef]);
 
   return null;
 }
@@ -246,7 +329,7 @@ function TopControls({ zoomRef }) {
  *  씬이 리렌더될 때마다 zoom prop 이 다시 적용되면 사용자가 확대해 둔 배율이
  *  매 조작마다 초기값으로 되돌아간다. memo 로 리렌더 자체를 막는다.
  */
-const CameraRig = React.memo(function CameraRig({ view }) {
+const CameraRig = React.memo(function CameraRig({ view, cancelRef }) {
   const zoomRef = useRef(18);
   if (view === VIEW.TOP) {
     return (
@@ -259,7 +342,7 @@ const CameraRig = React.memo(function CameraRig({ view }) {
           near={0.1}
           far={400}
         />
-        <TopControls zoomRef={zoomRef} />
+        <TopControls zoomRef={zoomRef} cancelRef={cancelRef} />
       </>
     );
   }
@@ -347,12 +430,22 @@ function PointerDriver({ handlers }) {
       return raycaster.ray.intersectPlane(plane, hit) ? [hit.x, hit.z] : null;
     };
 
+    /**
+     * **두 번째 손가락은 흘려보낸다.**
+     *  이 핸들러들은 pointerId 를 안 보므로, 손가락이 둘이면 두 스트림이 **같은
+     *  자리로 섞여** 들어와 끌고 있던 설비가 두 손가락 사이를 오간다. 브라우저가
+     *  처음 닿은 손가락에만 붙여 주는 `isPrimary` 로 가른다 — 마우스는 언제나
+     *  primary 라 기존 조작은 한 글자도 안 바뀐다.
+     */
+    const secondFinger = (e) => e.pointerType === 'touch' && e.isPrimary === false;
+
     const onMove = (e) => {
+      if (secondFinger(e)) return;
       const p = ground(e);
       if (p) ref.current.onMove?.(p, e);
     };
     const onDown = (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || secondFinger(e)) return;
       downAt = [e.clientX, e.clientY];
       /* 이 리스너는 캔버스에, r3f 의 리스너는 상위 컨테이너에 달려 있다.
          버블링 순서상 여기가 먼저 실행되므로, "무언가를 집었는가" 플래그를
@@ -363,8 +456,10 @@ function PointerDriver({ handlers }) {
       const p = ground(e);
       if (p) ref.current.onDownGround?.(p, e);
     };
+    /* pointercancel 로도 들어온다(아래 등록 참조). 그때는 클릭으로 치지 않는다 —
+       브라우저가 제스처를 거둬 간 것이지 사람이 뗀 것이 아니다. */
     const onUp = (e) => {
-      if (e.button === 0 && downAt) {
+      if (e.type !== 'pointercancel' && e.button === 0 && downAt) {
         const moved = Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]);
         const p = ground(e);
         if (moved < 5 && p && e.target === el) ref.current.onClick?.(p, e);
@@ -382,11 +477,15 @@ function PointerDriver({ handlers }) {
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('dblclick', onDouble);
     window.addEventListener('pointerup', onUp);
+    /* **손가락은 pointerup 없이 사라질 수 있다.** 안 들으면 끌던 것이 손가락에
+       붙은 채 남는다 — 마우스에서 창 밖에 버튼을 떼던 것과 같은 자리다. */
+    window.addEventListener('pointercancel', onUp);
     return () => {
       el.removeEventListener('pointermove', onMove);
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('dblclick', onDouble);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
   }, [gl, camera, raycaster]);
 
@@ -449,7 +548,9 @@ function FocusRig() {
   const spin = useRef(null);
 
   useEffect(() => subscribeFocus((r) => {
-    goal.current = r;
+    /* **`at` 이 없으면 「목표를 지워라」 다**(focusStore 의 cancelFocus — 손가락이
+       둘 닿았을 때 온다). 그대로 넣으면 다음 프레임에서 `at[0]` 이 터진다. */
+    goal.current = r?.at ? r : null;
     /* 옮겨 간 **뒤에** 돌기 시작한다. 옮기면서 같이 돌면 어디로 가는지 안 보인다 */
     spin.current = null;
   }), []);
@@ -1421,6 +1522,31 @@ function SceneContent() {
   const marqueeStart = useRef(null);
   const [marquee, setMarquee] = useState(null);
 
+  /**
+   * **하던 편집을 없던 일로 한다** — 두 번째 손가락이 닿았을 때 TopControls 가 부른다.
+   * ---------------------------------------------------------------------------
+   *  핀치는 한 손가락이 이미 무언가를 시작해 둔 뒤에 일어난다. 그대로 두면 확대하는
+   *  내내 첫 손가락이 잡은 설비가 딸려 오고, 마키 사각형이 화면을 가로지른다.
+   *
+   *  **끝내는 것이 아니라 버리는 것이다.** onUp 을 부르면 그것은 「놓았다」 라서
+   *  마키가 선택을 확정하고 꼭짓점이 커밋된다 — 확대하려던 사람에게는 사고다.
+   *  그래서 진행 중인 것만 지우고 아무 결과도 만들지 않는다.
+   *
+   *  ref 로 두는 이유: CameraRig 는 memo + key={view} 라 prop 이 바뀌어도 다시
+   *  안 그린다(그래야 확대가 안 풀린다). 값이 아니라 통로를 넘겨야 최신 것이 닿는다.
+   */
+  const cancelRef = useRef(null);
+  cancelRef.current = () => {
+    drag.current = null;
+    marqueeStart.current = null;
+    setMarquee(null);
+    rectStart.current = null;
+    setRectDraft(null);
+    /* 「들여다보기」 애니메이션도 멈춘다 — 매 프레임 카메라를 목표로 당기고
+       있어서, 안 멈추면 핀치가 프레임마다 덮어써져 안 움직이는 것처럼 보인다 */
+    cancelFocus();
+  };
+
   const onDownGround = useCallback(
     (p) => {
       if (!isTop) return;
@@ -2097,7 +2223,7 @@ function SceneContent() {
       />
       <color attach="background" args={[theme.bg]} />
       <fog attach="fog" args={[theme.fog2 ?? theme.bg, theme.fog[0], theme.fog[1]]} />
-      <CameraRig view={view} key={view} />
+      <CameraRig view={view} key={view} cancelRef={cancelRef} />
       <FocusRig />
       <Lights view={view} theme={theme} />
       <PointerDriver
@@ -2522,8 +2648,47 @@ export default function EditorScene() {
       shadows
       dpr={[1, 2]}
       gl={{ antialias: true, powerPreference: 'high-performance' }}
-      /* 개발 중 콘솔에서 씬/카메라를 들여다보기 위한 창구 (프로덕션 빌드에는 없음) */
-      onCreated={(s) => { if (import.meta.env.DEV) window.__r3f = s; }}
+      /**
+       * **화면 배율(core/uiScale.js)이 걸리면 캔버스가 배율배로 커진다.**
+       * ---------------------------------------------------------------------
+       *  r3f 는 담는 곳을 `getBoundingClientRect` 로 재는데 그 값은 배율이
+       *  **곱해진** 값이다. 그리고 잰 값을 `canvas.style.width` 에 그대로 적는데
+       *  style 의 px 은 배율이 **안** 곱해지는 안쪽 좌표다 — 그래서 배율이 한 번
+       *  더 곱해진다. 실측: 배율 2 에서 담는 곳 800×184 에 캔버스 1600×368 이
+       *  들어가 도면이 **왼쪽 위 귀퉁이만** 보였다(1.5 에서는 정확히 1.5배).
+       *
+       *  `offsetSize` 를 주면 `offsetWidth/offsetHeight`(배율 안 곱해진 값)로
+       *  재므로 style 과 자리가 같은 자로 맞는다. 배율 1 에서는 rect 와
+       *  offsetWidth 가 같아 **아무것도 안 바뀐다**.
+       */
+      resize={{ offsetSize: true }}
+      onCreated={(s) => {
+        /**
+         * **집는 자리도 배율만큼 어긋난다** — 위의 캔버스 크기와는 **다른** 문제다.
+         * -------------------------------------------------------------------
+         *  r3f 의 기본 계산은 `offsetX / size.width` 인데, `offsetX` 는 배율이
+         *  **곱해진** 값이고 `size.width` 는 (offsetSize 를 준 지금) 안 곱해진
+         *  값이다. 그래서 비가 언제나 0..배율 이 된다 — 배율 2 에서 화면 한가운데를
+         *  눌러도 r3f 는 오른쪽 끝을 눌렀다고 본다. 캔버스 크기를 고쳐도 이건 안
+         *  낫는다(offsetX 의 범위 자체가 style 폭 × 배율이라서).
+         *
+         *  그래서 EditorScene 이 직접 쓰는 식(PointerDriver 의 ground)과 **글자
+         *  그대로 같은 식**으로 갈아 끼운다 — rect 와 clientX 를 같이 쓰면 둘 다
+         *  배율이 곱해진 값이라 비가 맞는다. 배율 1 에서는 지금과 같은 값이다.
+         */
+        s.setEvents({
+          compute: (e, st) => {
+            const r = st.gl.domElement.getBoundingClientRect();
+            st.pointer.set(
+              ((e.clientX - r.left) / r.width) * 2 - 1,
+              -((e.clientY - r.top) / r.height) * 2 + 1,
+            );
+            st.raycaster.setFromCamera(st.pointer, st.camera);
+          },
+        });
+        /* 개발 중 콘솔에서 씬/카메라를 들여다보기 위한 창구 (프로덕션 빌드에는 없음) */
+        if (import.meta.env.DEV) window.__r3f = s;
+      }}
     >
       <SceneContent />
     </Canvas>

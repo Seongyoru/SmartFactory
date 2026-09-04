@@ -313,3 +313,55 @@ t('--z 에 기본값 1 을 준다 — 없으면 calc 이 무효가 되어 상한
   }
   assert.ok(seen >= 3, `--z 를 쓰는 자리를 ${seen}곳만 찾았다`);
 });
+
+/* ==========================================================================
+ *  3D 캔버스 — **배율을 넣으면서 내가 깨뜨린 두 곳**
+ * ==========================================================================
+ *  실측(창 1600×900, 씬 자리 1044×587 기준):
+ *
+ *    ① 캔버스가 배율배로 커져 잘렸다
+ *         배율 1.5 → 담는 곳 630×334 에 캔버스 946×501   (정확히 1.5배)
+ *         배율 2   → 담는 곳 800×184 에 캔버스 1600×368  (정확히 2배)
+ *       도면이 왼쪽 위 귀퉁이만 보였다. r3f 가 rect(배율 곱해진 값)로 재서
+ *       style.width(배율 안 곱해진 값)에 그대로 적기 때문.
+ *
+ *    ② 집는 자리가 배율만큼 어긋났다 — **①을 고쳐도 안 낫는다**
+ *       캔버스 한가운데를 눌렀을 때 r3f 가 읽은 NDC:
+ *         배율 1   → ( 0.0,  0.0)   맞다
+ *         배율 0.8 → (-0.2,  0.2)
+ *         배율 1.5 → ( 0.5, -0.5)
+ *         배율 2   → ( 1.0, -1.0)   **오른쪽 아래 끝으로 읽었다**
+ *       고친 뒤에는 네 배율 모두 (0, 0) 이다.
+ */
+
+const scene = await readSrc('scene/EditorScene.jsx');
+
+t('**캔버스를 offsetSize 로 잰다** — rect 로 재면 배율배로 커져 도면이 잘린다', () => {
+  assert.match(scene, /resize=\{\{ offsetSize: true \}\}/,
+    'Canvas 에 resize={{ offsetSize: true }} 가 없다');
+});
+
+t('**집는 자리를 rect 로 계산한다** — r3f 기본값(offsetX)은 배율만큼 어긋난다', () => {
+  const at = scene.indexOf('s.setEvents({');
+  assert.ok(at > 0, 'onCreated 에서 compute 를 갈아 끼우지 않는다');
+  const body = scene.slice(at, at + 700);
+  assert.match(body, /getBoundingClientRect/, 'compute 가 rect 를 안 쓴다');
+  assert.match(body, /st\.pointer\.set/, 'compute 가 pointer 를 안 채운다');
+  assert.match(body, /raycaster\.setFromCamera/, 'compute 가 광선을 안 세운다');
+  assert.ok(!/offsetX/.test(body), 'compute 가 아직 offsetX 를 쓴다 — 배율이 곱해진 값이다');
+});
+
+t('씬이 직접 하는 광선도 rect + clientX 다 — 두 계산이 같은 자를 써야 한다', () => {
+  /* PointerDriver 의 ground(). 여기가 offsetWidth 로 바뀌면 compute 와 갈라진다 */
+  assert.match(scene, /ndc\.set\(\(\(e\.clientX - r\.left\) \/ r\.width\)/,
+    'ground 가 rect + clientX 꼴이 아니다');
+});
+
+t('탑뷰 팬도 배율로 나눈다 — 안 나누면 배율 2 에서 도면이 두 배로 따라온다', () => {
+  assert.match(scene, /uiZ = zoomOf\(el\)/, '탑뷰가 zoomOf 를 안 쓴다');
+  const hits = [...scene.matchAll(/camera\.position\.[xz] -= [^;]*;/g)].map((m) => m[0]);
+  assert.ok(hits.length >= 2, `카메라를 미는 자리를 ${hits.length}곳만 찾았다`);
+  for (const h of hits) {
+    assert.match(h, /camera\.zoom \* uiZ/, `${h} — 화면 배율로 안 나눈다`);
+  }
+});
