@@ -15,5 +15,24 @@ export const MIN_H = 190;
 export const MAX_H = 340;
 export const SCENE_RATIO = 16 / 9;
 
-export const dockHeight = (w, h) =>
-  Math.round(Math.min(MAX_H, Math.max(MIN_H, (h ?? 0) - (w ?? 0) / SCENE_RATIO)));
+/**
+ * 낮은 창에서 띠가 **절반을 넘게** 가져가지 않도록.
+ * ---------------------------------------------------------------------------
+ *  `MAX_H` 만으로는 못 막는다 — 그건 픽셀 상한이라 창이 낮을수록 비중이 커진다.
+ *  높이 600px 짜리 자리에서 340 은 **57%** 다. 도면이 계기판보다 작아진다.
+ */
+const TALL_SHARE = 0.45;
+
+/**
+ * @param w · h  **씬이 놓이는 자리(`main`)** 의 치수다 — 창이 아니다.
+ *   창 1920×1080 이면 좌우 패널 556 과 툴바·상태바 76 을 뺀 1364×1004 가 들어온다.
+ *   창 치수를 그대로 넣으면 전혀 다른 값이 나온다(1080−1080=0 → 최소값).
+ */
+export const dockHeight = (w, h) => {
+  const room = h ?? 0;
+  const rest = room - (w ?? 0) / SCENE_RATIO;
+  const cap = Math.min(MAX_H, Math.round(room * TALL_SHARE));
+  /* **바닥을 상한 뒤에 다시 깐다.** 순서를 바꾸면 아주 낮은 자리에서 상한이
+     바닥보다 작아져 띠가 최소 높이 밑으로 내려간다 — 글자가 잘린다. */
+  return Math.round(Math.max(MIN_H, Math.min(cap, rest)));
+};
