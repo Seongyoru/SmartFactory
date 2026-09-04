@@ -558,12 +558,24 @@ t('**가로줄의 항목이 안 줄어든다** — 한글은 아무 글자 사�
 });
 
 t('**넘친 쪽에 그늘을 드리운다** — 막대를 숨겼으니 잘린 줄을 알 길이 없다', () => {
-  assert.match(toolbarSrc, /edge\.right && \(/, '오른쪽 그늘이 없다');
-  assert.match(toolbarSrc, /edge\.left && \(/, '왼쪽 그늘이 없다');
-  /* 늘 켜 두면 안 된다 — 다 보이는데 그늘이 있으면 없는 것을 있다고 말하는 셈 */
-  assert.match(toolbarSrc, /max - el\.scrollLeft > 1/, '오른쪽에 남은 것이 있는지 안 본다');
-  assert.match(toolbarSrc, /el\.scrollLeft > 1/, '왼쪽으로 밀렸는지 안 본다');
-  assert.match(toolbarSrc, /pointer-events-none/, '그늘이 밑의 단추를 먹는다');
+  /* 늘 켜 두면 안 된다 — 다 보이는데 그늘이 있으면 없는 것을 있다고 말하는 셈.
+     **두 자리를 따로 짚는다.** `left:` 를 그냥 `/el\.scrollLeft > 1/` 로 보면
+     오른쪽 식(`max - el.scrollLeft > 1`)이 그 검사를 대신 만족시켜서, 왼쪽을
+     `true` 로 박아 놔도 통과한다 — 실제로 그렇게 새는 것을 봤다. */
+  assert.match(toolbarSrc, /left: el\.scrollLeft > 1/, '왼쪽으로 밀렸는지 안 본다');
+  assert.match(toolbarSrc, /right: max - el\.scrollLeft > 1/, '오른쪽에 남은 것이 있는지 안 본다');
+
+  /* 그늘 두 장을 각각 뜯어 본다. 파일 어딘가에 `pointer-events-none` 이 있는
+     것만 보면, 한 장에서 빼도 다른 장이 검사를 대신 만족시킨다. */
+  for (const [side, re] of [
+    ['오른쪽', /\{edge\.right && \([\s\S]{0,320}?\)\}/],
+    ['왼쪽', /\{edge\.left && \([\s\S]{0,320}?\)\}/],
+  ]) {
+    const m = toolbarSrc.match(re);
+    assert.ok(m, `${side} 그늘이 없다`);
+    assert.match(m[0], /pointer-events-none/, `${side} 그늘이 밑의 단추를 먹는다`);
+    assert.match(m[0], /aria-hidden/, `${side} 그늘을 읽어 주는 기계가 글자로 오해한다`);
+  }
 });
 
 t('그늘을 **다시 재는 길이 넷** — 스크롤 · 창 · 배율 · 한 프레임 뒤', () => {
