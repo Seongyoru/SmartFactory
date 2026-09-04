@@ -277,7 +277,7 @@ function Track({ guide, facts, onBack, onClose }) {
           </p>
         )}
 
-        <ul className="max-h-[42vh] overflow-y-auto py-1">
+        <ul className="max-h-[calc(42vh/var(--z,1))] overflow-y-auto py-1">
           {guide.steps.map((s, i) => {
             const ok = s.done(facts);
             const here = i === openIdx;

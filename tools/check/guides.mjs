@@ -491,9 +491,16 @@ t('머리 모양을 **배열로 잇는다** — 여러 줄 className 은 CRLF �
      안 됐다」고 한참 헤맸다. */
   assert.match(insp, /const STUCK_HEAD = \[/, '머리 모양이 상수로 안 묶여 있다');
   assert.match(insp, /\]\.join\(' '\)/, '배열로 안 잇는다');
-  const at = insp.indexOf('className={`w-[292px]');
-  assert.ok(at > 0, 'aside 의 className 을 못 찾았다');
-  assert.equal(/\n/.test(insp.slice(at, insp.indexOf('}', at))), false,
+  /* **폭을 박아 두지 않는다.** 예전엔 `className={\`w-[292px]` 로 짚었는데,
+     패널 폭이 반응형(narrow.js 의 clamp)으로 바뀌자 이 검사가 깨졌다 —
+     이 검사의 뜻은 「한 줄로 쓴다」 이지 「292px 이다」 가 아니다. */
+  const aside = insp.indexOf('<aside');
+  assert.ok(aside > 0, 'aside 를 못 찾았다');
+  const at = insp.indexOf('className={`', aside);
+  assert.ok(at > aside, 'aside 의 className 을 못 찾았다');
+  const end = insp.indexOf('`}', at);
+  assert.ok(end > at, 'className 의 끝을 못 찾았다');
+  assert.equal(/\n/.test(insp.slice(at, end)), false,
     'className 이 여러 줄이다 — 줄바꿈이 클래스 문자열에 들어간다');
 });
 

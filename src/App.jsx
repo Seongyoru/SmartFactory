@@ -12,7 +12,10 @@
  */
 
 import React, { useEffect } from 'react';
-import { Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2, Ruler, Truck } from 'lucide-react';
+import {
+  Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2,
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ruler, Truck,
+} from 'lucide-react';
 import { EditorProvider, SHAPE, TOOL, VIEW, isBuildTool, useEditor } from './core/store.jsx';
 import { getSpec, loadModel, modelOptions } from './core/modelStore.js';
 import { useCursor } from './core/cursorStore.js';
@@ -29,6 +32,7 @@ import EditorScene from './scene/EditorScene.jsx';
 import LibraryPanel from './ui/LibraryPanel.jsx';
 import Toolbar from './ui/Toolbar.jsx';
 import Inspector from './ui/Inspector.jsx';
+import { isNarrow, panelMode } from './ui/narrow.js';
 import ZoneLayers from './ui/ZoneLayers.jsx';
 import Tutorial from './ui/Tutorial.jsx';
 import Scenarios from './ui/Scenarios.jsx';
@@ -538,16 +542,84 @@ function useSharedLayout() {
   }, [dispatch]);
 }
 
+/**
+ * 자리가 좁은가 — **재서** 판단한다.
+ * ---------------------------------------------------------------------------
+ *  미디어 쿼리를 안 쓰는 이유는 narrow.js 에 적어 두었다(배율을 무시한다).
+ *
+ *  깨우는 길을 셋 둔다. ResizeObserver 하나로는 모자란다 — 창이 안 그려지는
+ *  동안에는 한 번도 안 오고(RunDock 에도 같은 주석이 있다), 배율은 바로 그
+ *  「창을 안 보면서 설정만 바꾸는」 상황에서 바뀐다. 그래서 루트의 style 이
+ *  바뀌는 것도 같이 지켜본다 — 이쪽은 그리든 말든 온다.
+ */
+function useNarrowRow(ref) {
+  const [narrow, setNarrow] = React.useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const measure = () => setNarrow(isNarrow(el.offsetWidth));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    /* 배율은 루트의 style 속성으로 걸린다(core/store.jsx) */
+    const mo = new MutationObserver(measure);
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      mo.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [ref]);
+
+  return narrow;
+}
+
+/** 접힌 서랍을 여는 손잡이 — 좁을 때만 나온다 */
+function DrawerTab({ side, open, onClick, label }) {
+  const left = side === 'left';
+  const Icon = left
+    ? (open ? PanelLeftClose : PanelLeftOpen)
+    : (open ? PanelRightClose : PanelRightOpen);
+  /* **클래스 이름을 조립하면 안 된다.** Tailwind 는 소스를 글자로 훑어서 쓰는
+     것만 만들어 낸다 — `rounded-${…}-md` 는 아예 안 생기고 모서리가 각지게
+     남는다. 그래서 양쪽을 통짜로 적어 둔다. */
+  const place = left
+    ? 'left-0 rounded-r-md border-l-0'
+    : 'right-0 rounded-l-md border-r-0';
+  return (
+    <button
+      title={label}
+      onClick={onClick}
+      className={`absolute top-1/2 z-40 -translate-y-1/2 border border-line bg-panel/95 p-1.5 text-ink3 shadow-lg transition-colors hover:bg-raiseh hover:text-ink ${place}`}
+    >
+      <Icon size={16} />
+    </button>
+  );
+}
+
 function Shell() {
   usePreloadBuiltins();
   useShortcuts();
   useSharedLayout();
 
+  const rowRef = React.useRef(null);
+  const narrow = useNarrowRow(rowRef);
+  /** null · 'lib' · 'insp' — 좁을 때 **한 번에 하나만** 연다. 둘 다 열면 도면이 없다 */
+  const [drawer, setDrawer] = React.useState(null);
+
+  /* 넓어지면 서랍이라는 개념이 사라진다. 열린 채로 두면 패널이 도면 위에
+     겹쳐 뜬 채 남는다 — 실제로 창을 늘렸을 때 그렇게 됐다. */
+  useEffect(() => { if (!narrow) setDrawer(null); }, [narrow]);
+
+  const pick = (which) => setDrawer((d) => (d === which ? null : which));
+
   return (
     <div className="flex h-full flex-col bg-app text-ink">
       <Toolbar />
-      <div className="flex min-h-0 flex-1">
-        <LibraryPanel />
+      <div ref={rowRef} className="relative flex min-h-0 flex-1">
+        <LibraryPanel mode={panelMode(narrow, drawer === 'lib')} />
         <main className="flex min-w-0 flex-1 flex-col">
           {/**
            * 씬은 **남는 높이를 다 쓴다.** 16:9 는 여기서 정하지 않는다 —
@@ -573,7 +645,24 @@ function Shell() {
           {/* 이번 실행 · 원가 — 무엇을 골랐든 계속 보여야 하는 값들 */}
           <RunDock />
         </main>
-        <Inspector />
+        <Inspector mode={panelMode(narrow, drawer === 'insp')} />
+
+        {/* 좁을 때만 — 손잡이 둘과, 열렸을 때 바깥을 누르면 닫히는 바닥 */}
+        {narrow && drawer && (
+          <div
+            aria-hidden
+            onClick={() => setDrawer(null)}
+            className="absolute inset-0 z-20 bg-black/40"
+          />
+        )}
+        {narrow && (
+          <>
+            <DrawerTab side="left" open={drawer === 'lib'} label="라이브러리"
+              onClick={() => pick('lib')} />
+            <DrawerTab side="right" open={drawer === 'insp'} label="속성"
+              onClick={() => pick('insp')} />
+          </>
+        )}
       </div>
       <StatusBar />
     </div>

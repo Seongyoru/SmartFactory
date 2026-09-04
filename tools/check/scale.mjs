@@ -156,3 +156,160 @@ t('배율을 이 브라우저에 기억한다', () => {
   assert.ok(/localStorage\.setItem\(SCALE_KEY/.test(persist), '저장하지 않는다');
   assert.ok(/clampUiScale\(saved\)/.test(persist), '되읽을 때 목록으로 안 붙인다 — 손댄 값이 그대로 들어온다');
 });
+
+/* ==========================================================================
+ *  좁은 화면 — 패널을 서랍으로 접는다
+ * ==========================================================================
+ *  실측(창 폭 = 자리 폭, 배율 1):
+ *      1440 → 264·292 · 씬 884   (예전과 같다)
+ *      1200 → 233·258 · 씬 709   (예전 644 · +65)
+ *      1024 → 199·220 · 씬 605   (예전 468 · +137)
+ *       820 → 접힘   · 씬 820   (예전 264 — 편집기라 부를 수 없었다)
+ *       390 → 접힘   · 씬 390 · 가로 스크롤 0
+ */
+
+const { NARROW_AT, isNarrow, panelMode, panelClass, PANEL_CLASS } =
+  await import(`${SRC}ui/narrow.js`);
+
+const app = await readSrc('App.jsx');
+const lib = await readSrc('ui/LibraryPanel.jsx');
+const insp = await readSrc('ui/Inspector.jsx');
+const narrowSrc = await readSrc('ui/narrow.js');
+
+t('좁은지 판정의 경계가 분명하다', () => {
+  assert.equal(isNarrow(NARROW_AT - 1), true);
+  assert.equal(isNarrow(NARROW_AT), false, '경계값은 넓은 쪽이다');
+  assert.equal(isNarrow(NARROW_AT + 1), false);
+});
+
+t('**아직 못 쟀으면 넓은 것으로 본다** — 안 그러면 넓은 화면에서 서랍이 번쩍인다', () => {
+  for (const v of [0, -5, NaN, undefined, null, Infinity]) {
+    assert.equal(isNarrow(v), false, `isNarrow(${v}) 가 참이다`);
+  }
+});
+
+t('넓으면 서랍이라는 개념이 없다 — 열린 채 넓어지면 패널이 도면 위에 뜬다', () => {
+  assert.equal(panelMode(false, true), 'side');
+  assert.equal(panelMode(false, false), 'side');
+  assert.equal(panelMode(true, false), 'closed');
+  assert.equal(panelMode(true, true), 'open');
+});
+
+t('접히면 사라지고, 열리면 **도면을 덮는다** — 밀어내면 접은 보람이 없다', () => {
+  assert.match(panelClass('lib', 'closed'), /hidden/);
+  assert.match(panelClass('insp', 'closed'), /hidden/);
+  for (const w of ['lib', 'insp']) {
+    assert.match(panelClass(w, 'open'), /absolute/, `${w} 서랍이 자리를 차지한다`);
+    assert.match(panelClass(w, 'open'), /z-30/, `${w} 서랍이 도면 밑에 깔린다`);
+  }
+});
+
+t('못 보던 값이 와도 패널은 보인다 — 사라지는 것이 제일 나쁘다', () => {
+  for (const bad of ['', null, undefined, 'wat']) {
+    assert.equal(panelClass('lib', bad), PANEL_CLASS.lib.side);
+  }
+  assert.equal(panelClass('없는패널', 'side'), '');
+});
+
+t('넓은 쪽 폭은 **예전 그대로다** — 좁아질 때만 같이 줄어든다', () => {
+  assert.match(PANEL_CLASS.lib.side, /264px\)\]/, '라이브러리 최대폭이 264 가 아니다');
+  assert.match(PANEL_CLASS.insp.side, /292px\)\]/, '속성 패널 최대폭이 292 가 아니다');
+});
+
+t('**패널 폭은 % 다 — vw 가 아니다.** vw 는 배율을 무시한다', () => {
+  for (const w of ['lib', 'insp']) {
+    for (const m of ['side', 'closed', 'open']) {
+      assert.ok(!/\dvw/.test(PANEL_CLASS[w][m]),
+        `${w}.${m} 이 vw 를 쓴다 — 배율 2 에서 패널이 자리의 두 배를 먹는다`);
+    }
+  }
+});
+
+t('**중단점(sm: md: lg:)을 안 쓴다** — 미디어 쿼리도 배율을 무시한다', () => {
+  const all = Object.values(PANEL_CLASS).flatMap((o) => Object.values(o)).join(' ');
+  assert.ok(!/\b(sm|md|lg|xl|2xl):/.test(all), `중단점을 쓴다: ${all}`);
+  assert.match(narrowSrc, /offsetWidth|재서/, 'narrow.js 가 자리를 재는 방식임을 안 밝힌다');
+});
+
+t('App 이 두 패널에 꼴을 넘긴다', () => {
+  assert.match(app, /<LibraryPanel mode=\{panelMode\(narrow, drawer === 'lib'\)\} \/>/);
+  assert.match(app, /<Inspector mode=\{panelMode\(narrow, drawer === 'insp'\)\} \/>/);
+  assert.match(lib, /panelClass\('lib', mode\)/, '라이브러리가 꼴을 안 쓴다');
+  assert.match(insp, /panelClass\('insp', mode\)/, '속성 패널이 꼴을 안 쓴다');
+});
+
+t('손잡이와 바닥은 **좁을 때만** 나온다', () => {
+  assert.match(app, /\{narrow && drawer && \(/, '바닥이 좁을 때만 나오지 않는다');
+  assert.match(app, /\{narrow && \(\s*<>/, '손잡이가 좁을 때만 나오지 않는다');
+  assert.match(app, /onClick=\{\(\) => setDrawer\(null\)\}/, '바닥을 눌러도 안 닫힌다');
+});
+
+t('**넓어지면 서랍을 닫는다** — 안 닫으면 패널이 도면 위에 겹쳐 남는다', () => {
+  assert.match(app, /if \(!narrow\) setDrawer\(null\)/, '넓어질 때 서랍을 안 닫는다');
+});
+
+t('한 번에 하나만 열린다 — 둘 다 열면 좁은 화면에 도면이 없다', () => {
+  assert.match(app, /setDrawer\(\(d\) => \(d === which \? null : which\)\)/,
+    '서랍이 하나만 열리는 구조가 아니다');
+});
+
+t('자리를 재는 갈고리가 **루트의 style 도 지켜본다** — 배율은 그것으로 바뀐다', () => {
+  assert.match(app, /new MutationObserver/, '배율 변화를 못 받는다');
+  assert.match(app, /attributeFilter: \['style'\]/, '무엇이 바뀌는지 안 좁혔다');
+  assert.match(app, /new ResizeObserver/, '창 크기 변화를 못 받는다');
+});
+
+t('**클래스 이름을 조립하지 않는다** — Tailwind 는 조립된 이름을 못 만든다', () => {
+  const at = app.indexOf('function DrawerTab');
+  assert.ok(at > 0, 'DrawerTab 을 못 찾았다');
+  /* **주석을 걷어내고 본다.** 안 걷으면 「이렇게 쓰면 안 된다」 고 적어 둔
+     예시 자체가 걸린다 — 실제로 걸렸다. */
+  const body = app.slice(at, app.indexOf('\nfunction ', at + 10))
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  /* 실제로 저질렀던 꼴을 그대로 짚는다. 「조립처럼 보이는 것」 을 통째로 잡으려
+     들면 `${place}` 같은 **멀쩡한** 자리까지 걸린다 — 한 번 그렇게 걸렸다.
+     클래스 조각 뒤에 바로 `${` 가 붙는 것만이 Tailwind 가 못 보는 꼴이다. */
+  const bad = body.match(/[a-z](-|:)\$\{/);
+  assert.equal(bad, null, `클래스 이름을 조립한다: ${bad?.[0]}`);
+  assert.match(body, /rounded-r-md/, '왼쪽 손잡이 모서리 클래스가 통짜가 아니다');
+  assert.match(body, /rounded-l-md/, '오른쪽 손잡이 모서리 클래스가 통짜가 아니다');
+});
+
+/* 화면을 그리는 파일 전부 — 새 파일이 늘면 여기에 더한다.
+   검사는 async 로 못 쓰므로(뼈대가 막는다) 값을 여기서 받아 둔다. */
+const SCREENS = ['App.jsx', 'ui/CadDialog.jsx', 'ui/Toolbar.jsx', 'ui/Tutorial.jsx',
+  'ui/Inspector.jsx', 'ui/LibraryPanel.jsx', 'ui/RunDock.jsx', 'ui/Scenarios.jsx',
+  'ui/ImportDialog.jsx', 'ui/OrdersDock.jsx', 'ui/ZoneLayers.jsx', 'ui/common.jsx'];
+const screenSrc = Object.fromEntries(
+  await Promise.all(SCREENS.map(async (f) => [f, await readSrc(f)])));
+
+t('**높이를 vh 로 막은 자리는 배율로 되나눈다** — 안 그러면 대화상자가 화면보다 커진다', () => {
+  /* 배율 2 에서 `max-h-[88vh]` 는 화면의 176% 다 — 아래쪽 단추에 손이 안 닿는다.
+     `100dvh` 도 `position:fixed` 의 `height:100%` 도 안 통한다(셋 다 재 봤다).
+     되는 것은 `calc(88vh/var(--z,1))` 하나뿐이다. */
+  let seen = 0;
+  for (const [f, src] of Object.entries(screenSrc)) {
+    for (const m of src.matchAll(/\[[^\]]*?\d+(?:\.\d+)?[vd]h[^\]]*?\]/g)) {
+      seen += 1;
+      assert.match(m[0], /var\(--z/,
+        `${f} 의 ${m[0]} — vh 는 배율을 무시한다. calc(Nvh/var(--z,1)) 로 적을 것`);
+    }
+  }
+  /* 하나도 못 찾았으면 검사가 아무것도 안 보고 통과한 것이다 */
+  assert.ok(seen >= 3, `vh 로 막은 자리를 ${seen}곳만 찾았다 — 정규식이 안 맞는다`);
+});
+
+t('store 가 --z 를 내놓는다 — 없으면 위의 calc 이 늘 1 로 계산된다', () => {
+  assert.match(store, /setProperty\('--z', String\(z\)\)/, '--z 를 안 건다');
+});
+
+t('--z 에 기본값 1 을 준다 — 없으면 calc 이 무효가 되어 상한이 사라진다', () => {
+  let seen = 0;
+  for (const [f, src] of Object.entries(screenSrc)) {
+    for (const m of src.matchAll(/var\(--z[^)]*\)/g)) {
+      seen += 1;
+      assert.match(m[0], /var\(--z,\s*1\)/, `${f} 의 ${m[0]} — 기본값이 없다`);
+    }
+  }
+  assert.ok(seen >= 3, `--z 를 쓰는 자리를 ${seen}곳만 찾았다`);
+});

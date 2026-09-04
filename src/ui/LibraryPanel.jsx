@@ -38,6 +38,7 @@ import { dropModel, getSpec } from '../core/modelStore.js';
 import ImportDialog from './ImportDialog.jsx';
 import OrdersDock from './OrdersDock.jsx';
 import { ColorField, Slider } from './common.jsx';
+import { panelClass } from './narrow.js';
 
 /** 건물 탭은 라이브러리 항목이 아니라 도구 모음이라 별도의 id 를 쓴다 */
 const BUILD = 'build';
@@ -249,7 +250,7 @@ function BuildTools() {
 
 /* ========================================================================== */
 
-export default function LibraryPanel() {
+export default function LibraryPanel({ mode = 'side' }) {
   const { state, dispatch } = useEditor();
   const [tab, setTab] = useState(CATEGORY.EQUIPMENT);
   const [importing, setImporting] = useState(false);
@@ -264,7 +265,7 @@ export default function LibraryPanel() {
   };
 
   return (
-    <aside className="flex w-[264px] shrink-0 flex-col border-r border-line bg-panel">
+    <aside className={`flex flex-col border-r border-line bg-panel ${panelClass('lib', mode)}`}>
       <div className="flex min-h-0 flex-1 flex-col">
       {/* 탭 — 아이콘 위, 이름 아래 */}
       <div className="flex border-b border-line">

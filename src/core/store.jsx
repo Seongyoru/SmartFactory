@@ -1400,6 +1400,10 @@ export function EditorProvider({ children }) {
   useInsertionEffect(() => {
     const z = clampUiScale(state.uiScale);
     document.documentElement.style.zoom = z === 1 ? '' : String(z);
+    /* CSS 에서 배율을 되나눌 수 있도록 같이 내놓는다 — `vh` 는 배율을 무시해서
+       배율 2 에서 `max-h-[88vh]` 가 화면보다 1.76배 커진다. 쓰는 쪽은
+       `calc(88vh/var(--z,1))` 로 적는다(ui/narrow.js 에 왜인지 적어 두었다). */
+    document.documentElement.style.setProperty('--z', String(z));
   }, [state.uiScale]);
 
   /* 기억하는 일은 급하지 않으니 보통 자리에서 — 배율을 거는 일과 붙여 두면

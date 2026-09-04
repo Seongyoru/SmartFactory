@@ -292,7 +292,7 @@ function GalleryButton({ onPick, onExport }) {
            좁은 창에서 실제로 그렇게 넘쳤다. */
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-6" onClick={close}>
           <div
-            className="flex max-h-[78vh] w-[900px] max-w-full flex-col overflow-hidden rounded-xl bg-panel shadow-2xl ring-1 ring-edge"
+            className="flex max-h-[calc(78vh/var(--z,1))] w-[900px] max-w-full flex-col overflow-hidden rounded-xl bg-panel shadow-2xl ring-1 ring-edge"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex shrink-0 items-center justify-between border-b border-line px-4 py-2.5">

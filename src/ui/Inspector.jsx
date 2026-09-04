@@ -122,6 +122,7 @@ import { useCostInput } from './useCost.js';
 import { seriesCSV } from '../core/scenarios.js';
 import { sliceCountFor, tileCount } from '../scene/connectorGeometry.js';
 import { Btn, ColorField, Field, Row, Section, Slider } from './common.jsx';
+import { panelClass } from './narrow.js';
 
 function useModelsVersion() {
   const [v, setV] = React.useState(0);
@@ -4557,7 +4558,7 @@ const STUCK_HEAD = [
   '[&>div:first-child]:shadow-[0_3px_8px_-4px_rgba(0,0,0,0.3)]',
 ].join(' ');
 
-export default function Inspector() {
+export default function Inspector({ mode = 'side' }) {
   const { state } = useEditor();
   useModelsVersion();
   const sel = state.selected;
@@ -4632,7 +4633,7 @@ export default function Inspector() {
      */
     <aside
       ref={bodyRef}
-      className={`w-[292px] shrink-0 overflow-y-auto border-l border-line bg-panel ${stickHead ? STUCK_HEAD : ''}`}
+      className={`overflow-y-auto border-l border-line bg-panel ${panelClass('insp', mode)} ${stickHead ? STUCK_HEAD : ''}`}
     >
       {multi ? <MultiPanel items={multi} />
         : area ? <AreaPanel area={area} edge={sel.edge} />

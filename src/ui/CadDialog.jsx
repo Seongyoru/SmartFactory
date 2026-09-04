@@ -85,7 +85,7 @@ export default function CadDialog({ onClose, onImport }) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-overlay p-6" onClick={onClose}>
       <div
-        className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-head shadow-2xl"
+        className="flex max-h-[calc(88vh/var(--z,1))] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-line bg-head shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-center justify-between border-b border-line px-4 py-3">
