@@ -55,6 +55,7 @@ await import('./dispatch.mjs');
 await import('./reach.mjs');
 await import('./camera.mjs');
 await import('./ceiling.mjs');
+await import('./scale.mjs');
 await import('./divert.mjs');
 await import('./inspect.mjs');
 await import('./calibrate.mjs');

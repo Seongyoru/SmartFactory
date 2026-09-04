@@ -10,7 +10,8 @@
  * ---------------------------------------------------------------------------
  */
 
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useInsertionEffect, useMemo, useReducer, useRef } from 'react';
+import { clampUiScale } from './uiScale.js';
 import { DEFAULT_GRID, clean } from './grid.js';
 import { BUILTIN_LIBRARY, CATEGORY, KIND, defaultOutOf } from '../data/library.js';
 import { DEFAULT_BAYS, MAX_BAYS, MIN_BAYS } from './shelf.js';
@@ -39,11 +40,13 @@ import {
   getModelBuffer,
   layoutSnapshot,
   loadAppearance,
+  loadUiScale,
   loadGuidePhase,
   loadScenarios,
   loadLayout,
   loadUserLibrary,
   saveAppearance,
+  saveUiScale,
   saveGuidePhase,
   saveScenarios,
   saveLayout,
@@ -123,6 +126,8 @@ const initialState = {
   view: VIEW.TOP,
   /** 화면 테마. 마지막 선택을 기억한다 */
   appearance: loadAppearance(),
+  /** 화면 배율 — 4K 나 작은 노트북에서 사람이 직접 고른다 */
+  uiScale: loadUiScale(),
   gridSize: DEFAULT_GRID,
   snapEdge: true,
   showPorts: true,
@@ -1378,6 +1383,28 @@ export function EditorProvider({ children }) {
     document.documentElement.dataset.theme = state.appearance;
     saveAppearance(state.appearance);
   }, [state.appearance]);
+
+  /* ---- 화면 배율: 루트에 zoom 으로 건다 + 기억 -------------------------
+   *  `zoom` 은 자식 전부를 **레이아웃째** 다시 흘린다. transform 과 달리
+   *  줄바꿈과 스크롤이 배율에 맞게 다시 계산돼서, 창이 그만큼 작아진 것과
+   *  똑같이 동작한다 — 그래서 px 로 박아 둔 치수를 하나도 안 고쳐도 된다.
+   *  1 일 때는 아예 지운다. 값이 남아 있으면 브라우저가 배율 없는 화면에도
+   *  합성 층을 하나 더 만들어 3D 가 흐려질 수 있다.
+   *
+   *  **useEffect 도 useLayoutEffect 도 아닌 useInsertionEffect 인 이유.**
+   *  갈고리는 **자식부터** 돈다. 여기는 provider 라 제일 늦다 — 그래서 보통
+   *  자리에 두면 아래 띠(RunDock)가 자기 자리를 재는 순간에 배율이 아직 안
+   *  걸려 있어서 **한 박자 전 치수**로 잰다. 배율 1→2 로 바꿔도 띠 높이가
+   *  237 그대로 남는 것을 실제로 봤다(맞는 값은 209).
+   *  insertion 자리는 **모든 layout 갈고리보다 먼저** 도는 유일한 자리다. */
+  useInsertionEffect(() => {
+    const z = clampUiScale(state.uiScale);
+    document.documentElement.style.zoom = z === 1 ? '' : String(z);
+  }, [state.uiScale]);
+
+  /* 기억하는 일은 급하지 않으니 보통 자리에서 — 배율을 거는 일과 붙여 두면
+     저장이 늦어지는 게 아니라, 위 갈고리가 무거워진다 */
+  useEffect(() => { saveUiScale(clampUiScale(state.uiScale)); }, [state.uiScale]);
 
   /* ---- 따라 하기: 어디까지 왔는지 이 브라우저에 남긴다 -------------------
    *  'welcome' 일 때는 저장하지 않는다. 아직 아무것도 고르지 않은 상태라,

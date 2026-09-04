@@ -10,9 +10,12 @@
  * ---------------------------------------------------------------------------
  */
 
+import { clampUiScale, DEFAULT_UI_SCALE } from './uiScale.js';
+
 const LAYOUT_KEY = 'factory.layout.v1';
 const LIB_KEY = 'factory.userlib.v1';
 const THEME_KEY = 'factory.appearance';
+const SCALE_KEY = 'factory.uiscale';
 const GUIDE_KEY = 'factory.guide.v1';
 const SCENARIO_KEY = 'factory.scenarios.v1';
 const DB_NAME = 'factory';
@@ -108,6 +111,26 @@ export function loadAppearance() {
 export function saveAppearance(value) {
   try {
     localStorage.setItem(THEME_KEY, value);
+  } catch { /* 무시 */ }
+}
+
+/**
+ * 화면 배율.
+ * ---------------------------------------------------------------------------
+ *  저장된 값이 없으면 100% 다 — 브라우저는 화면이 몇 인치인지 모르므로
+ *  **짐작해서 키우지 않는다**(uiScale.js 에 왜인지 적어 두었다).
+ */
+export function loadUiScale() {
+  try {
+    const saved = localStorage.getItem(SCALE_KEY);
+    if (saved != null) return clampUiScale(saved);
+  } catch { /* 무시 */ }
+  return DEFAULT_UI_SCALE;
+}
+
+export function saveUiScale(value) {
+  try {
+    localStorage.setItem(SCALE_KEY, String(value));
   } catch { /* 무시 */ }
 }
 

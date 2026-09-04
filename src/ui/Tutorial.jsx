@@ -24,6 +24,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { zoomOf } from '../core/uiScale.js';
 import { ArrowLeft, Check, GraduationCap, X } from 'lucide-react';
 import { useEditor } from '../core/store.jsx';
 import { subscribeModels } from '../core/modelStore.js';
@@ -80,7 +81,12 @@ function useSpotBox(selectors) {
     const measure = () => {
       const el = list.map((s) => document.querySelector(s)).find(Boolean);
       const r = el?.getBoundingClientRect();
-      const next = r && r.width > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+      /* 상자는 이 칸과 **같은 배율 안에** 그려진다. rect 는 배율이 곱해진 값이라
+         그대로 style 에 넣으면 배율만큼 어긋난다 — 나눠서 같은 자로 맞춘다. */
+      const z = zoomOf(el);
+      const next = r && r.width > 0
+        ? { x: r.left / z, y: r.top / z, w: r.width / z, h: r.height / z }
+        : null;
       setBox((prev) => {
         if (!prev && !next) return prev;
         if (prev && next && prev.x === next.x && prev.y === next.y && prev.w === next.w && prev.h === next.h) return prev;

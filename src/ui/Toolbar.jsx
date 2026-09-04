@@ -3,6 +3,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { UI_SCALES, uiScaleLabel, clampUiScale } from '../core/uiScale.js';
 import {
   Download,
   Eraser,
@@ -28,6 +29,7 @@ import {
   Undo2,
   Upload,
   X,
+  ZoomIn,
 } from 'lucide-react';
 import { SPEEDS, formatElapsed, setSpeed, useElapsed, useSimSpeed } from '../core/clock.js';
 import { resetRun } from '../core/sim.js';
@@ -706,6 +708,24 @@ export default function Toolbar() {
       >
         {state.appearance === 'light' ? <Moon size={14} /> : <Sun size={14} />}
       </IconBtn>
+
+      {/* 화면 배율 — 4K 100% 배율에서 글자가 절반이 되고, 작은 노트북에서는
+          툴바가 자리를 다 먹는다. 화면이 몇 인치인지는 브라우저가 모르니
+          사람이 고른다(uiScale.js). */}
+      <label className="flex items-center gap-1.5 text-[11px] text-ink3" title="화면 배율 — 글자와 단추를 통째로 키우고 줄인다">
+        <ZoomIn size={13} />
+        <select
+          value={clampUiScale(state.uiScale)}
+          onChange={(e) => dispatch({ type: 'SET', patch: { uiScale: Number(e.target.value) } })}
+          className="cursor-pointer rounded border border-edge bg-field px-1.5 py-1 text-[11px] text-ink outline-none transition-colors hover:border-sky-500/60 hover:bg-raiseh focus:border-sky-500"
+        >
+          {UI_SCALES.map((z) => (
+            <option key={z} value={z}>
+              {uiScaleLabel(z)}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <div className="flex-1" />
 

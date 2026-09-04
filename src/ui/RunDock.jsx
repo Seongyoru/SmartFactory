@@ -37,6 +37,7 @@
  */
 
 import React, { useLayoutEffect, useRef, useState } from 'react';
+import { zoomOf } from '../core/uiScale.js';
 import { ChevronDown, ChevronUp, Repeat, RotateCcw } from 'lucide-react';
 import { useEditor } from '../core/store.jsx';
 import { focusOn } from '../core/focusStore.js';
@@ -1111,13 +1112,18 @@ export default function RunDock() {
    */
   const onGrab = (e) => {
     e.preventDefault();
-    const room = ref.current?.parentElement?.getBoundingClientRect().height ?? 0;
+    const parent = ref.current?.parentElement;
+    /* clientY 와 rect 는 배율이 **곱해진** 값이고, 아래에서 정하는 높이는
+       곱해지지 않은 값으로 나간다. 배율로 나눠 같은 자로 맞춘다 — 안 하면
+       배율 2 에서 손을 1cm 움직일 때 띠가 2cm 씩 따라온다(zoomOf 참고). */
+    const z = zoomOf(parent);
+    const room = (parent?.getBoundingClientRect().height ?? 0) / z;
     const cap = Math.max(MAX_H, Math.round(room * 0.7));
     drag.current = { y: e.clientY, from: pulled ?? h };
     const move = (ev) => {
       const d = drag.current;
       if (!d) return;
-      setPulled(Math.round(Math.min(cap, Math.max(MIN_H, d.from + (d.y - ev.clientY)))));
+      setPulled(Math.round(Math.min(cap, Math.max(MIN_H, d.from + (d.y - ev.clientY) / z))));
     };
     const up = () => {
       drag.current = null;
@@ -1134,8 +1140,12 @@ export default function RunDock() {
     const main = ref.current?.parentElement;
     if (!main) return undefined;
     const measure = () => {
-      const r = main.getBoundingClientRect();
-      setH(dockHeight(r.width, r.height));
+      /* **getBoundingClientRect 를 쓰면 안 된다.** 화면 배율(uiScale)은 루트에
+         `zoom` 으로 걸리는데, 그러면 rect 는 배율이 **곱해진** 값을 주고
+         offsetWidth 는 안 곱해진 값을 준다. 아래에서 정한 높이는 style 로
+         나가서 곱해지지 않은 쪽으로 읽히므로, rect 를 먹이면 배율이 한 번 더
+         곱해진다 — 배율 2 에서 띠가 자리의 73% 를 먹는 것을 실제로 봤다. */
+      setH(dockHeight(main.offsetWidth, main.offsetHeight));
     };
     /* 처음 한 번은 **직접** 잰다. ResizeObserver 는 브라우저의 렌더 단계에서
        불려서, 창이 가려져 그리지 않는 동안에는 한 번도 안 온다 — 그러면 띠가
@@ -1145,7 +1155,10 @@ export default function RunDock() {
     ro.observe(main);
     window.addEventListener('resize', measure);
     return () => { ro.disconnect(); window.removeEventListener('resize', measure); };
-  }, [open]);
+    /* **배율을 딸림값에 넣어 다시 재게 한다.** ResizeObserver 에 맡기면 안 된다 —
+       위에 적었듯 창이 안 그려지는 동안에는 한 번도 안 오고, 배율은 바로 그
+       「창이 가려진 채 설정만 바꾸는」 상황에서 흔히 바뀐다. */
+  }, [open, state.uiScale]);
 
   return (
     <div
