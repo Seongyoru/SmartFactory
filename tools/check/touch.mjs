@@ -28,6 +28,7 @@ group('손가락');
 const scene = await readSrc('scene/EditorScene.jsx');
 const css = await readSrc('index.css');
 const focus = await readSrc('core/focusStore.js');
+const libSrc = await readSrc('ui/LibraryPanel.jsx');
 
 /** TopControls 의 본문만 떼어 낸다 — 다른 데서 우연히 맞는 글자에 속지 않게 */
 const topAt = scene.indexOf('function TopControls(');
@@ -156,4 +157,74 @@ t('탑뷰에 OrbitControls 를 들이지 않았다 — 왼쪽 버튼을 배치�
 t('마우스 조작 조건이 **글자 그대로** 남아 있다 — 터치를 넣으면서 안 바꿨다', () => {
   assert.match(topBody, /e\.button === 1 \|\| e\.button === 2/, '가운데/오른쪽 버튼 팬 조건이 바뀌었다');
   assert.match(topBody, /Math\.exp\(-e\.deltaY \* 0\.0012\)/, '휠 확대 속도가 바뀌었다');
+});
+
+/* ==========================================================================
+ *  누를 자리 크기 — 손가락이 닿는가
+ * ==========================================================================
+ *  세어 보니 누를 수 있는 목표 243곳 중 **237곳이 44px 미만**이었다.
+ *  가장 심한 곳: 띠 손잡이 8px · 슬라이더 12px · 휴지통 단추들 15px.
+ *
+ *  실측(모바일 375×812, pointer: coarse):
+ *      서랍 닫힘   목표 35곳 — 높이 미달 0 · 아이콘 단추 21곳 폭 미달 0
+ *      라이브러리   목표 41곳 — 미달 0
+ *      속성        목표 43곳 — 미달 0
+ *  데스크톱(pointer: fine)에서는 min-block-size 가 `auto` 이고 34곳이 여전히
+ *  44 미만이다 — **밀도가 한 톨도 안 바뀌었다**는 뜻이다.
+ *
+ *  배율 되나누기 실측: min-block-size 가 배율 1·1.5·2 에서 44 · 29.33 · 22px.
+ */
+
+const coarseAt = css.indexOf('@media (pointer: coarse)');
+/* 이 블록은 파일의 맨 끝에 둔다 — 뒤에 다른 규칙이 붙으면 여기를 같이 고칠 것 */
+const coarse = coarseAt < 0 ? '' : css.slice(coarseAt);
+
+t('**`pointer: coarse` 다 — `any-pointer` 가 아니다.** 마우스 쓰는 사람의 밀도를 지킨다', () => {
+  assert.ok(coarseAt > 0, '(pointer: coarse) 블록이 없다');
+  assert.ok(!/@media \(any-pointer: coarse\)/.test(css),
+    'any-pointer 를 쓴다 — 트랙패드로 쓰는 2-in-1 에서도 단추가 커진다');
+});
+
+t('**44px 을 배율로 되나눈다** — 안 나누면 배율 2 에서 단추가 88px 이 된다', () => {
+  const sizes = [...coarse.matchAll(/(?:min-)?(?:block|inline)-size:\s*([^;]+);/g)].map((m) => m[1].trim());
+  assert.ok(sizes.length >= 3, `크기를 정하는 줄을 ${sizes.length}줄만 찾았다`);
+  for (const v of sizes) {
+    assert.match(v, /calc\(44px \/ var\(--z, 1\)\)/,
+      `${v} — calc(44px / var(--z, 1)) 이 아니다`);
+  }
+});
+
+t('`--z` 에 기본값 1 이 있다 — 없으면 마운트 전 한 틱에 calc 이 통째로 무효가 된다', () => {
+  for (const m of coarse.matchAll(/var\(--z[^)]*\)/g)) {
+    assert.match(m[0], /var\(--z, 1\)/, `${m[0]} — 기본값이 없다`);
+  }
+});
+
+t('슬라이더는 **높이를 직접 준다** — range 는 min-height 가 안 먹는다', () => {
+  assert.match(coarse, /input\[type="range"\]\s*\{\s*block-size:/,
+    'range 에 block-size 를 안 준다 — UA 기본 12~21px 로 남는다');
+});
+
+t('아이콘만 있는 단추는 **폭도** 깐다 — 15×15 짜리 휴지통이 여럿 있었다', () => {
+  assert.match(coarse, /button:has\(> svg:only-child\)/, '아이콘 단추를 안 가른다');
+  assert.match(coarse, /min-inline-size/, '폭을 안 깐다');
+});
+
+t('글자 있는 단추의 **폭은 안 건드린다** — 좁은 줄의 배치가 무너진다', () => {
+  const generic = coarse.slice(0, coarse.indexOf('button:has('));
+  assert.ok(!/min-inline-size/.test(generic),
+    '모든 단추에 폭을 깔았다 — 구역 목록과 오더 한 줄이 무너진다');
+});
+
+t('**hover 로만 나타나던 것을 손가락에도 보여 준다** — 크기가 아니라 닿을 수 없던 문제', () => {
+  assert.match(coarse, /\[data-touch-show\]/, 'CSS 에 표시를 읽는 규칙이 없다');
+  const lib = libSrc;
+  assert.match(lib, /data-touch-show=""/, '라이브러리 삭제 단추에 표시가 없다');
+  const at = lib.indexOf('data-touch-show=""');
+  assert.match(lib.slice(at, at + 400), /group-hover:block/,
+    '표시를 붙인 자리가 hover 로만 나타나는 그 단추가 아니다');
+});
+
+t('숨긴 파일 고르개는 빼 둔다 — 안 보이는 것에 크기를 주는 것은 뜻이 없다', () => {
+  assert.match(coarse, /input:not\(\[type="file"\]\)/, 'file 을 안 뺐다');
 });

@@ -100,8 +100,12 @@ function ItemCard({ item, active, onPick, onRemove }) {
         </div>
       </div>
 
+      {/* 손가락에는 hover 가 없다 — `data-touch-show` 를 보고 index.css 의
+          (pointer: coarse) 가 늘 보이게 한다. 없으면 이 단추가 손가락으로 쓰는
+          화면에는 **아예 존재하지 않는다**(크기가 아니라 닿을 수 없는 문제다). */}
       {item.source === 'user' && (
         <button
+          data-touch-show=""
           title="라이브러리에서 삭제"
           onClick={(e) => {
             e.stopPropagation();
