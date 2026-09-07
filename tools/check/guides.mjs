@@ -600,3 +600,91 @@ t('벽은 **한 면씩** 고르므로 edge 까지 본다', () => {
   assert.match(line, /i\.edge/, 'edge 를 안 본다 — 옆면으로 옮겨도 스크롤이 남는다');
   assert.match(line, /i\.kind/, 'kind 를 안 본다 — 종류가 달라도 uid 가 같을 수 있다');
 });
+
+/* ---------- 안내를 **열 때마다** 띄운다 ------------------------------------ *
+ *  예전에는 처음 한 번 보고 닫으면 그것으로 끝이었다. 그런데 이 편집기는 순서를
+ *  모르면 막히는 도구라(바닥을 먼저 그려야 설비가 놓인다), 한 번 스쳐 본 사람이
+ *  다음에 다시 열면 그 순서를 기억하지 못한다.
+ *
+ *  실측: 상자를 안 켜고 닫으면 새로고침 뒤 다시 뜬다. 켜고 닫으면
+ *  `factory.guide.skip = '1'` 이 남고 그 뒤로는 안 뜬다.
+ * -------------------------------------------------------------------------- */
+
+const persistSrc = await readSrc('core/persistence.js');
+const tutorialSrc = await readSrc('ui/Tutorial.jsx');
+const storeSrc2 = await readSrc('core/store.jsx');
+
+/* localStorage 를 흉내 내어 **값으로** 확인한다 — 소스 글자만 보면 뜻이 안 잡힌다 */
+const fakeStore = (init = {}) => {
+  const map = { ...init };
+  return {
+    getItem: (k) => (k in map ? map[k] : null),
+    setItem: (k, v) => { map[k] = String(v); },
+    removeItem: (k) => { delete map[k]; },
+    _map: map,
+  };
+};
+const withStore = async (store, fn) => {
+  const had = 'localStorage' in globalThis;
+  const old = had ? globalThis.localStorage : undefined;
+  Object.defineProperty(globalThis, 'localStorage', { value: store, configurable: true, writable: true });
+  try { return await fn(); } finally {
+    if (had) Object.defineProperty(globalThis, 'localStorage', { value: old, configurable: true, writable: true });
+    else delete globalThis.localStorage;
+  }
+};
+
+const P = await import(`${SRC}core/persistence.js`);
+
+const emptyPhase = await withStore(fakeStore(), () => P.loadGuidePhase());
+const skipPhase = await withStore(fakeStore({ 'factory.guide.skip': '1' }), () => P.loadGuidePhase());
+const oldDonePhase = await withStore(fakeStore({ 'factory.guide.v1': 'done' }), () => P.loadGuidePhase());
+const savedOn = await withStore(fakeStore(), function () {
+  P.saveGuideSkip(true);
+  return globalThis.localStorage._map['factory.guide.skip'];
+});
+const savedOff = await withStore(fakeStore({ 'factory.guide.skip': '1' }), function () {
+  P.saveGuideSkip(false);
+  return globalThis.localStorage._map['factory.guide.skip'];
+});
+
+t('**열 때마다 띄운다** — 처음이든 아니든 환영 창이 뜬다', () => {
+  assert.equal(emptyPhase, 'welcome', '처음 열 때 안 뜬다');
+});
+
+t('「다시 보지 않기」를 켜 두면 안 뜬다', () => {
+  assert.equal(skipPhase, null, '끄기로 해 놓았는데도 뜬다');
+});
+
+t('**옛 판이 남긴 `done` 은 무시한다** — 그것 때문에 영영 안 뜨면 안 된다', () => {
+  assert.equal(oldDonePhase, 'welcome',
+    '예전에 한 번 닫아 둔 사람에게는 새 동작이 적용이 안 된다');
+});
+
+t('끄고 켜는 것이 값으로 남는다', () => {
+  assert.equal(savedOn, '1', '켰는데 안 남는다');
+  assert.equal(savedOff, undefined, '껐는데 남아 있다 — 다시 보고 싶어도 못 본다');
+});
+
+t('끄는 뜻을 **따로 된 열쇠**에 담는다 — 진행 상태와 섞으면 구분이 안 된다', () => {
+  assert.match(persistSrc, /const GUIDE_SKIP_KEY = 'factory\.guide\.skip';/, '따로 된 열쇠가 없다');
+});
+
+t('**진행 상태를 더 이상 저장하지 않는다** — 저장하면 환영 창 대신 옛 걸음이 뜬다', () => {
+  assert.ok(!/saveGuidePhase\(/.test(storeSrc2), 'store 가 아직 걸음을 저장한다');
+  assert.ok(!/export function saveGuidePhase/.test(persistSrc), '안 쓰는 함수가 남아 있다');
+});
+
+t('환영 창에 **다시 보지 않기 상자**가 있다', () => {
+  assert.match(tutorialSrc, /다시 보지 않기/, '상자에 이름이 없다');
+  assert.match(tutorialSrc, /type="checkbox"/, '상자가 없다');
+  assert.match(tutorialSrc, /const \[skip, setSkip\] = useState\(loadGuideSkip\(\)\)/,
+    '지금 꺼져 있는지 켜져 있는지를 안 읽어 온다');
+});
+
+t('**어느 단추로 나가든 상자의 뜻이 남는다** — 켜고 닫았는데 안 남으면 켠 뜻이 사라진다', () => {
+  assert.match(tutorialSrc, /const leave = \(go\) => \{ saveGuideSkip\(skip\); go\(\); \};/,
+    '나가는 길에서 저장하지 않는다');
+  assert.match(tutorialSrc, /onClick=\{\(\) => leave\(onSkip\)\}/, '「혼자 해볼게요」가 안 남긴다');
+  assert.match(tutorialSrc, /onClick=\{\(\) => leave\(onPick\)\}/, '「안내 고르기」가 안 남긴다');
+});

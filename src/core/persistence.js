@@ -18,6 +18,7 @@ const THEME_KEY = 'factory.appearance';
 const SCALE_KEY = 'factory.uiscale';
 const READONLY_KEY = 'factory.readonly';
 const GUIDE_KEY = 'factory.guide.v1';
+const GUIDE_SKIP_KEY = 'factory.guide.skip';
 const SCENARIO_KEY = 'factory.scenarios.v1';
 const DB_NAME = 'factory';
 const STORE = 'models';
@@ -170,27 +171,38 @@ export function saveReadOnly(on) {
  *  설비가 있는가), 따로 적어 두면 도면과 어긋날 수 있다.
  */
 /**
- * 저장하는 값은 **지금 어느 화면인가** 하나다 — `'welcome'` · `'pick'` ·
- * 갈래 이름(`'basics'` · `'cost'` …) · 닫힘(`'done'`).
+ * 안내를 **열 때마다 띄운다.** 딱 한 번만 띄우던 것을 바꿨다.
+ * ---------------------------------------------------------------------------
+ *  예전에는 처음 한 번 보고 닫으면 그것으로 끝이었다. 그런데 이 편집기는 순서를
+ *  모르면 막히는 도구라(바닥을 먼저 그려야 설비가 놓인다), 한 번 스쳐 본 사람이
+ *  다음 주에 다시 열면 그 순서를 기억하지 못한다. 그래서 **기본은 늘 띄우는 것**
+ *  으로 두고, 그만 보고 싶은 사람은 창 안에서 직접 끄게 했다.
  *
- *  안내가 갈래로 나뉘면서 값의 가짓수가 늘었다. 여기서 이름을 하나하나 알 필요는
- *  없으므로 **글자를 그대로 오간다** — 모르는 이름이 남아 있으면(옛 판이 적어 둔
- *  `'steps'` 같은 것) 화면 쪽이 고르는 창으로 돌린다.
+ *  끄는 뜻을 **따로 된 열쇠**에 담는다. 진행 상태(어느 갈래의 몇 번째 걸음인가)와
+ *  섞으면 「닫았다」와 「그만 보겠다」가 한 값이 되어 구분이 안 된다 — 실제로
+ *  예전 판이 그래서 한 번 닫으면 영영 안 떴다.
  */
 export function loadGuidePhase() {
   try {
-    const v = localStorage.getItem(GUIDE_KEY);
-    if (v === null) return 'welcome';          // 이 브라우저에서 처음 연다
-    return v === 'done' ? null : v;            // 'done' 은 닫아 둔 것
-  } catch {
-    return null;
-  }
+    if (localStorage.getItem(GUIDE_SKIP_KEY) === '1') return null;
+  } catch { /* 무시 — 못 읽으면 띄우는 쪽이 낫다 */ }
+  return 'welcome';
 }
 
-export function saveGuidePhase(phase) {
+/** 「다시 보지 않기」 — 이 브라우저에서 안내 창을 더 안 띄운다 */
+export function saveGuideSkip(on) {
   try {
-    localStorage.setItem(GUIDE_KEY, phase ? String(phase) : 'done');
+    if (on) localStorage.setItem(GUIDE_SKIP_KEY, '1');
+    else localStorage.removeItem(GUIDE_SKIP_KEY);
   } catch { /* 무시 */ }
+}
+
+export function loadGuideSkip() {
+  try {
+    return localStorage.getItem(GUIDE_SKIP_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 /**

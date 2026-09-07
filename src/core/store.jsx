@@ -50,7 +50,6 @@ import {
   saveAppearance,
   saveReadOnly,
   saveUiScale,
-  saveGuidePhase,
   saveScenarios,
   saveLayout,
   saveUserLibrary,
@@ -1433,13 +1432,11 @@ export function EditorProvider({ children }) {
     if (state.readOnly) dispatch({ type: 'SET_TOOL', tool: TOOL.SELECT, itemId: null });
   }, [state.readOnly]);
 
-  /* ---- 따라 하기: 어디까지 왔는지 이 브라우저에 남긴다 -------------------
-   *  'welcome' 일 때는 저장하지 않는다. 아직 아무것도 고르지 않은 상태라,
-   *  띄워 놓은 채 새로고침했다고 환영 창을 영영 못 보게 되면 곤란하다.
-   *  여는 길이 여럿(환영 창 · 툴바)이라 저장은 이 한 곳에서만 한다. */
-  useEffect(() => {
-    if (state.guide !== 'welcome') saveGuidePhase(state.guide);
-  }, [state.guide]);
+  /* ---- 따라 하기 -------------------------------------------------------
+   *  **진행 상태를 이제 저장하지 않는다.** 안내는 열 때마다 처음부터 띄우기로
+   *  했고(core/persistence.js), 그러면 「어디까지 왔나」를 적어 둘 이유가 없다.
+   *  적어 두면 오히려 다음에 열었을 때 환영 창 대신 옛 걸음이 튀어나온다.
+   *  그만 보겠다는 뜻만 「다시 보지 않기」 상자가 따로 남긴다. */
 
   /* ---- 시나리오도 이 브라우저에 남긴다 (도면과는 따로) --------------------
    *  도면을 초기화해도 비교 기록은 남아야 한다 — 배치를 바꿔 가며 견주는 일이

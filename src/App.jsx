@@ -11,7 +11,7 @@
  * ---------------------------------------------------------------------------
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import {
   Ban, Box as BoxIcon, Building2, Cable, Crosshair, Eraser, Eye, EyeOff, MousePointer2,
   Lock, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Ruler, Truck,
@@ -35,6 +35,7 @@ import LibraryPanel from './ui/LibraryPanel.jsx';
 import Toolbar from './ui/Toolbar.jsx';
 import Inspector from './ui/Inspector.jsx';
 import { isNarrow, panelMode } from './ui/narrow.js';
+import { zoomOf } from './core/uiScale.js';
 import ZoneLayers from './ui/ZoneLayers.jsx';
 import Tutorial from './ui/Tutorial.jsx';
 import Scenarios from './ui/Scenarios.jsx';
@@ -352,6 +353,54 @@ function StepRow({ step, depth, culprit }) {
   );
 }
 
+/**
+ * 순서가 바뀌면 **자리를 미끄러져 옮긴다** (FLIP).
+ * ---------------------------------------------------------------------------
+ *  출하 누계는 많은 것이 위로 올라온다. 그런데 그냥 다시 그리면 두 줄이 순간
+ *  이동해서 **무엇이 무엇을 제쳤는지 눈으로 못 쫓는다.** 옮기기 전 자리를 재
+ *  뒀다가, 새 자리에 그려진 것을 옛 자리로 되돌려 놓고 한 프레임 뒤에 풀면
+ *  미끄러진다.
+ *
+ *  **줄 높이를 px 로 박지 않는다.** 화면 배율(core/uiScale.js)과 글꼴에 따라
+ *  높이가 달라진다 — 재서 옮기면 그 둘에 상관없이 맞는다.
+ *
+ *  옮길 거리는 **배율로 나눈다.** rect 는 배율이 곱해진 값인데 transform 의 px 은
+ *  안 곱해진 값이라, 안 나누면 배율 2 에서 두 배로 미끄러진다(uiScale.js 의 zoomOf).
+ */
+function useSlideOrder(order) {
+  const nodes = useRef(new Map());
+  const prev = useRef(new Map());
+
+  useLayoutEffect(() => {
+    const now = new Map();
+    for (const [key, el] of nodes.current) if (el) now.set(key, el.getBoundingClientRect().top);
+
+    /* 손이 덜 가는 화면을 원하는 사람에게는 그냥 자리만 바꿔 준다 */
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!still) {
+      for (const [key, el] of nodes.current) {
+        if (!el) continue;
+        const was = prev.current.get(key);
+        const is = now.get(key);
+        if (was === undefined || is === undefined) continue;
+        const dy = (was - is) / zoomOf(el);
+        if (Math.abs(dy) < 0.5) continue;
+        el.style.transition = 'none';
+        el.style.transform = `translateY(${dy}px)`;
+        /* **다음 프레임에 푼다.** 같은 프레임에 풀면 브라우저가 옛 자리를 한 번도
+           안 그려서 아무 일도 없던 것처럼 보인다. */
+        requestAnimationFrame(() => {
+          el.style.transition = 'transform 280ms cubic-bezier(.22,.7,.3,1)';
+          el.style.transform = '';
+        });
+      }
+    }
+    prev.current = now;
+  }, [order]);
+
+  return nodes;
+}
+
 function ShippedHUD() {
   const { state, itemOf } = useEditor();
   const shipped = useShipped();
@@ -359,7 +408,12 @@ function ShippedHUD() {
   const stock = useAllStock();
   const ran = getRan();
 
-  const kinds = Object.entries(shipped).filter(([, n]) => n > 0);
+  /* **많이 나온 것이 위로.** 같은 값이면 이름 순으로 갈라 둔다 — 안 그러면
+     값이 같아지는 순간 순서가 매 틱 뒤바뀌어 줄이 떨린다. */
+  const kinds = Object.entries(shipped)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const slide = useSlideOrder(kinds.map(([k]) => k).join('|'));
   const total = shippedTotal(shipped);
   /** 재공(WIP) — 아직 공장 안에 있는 것. 적치대·선반에 쌓인 것을 센다 */
   const wip = Object.values(stock).reduce((s, n) => s + n, 0);
@@ -390,6 +444,7 @@ function ShippedHUD() {
         return (
           <div
             key={kind}
+            ref={(el) => { if (el) slide.current.set(kind, el); else slide.current.delete(kind); }}
             className="flex items-center gap-2 rounded-full bg-float px-2.5 py-1 text-[11.5px] ring-1 ring-edge backdrop-blur"
             title={`${it?.name ?? kind} 출하 누계`}
           >

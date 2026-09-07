@@ -24,6 +24,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { loadGuideSkip, saveGuideSkip } from '../core/persistence.js';
 import { zoomOf } from '../core/uiScale.js';
 import { ArrowLeft, Check, GraduationCap, X } from 'lucide-react';
 import { useEditor } from '../core/store.jsx';
@@ -118,7 +119,20 @@ function Spot({ box }) {
 
 /* ── 환영 ────────────────────────────────────────────────────────────── */
 
+/**
+ * 환영 창 — **열 때마다 뜬다.**
+ * ---------------------------------------------------------------------------
+ *  예전에는 처음 한 번만 떴다. 그런데 이 편집기는 순서를 모르면 막히는 도구라
+ *  (바닥을 먼저 그려야 설비가 놓인다), 한 번 스쳐 본 사람이 다음에 다시 열면
+ *  그 순서를 기억하지 못한다. 그래서 늘 띄우되 **끄는 길을 창 안에 둔다.**
+ *
+ *  끄는 것은 **누르는 순간** 남긴다. 「혼자 해볼게요」로 닫든 「안내 고르기」로
+ *  들어가든 상자를 켜 뒀으면 다음부터 안 뜬다 — 상자만 켜고 창을 닫아 버렸을 때
+ *  아무 일도 안 일어나면 켠 뜻이 사라진다.
+ */
 function Welcome({ onPick, onSkip }) {
+  const [skip, setSkip] = useState(loadGuideSkip());
+  const leave = (go) => { saveGuideSkip(skip); go(); };
   return (
     <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/45 p-4 backdrop-blur-[2px]">
       <div className="w-full max-w-[460px] overflow-hidden rounded-xl border border-line bg-app shadow-2xl">
@@ -138,9 +152,20 @@ function Welcome({ onPick, onSkip }) {
           배우고 싶은 것을 <b className="text-ink2">골라서</b> 따라갈 수 있습니다.
           도면 그리기 · 설비 다루기 · 원가 · 인력 · 나눠 쓰기 등 {GUIDES.length}가지가 있습니다.
         </div>
-        <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
-          <Btn onClick={onSkip}>혼자 해볼게요</Btn>
-          <Btn active onClick={onPick}>안내 고르기</Btn>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line px-5 py-3">
+          <label className="flex cursor-pointer select-none items-center gap-2 text-[11.5px] text-ink3 hover:text-ink2">
+            <input
+              type="checkbox"
+              checked={skip}
+              onChange={(e) => setSkip(e.target.checked)}
+              className="h-3.5 w-3.5 cursor-pointer accent-sky-500"
+            />
+            다시 보지 않기
+          </label>
+          <div className="flex gap-2">
+            <Btn onClick={() => leave(onSkip)}>혼자 해볼게요</Btn>
+            <Btn active onClick={() => leave(onPick)}>안내 고르기</Btn>
+          </div>
         </div>
       </div>
     </div>
