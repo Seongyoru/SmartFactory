@@ -11,7 +11,7 @@
 ```bash
 npm install
 npm run dev      # http://localhost:5174
-npm test         # 868건, 의존성 없이 3초
+npm test         # 1,360건, 의존성 없이 6초
 ```
 
 ---
