@@ -3,41 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smart Factory — 이런 프로그램입니다</title>
+<title>Smart Factory 가이드 — 프로그램 소개 및 작동 방식</title>
 <meta name="description" content="공장 라인을 컴퓨터 안에 지어 보고 돌려 보는 프로그램. 무엇을 하고, 왜 필요하고, 어떻게 쓰는지.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 
 <style>
-/* 색은 앱이 실제로 쓰는 토큰에서 가져왔다 — 머리 #0B1322 / #F7F9FC, 고르기 sky, 경고 amber */
+/* ===========================================================================
+   밝은 바탕 + 어두운 히어로 패널.
+   배경 격자를 걷어냈다 — 격자·구역선·표선·상자선이 모두 비슷한 굵기라
+   서로 싸우고 있었다. 지금은 **면**으로 나누고 선은 꼭 필요한 곳에만 쓴다.
+   =========================================================================== */
 :root {
-  --paper:#F4F7FB; --sheet:#FFFFFF; --sunken:#EDF2F8;
-  --ink:#0B1322; --ink-2:#35465F; --ink-3:#64768E; --ink-4:#94A5BC;
-  --rule:#D3DEEC; --rule-soft:#E4EBF4;
-  --accent:#0284C7; --warn:#B45309; --good:#047857;
-  --grid:rgba(11,19,34,.055);
-  --shadow:0 1px 2px rgba(11,19,34,.05), 0 8px 24px -12px rgba(11,19,34,.16);
+  --ground:#F4F7FA; --surface:#FFFFFF; --surface-2:#EAF0F5;
+  --ink:#0F1E2D; --ink-2:#40566A; --muted:#68809A; --line:#D5E0E9;
+  --accent:#0369A1; --accent-soft:#E1F0FA;
+  --ok:#059669; --warn:#B45309;
+  --panel:#04070F; --panel-2:#0A1322; --panel-line:#1B2C44;
+  --panel-ink:#DBE7F3; --panel-muted:#6D84A0; --panel-cyan:#4FC3F7;
   --f-sans:"IBM Plex Sans KR", system-ui, -apple-system, "Malgun Gothic", sans-serif;
   --f-mono:"IBM Plex Mono", ui-monospace, Consolas, monospace;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper:#070C15; --sheet:#0B1322; --sunken:#101B2D;
-    --ink:#E7EDF6; --ink-2:#B4C2D6; --ink-3:#8496AF; --ink-4:#5D6E88;
-    --rule:#1E2C42; --rule-soft:#172336;
-    --accent:#38BDF8; --warn:#F0B429; --good:#34D399;
-    --grid:rgba(231,237,246,.045);
-    --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    --ground:#080D16; --surface:#0E1725; --surface-2:#141F31;
+    --ink:#E4EDF7; --ink-2:#AFC0D3; --muted:#7D91A9; --line:#20304A;
+    --accent:#4FC3F7; --accent-soft:#122740;
+    --ok:#34D399; --warn:#F0B429;
   }
 }
 :root[data-theme="dark"] {
-  --paper:#070C15; --sheet:#0B1322; --sunken:#101B2D;
-  --ink:#E7EDF6; --ink-2:#B4C2D6; --ink-3:#8496AF; --ink-4:#5D6E88;
-  --rule:#1E2C42; --rule-soft:#172336;
-  --accent:#38BDF8; --warn:#F0B429; --good:#34D399;
-  --grid:rgba(231,237,246,.045);
-  --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  --ground:#080D16; --surface:#0E1725; --surface-2:#141F31;
+  --ink:#E4EDF7; --ink-2:#AFC0D3; --muted:#7D91A9; --line:#20304A;
+  --accent:#4FC3F7; --accent-soft:#122740;
+  --ok:#34D399; --warn:#F0B429;
 }
 
 * { box-sizing:border-box; }
@@ -45,202 +45,237 @@ html { scroll-behavior:smooth; }
 @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
 
 body {
-  margin:0; background:var(--paper);
-  background-image:linear-gradient(var(--grid) 1px, transparent 1px),
-                   linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size:25px 25px;
-  color:var(--ink); font-family:var(--f-sans); font-size:16.5px; line-height:1.8;
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--f-sans); font-size:16.5px; line-height:1.8;
   -webkit-font-smoothing:antialiased;
 }
-.sheet { max-width:940px; margin:0 auto; padding:0 20px 100px; }
+.wrap { max-width:1000px; margin:0 auto; padding:0 22px 110px; }
 
-/* ---- 표제란 ---- */
-.block { background:var(--sheet); border:1px solid var(--rule); box-shadow:var(--shadow); margin-top:40px; }
-.block__top { padding:34px 34px 28px; border-bottom:1px solid var(--rule); }
-.eyebrow { font-family:var(--f-mono); font-size:11px; font-weight:500; letter-spacing:.16em;
-           text-transform:uppercase; color:var(--ink-4); margin:0 0 12px; }
-h1 { font-size:clamp(30px,5.4vw,46px); font-weight:700; line-height:1.14; letter-spacing:-.022em;
-     margin:0; text-wrap:balance; }
-h1 .thin { font-weight:300; color:var(--ink-3); }
-.tagline { margin:16px 0 0; font-size:18px; line-height:1.68; color:var(--ink-2); max-width:52ch; }
-.specs { display:grid; grid-template-columns:repeat(3,1fr); }
-.spec { padding:18px 22px 20px; border-right:1px solid var(--rule-soft); }
-.spec:last-child { border-right:0; }
-.spec dt { font-family:var(--f-mono); font-size:10px; letter-spacing:.13em; text-transform:uppercase;
-           color:var(--ink-4); margin:0 0 5px; }
-.spec dd { margin:0; font-size:14.5px; color:var(--ink-2); line-height:1.55; }
+/* ═══ 히어로 ═══ */
+.hero { background:var(--panel); border-radius:14px; margin-top:34px; overflow:hidden;
+        box-shadow:0 24px 60px -34px rgba(4,7,15,.7); }
+.hero__body { padding:44px 46px 38px; }
+.hero__eyebrow { display:flex; flex-wrap:wrap; gap:10px 22px; justify-content:space-between;
+                 align-items:center; font-family:var(--f-mono); font-size:11px;
+                 letter-spacing:.16em; text-transform:uppercase; color:var(--panel-muted);
+                 margin:0 0 28px; }
+.dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--panel-cyan);
+       margin-right:8px; vertical-align:1px; box-shadow:0 0 0 3px rgba(79,195,247,.18); }
+.hero h1 { margin:0; color:var(--panel-ink); font-size:clamp(29px,4.6vw,45px); font-weight:700;
+           line-height:1.24; letter-spacing:-.02em; text-wrap:balance; }
+.hero h1 em { font-style:normal; color:var(--panel-cyan); }
+.hero__lead { margin:22px 0 0; color:var(--panel-muted); font-size:16px; line-height:1.78; max-width:62ch; }
+.hero__lead b { color:var(--panel-ink); font-weight:500; }
 
-/* ---- 한눈에 ---- */
-.glance { display:grid; grid-template-columns:repeat(3,1fr); gap:1px; background:var(--rule);
-          border:1px solid var(--rule); margin-top:34px; }
-.glance > div { background:var(--sheet); padding:24px 24px 26px; }
-.glance .n { font-family:var(--f-mono); font-size:11px; letter-spacing:.14em; color:var(--accent);
-             display:block; margin-bottom:10px; }
-.glance h3 { font-size:16.5px; font-weight:600; margin:0 0 8px; }
-.glance p { font-size:14.5px; color:var(--ink-2); line-height:1.7; margin:0; max-width:none; }
+.hero__stats { display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:var(--panel-line);
+               border:1px solid var(--panel-line); border-radius:8px; overflow:hidden; margin:32px 0 30px; }
+.hero__stats > div { background:var(--panel-2); padding:16px 18px 18px; }
+.hero__stats dt { font-family:var(--f-mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+                  color:var(--panel-muted); margin:0 0 7px; }
+.hero__stats dd { margin:0; font-family:var(--f-mono); font-size:19px; font-weight:600; color:var(--panel-ink);
+                  font-variant-numeric:tabular-nums; line-height:1.2; }
+.hero__stats dd span { font-size:11.5px; font-weight:400; color:var(--panel-muted); margin-left:4px; }
 
-/* ---- 절 ---- */
-section { margin-top:66px; scroll-margin-top:24px; }
-.head { border-bottom:1px solid var(--rule); padding-bottom:13px; margin-bottom:28px; }
-.head h2 { font-size:27px; font-weight:600; letter-spacing:-.018em; margin:0; text-wrap:balance; }
-.head .sub { margin:7px 0 0; font-size:15px; color:var(--ink-3); line-height:1.6; }
-.head .kicker { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.15em; text-transform:uppercase;
-                color:var(--ink-4); display:block; margin-bottom:9px; }
-h3 { font-size:17px; font-weight:600; margin:38px 0 12px; letter-spacing:-.008em; }
+.btns { display:flex; flex-wrap:wrap; gap:10px; }
+.btn { display:inline-flex; align-items:center; gap:8px; font-family:var(--f-mono); font-size:12px;
+       font-weight:500; letter-spacing:.06em; text-decoration:none; padding:11px 20px; border-radius:6px;
+       transition:filter .15s, background .15s; }
+.btn--fill { background:var(--panel-cyan); color:#04070F; }
+.btn--fill:hover { filter:brightness(1.1); }
+.btn--ghost { color:var(--panel-ink); border:1px solid var(--panel-line); }
+.btn--ghost:hover { background:var(--panel-2); }
+.btn:focus-visible { outline:2px solid var(--panel-cyan); outline-offset:3px; }
 
-p { margin:0 0 18px; max-width:68ch; }
+.hero__foot { border-top:1px solid var(--panel-line); padding:15px 46px; display:flex; flex-wrap:wrap;
+              gap:8px 26px; justify-content:space-between; font-family:var(--f-mono); font-size:10.5px;
+              letter-spacing:.12em; text-transform:uppercase; color:var(--panel-muted); }
+
+/* ═══ 목차 ═══ */
+.toc { background:var(--surface); border-radius:12px; padding:26px 30px 28px; margin-top:26px; }
+.toc h2 { font-family:var(--f-mono); font-size:10.5px; font-weight:500; letter-spacing:.16em;
+          text-transform:uppercase; color:var(--muted); margin:0 0 16px; }
+.toc ol { list-style:none; margin:0; padding:0; columns:2; column-gap:40px; }
+.toc li { break-inside:avoid; padding:5px 0; }
+.toc a { display:flex; gap:14px; text-decoration:none; color:var(--ink-2); font-size:15px; }
+.toc a:hover { color:var(--accent); }
+.toc a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+.toc .n { font-family:var(--f-mono); font-size:12px; color:var(--muted); min-width:20px; }
+
+/* ═══ 절 ═══ */
+section { margin-top:72px; scroll-margin-top:24px; }
+.kicker { font-family:var(--f-mono); font-size:11px; font-weight:500; letter-spacing:.16em;
+          text-transform:uppercase; color:var(--accent); margin:0 0 12px; }
+h2.title { font-size:28px; font-weight:700; letter-spacing:-.02em; margin:0 0 10px; text-wrap:balance; }
+.sub { margin:0 0 30px; font-size:15.5px; color:var(--muted); line-height:1.65; max-width:62ch; }
+h3 { font-size:17.5px; font-weight:700; margin:40px 0 14px; letter-spacing:-.01em; }
+h3 .hn { font-family:var(--f-mono); font-size:13px; font-weight:500; color:var(--accent); margin-right:10px; }
+
+p { margin:0 0 18px; max-width:66ch; }
 p:last-child { margin-bottom:0; }
-strong { font-weight:600; }
-.lead { font-size:19px; line-height:1.72; color:var(--ink); font-weight:400; }
+strong { font-weight:700; }
+.lead { font-size:18.5px; line-height:1.75; color:var(--ink); }
 .mono { font-family:var(--f-mono); font-size:.92em; }
-code { font-family:var(--f-mono); font-size:.85em; background:var(--sunken);
-       border:1px solid var(--rule-soft); border-radius:3px; padding:.1em .38em; color:var(--ink-2); }
+code { font-family:var(--f-mono); font-size:.86em; background:var(--surface-2); border-radius:4px;
+       padding:.15em .45em; color:var(--ink-2); }
 
-ul.plain { margin:0 0 20px; padding:0 0 0 4px; list-style:none; max-width:68ch; }
-ul.plain li { position:relative; padding-left:22px; margin-bottom:10px; }
-ul.plain li::before { content:"—"; position:absolute; left:0; color:var(--accent); font-family:var(--f-mono); }
+ul.plain { margin:0 0 20px; padding:0; list-style:none; max-width:66ch; }
+ul.plain li { position:relative; padding-left:24px; margin-bottom:11px; }
+ul.plain li::before { content:""; position:absolute; left:2px; top:.72em; width:8px; height:8px;
+                      border-radius:2px; background:var(--accent); }
 
-/* ---- 그림 ---- */
-figure { margin:32px 0; background:var(--sheet); border:1px solid var(--rule); overflow:hidden; }
-figure .canvas { padding:26px 20px; overflow-x:auto; }
+/* ═══ 카드 ═══ */
+.cards { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:28px 0; }
+.card { background:var(--surface); border-radius:12px; padding:24px 26px 26px; }
+.card h4 { margin:0 0 10px; font-size:15.5px; font-weight:700; color:var(--accent); }
+.card p { margin:0; font-size:14.5px; color:var(--ink-2); line-height:1.72; max-width:none; }
+.card .n { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.14em; color:var(--muted);
+           display:block; margin-bottom:11px; }
+
+/* ═══ 그림 ═══ */
+figure { margin:30px 0; background:var(--surface); border-radius:12px; overflow:hidden; }
+figure .canvas { padding:28px 22px; overflow-x:auto; }
 figure svg { display:block; margin:0 auto; max-width:100%; height:auto; }
-figcaption { border-top:1px solid var(--rule-soft); padding:11px 18px; font-family:var(--f-mono);
-             font-size:11px; color:var(--ink-4); letter-spacing:.02em; }
+figcaption { padding:0 26px 20px; font-family:var(--f-mono); font-size:11px; color:var(--muted);
+             letter-spacing:.02em; }
 
-/* ---- 표 ---- */
-.tablewrap { overflow-x:auto; margin:28px 0; border:1px solid var(--rule); background:var(--sheet); }
+/* ═══ 표 — 줄 대신 여백으로 가른다 ═══ */
+.tablewrap { overflow-x:auto; margin:28px 0; background:var(--surface); border-radius:12px; padding:8px 4px 10px; }
 table { border-collapse:collapse; width:100%; min-width:540px; font-size:14.5px; }
-caption { text-align:left; padding:14px 18px 2px; font-family:var(--f-mono); font-size:11px;
-          color:var(--ink-4); letter-spacing:.02em; }
-th { text-align:left; font-family:var(--f-mono); font-size:10.5px; font-weight:500; letter-spacing:.12em;
-     text-transform:uppercase; color:var(--ink-4); padding:12px 18px; border-bottom:1px solid var(--rule);
-     white-space:nowrap; }
-td { padding:13px 18px; border-bottom:1px solid var(--rule-soft); vertical-align:top; color:var(--ink-2);
-     line-height:1.65; }
-tbody tr:last-child td { border-bottom:0; }
+caption { text-align:left; padding:14px 22px 6px; font-family:var(--f-mono); font-size:11px;
+          color:var(--muted); letter-spacing:.02em; }
+th { text-align:left; font-family:var(--f-mono); font-size:10.5px; font-weight:500; letter-spacing:.13em;
+     text-transform:uppercase; color:var(--muted); padding:10px 22px 12px; white-space:nowrap;
+     border-bottom:2px solid var(--line); }
+td { padding:14px 22px; vertical-align:top; color:var(--ink-2); line-height:1.68; }
 td:first-child { color:var(--ink); font-weight:500; white-space:nowrap; }
 td.num, th.num { font-family:var(--f-mono); font-variant-numeric:tabular-nums; text-align:right; }
+tbody tr:nth-child(even) td { background:var(--surface-2); }
+tbody tr:nth-child(even) td:first-child { border-radius:6px 0 0 6px; }
+tbody tr:nth-child(even) td:last-child { border-radius:0 6px 6px 0; }
 
 .chip { display:inline-block; font-family:var(--f-mono); font-size:10.5px; font-weight:500;
-        letter-spacing:.04em; padding:2px 7px; border-radius:2px; border:1px solid currentColor; white-space:nowrap; }
-.chip--up{color:var(--warn)} .chip--down{color:var(--accent)} .chip--none{color:var(--ink-4)}
+        letter-spacing:.04em; padding:3px 9px; border-radius:20px; white-space:nowrap;
+        background:var(--accent-soft); color:var(--accent); }
+.chip--none { background:var(--surface-2); color:var(--muted); }
 
-/* ---- 상자 ---- */
-.note { border-left:2px solid var(--accent); background:var(--sheet); padding:22px 26px; margin:28px 0; }
-.note p { margin-bottom:12px; } .note p:last-child { margin-bottom:0; }
-.note .label { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
-               color:var(--accent); display:block; margin-bottom:10px; }
-.note--warn { border-left-color:var(--warn); } .note--warn .label { color:var(--warn); }
+/* ═══ 강조 ═══ */
+.note { background:var(--accent-soft); border-radius:12px; padding:24px 28px; margin:28px 0; }
+.note .label { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+               color:var(--accent); display:block; margin-bottom:11px; }
+.note p { margin-bottom:12px; color:var(--ink-2); } .note p:last-child { margin-bottom:0; }
 
-/* ---- 예시 대화 ---- */
-.example { background:var(--sheet); border:1px solid var(--rule); margin:30px 0; }
-.example__q { padding:20px 26px 18px; border-bottom:1px dashed var(--rule); }
-.example__q .who { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
-                   color:var(--ink-4); display:block; margin-bottom:7px; }
-.example__q p { margin:0; font-size:17px; color:var(--ink); font-weight:500; }
-.example__a { padding:20px 26px 22px; }
-.example__a .who { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
-                   color:var(--accent); display:block; margin-bottom:9px; }
-.example__a p { margin:0 0 10px; font-size:15px; color:var(--ink-2); }
-.example__a p:last-child { margin-bottom:0; }
+/* ═══ 문답 ═══ */
+.qa { background:var(--surface); border-radius:12px; margin:30px 0; overflow:hidden; }
+.qa__q { padding:24px 28px 22px; background:var(--surface-2); }
+.qa__a { padding:24px 28px 26px; }
+.qa .who { font-family:var(--f-mono); font-size:10.5px; letter-spacing:.14em; text-transform:uppercase;
+           display:block; margin-bottom:9px; color:var(--muted); }
+.qa__a .who { color:var(--accent); }
+.qa__q p { margin:0; font-size:17px; font-weight:500; color:var(--ink); }
+.qa__a p { margin:0 0 12px; font-size:15px; color:var(--ink-2); } .qa__a p:last-child { margin-bottom:0; }
 
-/* ---- 수식 ---- */
-.eq { background:var(--sunken); border:1px solid var(--rule-soft); padding:22px 24px; margin:28px 0;
+/* ═══ 수식 ═══ */
+.eq { background:var(--panel-2); border-radius:12px; padding:26px 28px; margin:28px 0;
       font-family:var(--f-mono); text-align:center; overflow-x:auto; }
-.eq .big { font-size:17.5px; font-weight:500; color:var(--ink); letter-spacing:.01em; white-space:nowrap; }
-.eq .small { display:block; margin-top:12px; font-size:12.5px; color:var(--ink-3); white-space:normal; }
+.eq .big { font-size:17px; font-weight:500; color:var(--panel-ink); letter-spacing:.01em; white-space:nowrap; }
+.eq .small { display:block; margin-top:13px; font-size:12.5px; color:var(--panel-muted); white-space:normal;
+             line-height:1.7; }
 
-/* ---- 정의 ---- */
-.defs { margin:26px 0; }
-.def { display:grid; grid-template-columns:150px 1fr; gap:0 18px; padding:15px 0;
-       border-top:1px solid var(--rule-soft); align-items:start; }
-.def:last-child { border-bottom:1px solid var(--rule-soft); }
-.def dt { font-weight:600; font-size:14.5px; }
-.def dd { margin:0; font-size:14.5px; color:var(--ink-2); line-height:1.68; }
+/* ═══ 용어 ═══ */
+.defs { margin:26px 0; background:var(--surface); border-radius:12px; padding:10px 26px; }
+.def { display:grid; grid-template-columns:132px 1fr; gap:0 20px; padding:16px 0; align-items:start; }
+.def + .def { border-top:1px solid var(--line); }
+.def dt { font-weight:700; font-size:14.5px; }
+.def dd { margin:0; font-size:14.5px; color:var(--ink-2); line-height:1.7; }
 
-/* ---- 명령 ---- */
-.term { background:var(--ink); color:#E7EDF6; border:1px solid var(--rule); padding:20px 24px;
-        margin:28px 0; font-family:var(--f-mono); font-size:13px; line-height:2.05; overflow-x:auto; }
-:root[data-theme="dark"] .term { background:#05090F; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .term { background:#05090F; } }
-.term .p { color:#5D6E88; user-select:none; } .term .c { color:#7DD3FC; } .term .o { color:#8496AF; }
+/* ═══ 명령 ═══ */
+.term { background:var(--panel); border-radius:12px; padding:24px 28px; margin:28px 0;
+        font-family:var(--f-mono); font-size:13px; line-height:2.1; overflow-x:auto; color:var(--panel-ink); }
+.term .p { color:var(--panel-muted); user-select:none; }
+.term .c { color:var(--panel-cyan); }
+.term .o { color:var(--panel-muted); }
 
-.divider { margin:78px 0 0; border-top:1px solid var(--rule); padding-top:14px;
-           font-family:var(--f-mono); font-size:10.5px; letter-spacing:.15em; text-transform:uppercase;
-           color:var(--ink-4); }
+.rule { margin:86px 0 0; text-align:center; font-family:var(--f-mono); font-size:10.5px;
+        letter-spacing:.18em; text-transform:uppercase; color:var(--muted); }
 
-.colophon { margin-top:66px; padding-top:18px; border-top:1px solid var(--rule); display:flex;
-            flex-wrap:wrap; gap:8px 28px; font-family:var(--f-mono); font-size:11px; color:var(--ink-4); }
-.colophon a { color:var(--accent); text-decoration:none; }
-.colophon a:hover { text-decoration:underline; }
-a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+.foot { margin-top:70px; padding-top:22px; border-top:1px solid var(--line); display:flex;
+        flex-wrap:wrap; gap:8px 28px; font-family:var(--f-mono); font-size:11px; color:var(--muted); }
+.foot a { color:var(--accent); text-decoration:none; }
+.foot a:hover { text-decoration:underline; }
 
-@media (max-width:760px) {
-  body { font-size:16px; }
-  .block__top { padding:26px 22px 22px; }
-  .specs, .glance { grid-template-columns:1fr; }
-  .spec { border-right:0; border-bottom:1px solid var(--rule-soft); }
-  .spec:last-child { border-bottom:0; }
-  .def { grid-template-columns:1fr; gap:4px; }
+@media (max-width:800px) {
+  .hero__body { padding:32px 24px 28px; } .hero__foot { padding:14px 24px; }
+  .hero__stats { grid-template-columns:1fr 1fr; }
+  .toc ol { columns:1; }
+  .cards { grid-template-columns:1fr; }
+  .def { grid-template-columns:1fr; gap:5px; }
+  .eq .big { white-space:normal; }
 }
 </style>
 </head>
 <body>
-<div class="sheet">
+<div class="wrap">
 
-  <!-- ══════════════ 표제란 ══════════════ -->
-  <div class="block">
-    <div class="block__top">
-      <p class="eyebrow">설비 배치 에디터 · 라인 시뮬레이터</p>
-      <h1>Smart&nbsp;Factory<br><span class="thin">공장을 짓기 전에, 돌려 본다</span></h1>
-      <p class="tagline">
-        공장 라인을 컴퓨터 안에 지어 보고 실제로 돌려 보는 프로그램입니다.
-        기계를 놓고 컨베이어로 이으면, <strong>한 시간에 몇 개 나오고 어디가 막히고
-        돈이 얼마 드는지</strong>를 알려 줍니다.
+  <!-- ═══════════ 히어로 ═══════════ -->
+  <header class="hero">
+    <div class="hero__body">
+      <p class="hero__eyebrow">
+        <span>Smart Factory — 프로그램 소개</span>
+        <span><i class="dot"></i>브라우저에서 바로 실행</span>
       </p>
+      <h1>공장을 짓기 전에<br><em>컴퓨터 안에서 돌려 본다</em></h1>
+      <p class="hero__lead">
+        기계를 놓고 컨베이어로 이으면 그것이 그대로 돌아갑니다. 잠시 뒤에
+        <b>한 시간에 몇 개 나오는지, 어디가 막히는지, 돈이 얼마나 드는지</b>를
+        알려 줍니다. 그림을 고치면 숫자가 곧바로 다시 나옵니다.
+      </p>
+      <dl class="hero__stats">
+        <div><dt>검증</dt><dd>1,360<span>건</span></dd></div>
+        <div><dt>계산 모듈</dt><dd>56<span>개</span></dd></div>
+        <div><dt>서버 코드</dt><dd>0<span>줄</span></dd></div>
+        <div><dt>설치</dt><dd>없음</dd></div>
+      </dl>
+      <div class="btns">
+        <a class="btn btn--fill" href="./">▶ 프로그램 열기</a>
+        <a class="btn btn--ghost" href="https://github.com/Seongyoru/SmartFactory">SOURCE ↗</a>
+      </div>
     </div>
-    <dl class="specs">
-      <div class="spec"><dt>어디서 도나</dt><dd>웹 브라우저. 설치할 것이 없습니다</dd></div>
-      <div class="spec"><dt>누가 쓰나</dt><dd>라인을 계획하거나 검토하는 사람</dd></div>
-      <div class="spec"><dt>무엇이 필요한가</dt><dd>없습니다. 열면 바로 그릴 수 있습니다</dd></div>
-    </dl>
-  </div>
+    <div class="hero__foot">
+      <span>React 19 · Three.js (drei) · Vite · Tailwind 4</span>
+      <span>Static Build · GitHub Pages</span>
+    </div>
+  </header>
 
-  <!-- ══════════════ 한눈에 ══════════════ -->
-  <div class="glance">
-    <div>
-      <span class="n">01</span>
-      <h3>그린다</h3>
-      <p>바닥을 그리고 기계를 놓습니다. 마우스로 끌어다 놓으면 됩니다.</p>
-    </div>
-    <div>
-      <span class="n">02</span>
-      <h3>잇는다</h3>
-      <p>기계와 기계를 컨베이어로 잇습니다. 길이는 알아서 맞춰집니다.</p>
-    </div>
-    <div>
-      <span class="n">03</span>
-      <h3>돌린다</h3>
-      <p>실행을 누르면 물건이 흘러갑니다. 그리고 결과를 말해 줍니다.</p>
-    </div>
-  </div>
+  <!-- ═══════════ 목차 ═══════════ -->
+  <nav class="toc" aria-label="목차">
+    <h2>목차</h2>
+    <!-- `columns` 는 **열을 채우고 다음 열로 넘어간다.** 순서를 손으로 섞으면
+         번호가 뒤죽박죽이 된다 — 그냥 01→09 로 두면 알아서 반씩 갈린다. -->
+    <ol>
+      <li><a href="#s1"><span class="n">01</span> 프로그램 소개</a></li>
+      <li><a href="#s2"><span class="n">02</span> 왜 필요한가</a></li>
+      <li><a href="#s3"><span class="n">03</span> 어떻게 쓰나</a></li>
+      <li><a href="#s4"><span class="n">04</span> 화면 구성</a></li>
+      <li><a href="#s5"><span class="n">05</span> 무엇을 알려 주나</a></li>
+      <li><a href="#s6"><span class="n">06</span> 안에서 무슨 일이 일어나나</a></li>
+      <li><a href="#s7"><span class="n">07</span> 성과 지표</a></li>
+      <li><a href="#s8"><span class="n">08</span> 만듦새</a></li>
+      <li><a href="#s9"><span class="n">09</span> 용어와 실행</a></li>
+    </ol>
+  </nav>
 
-  <!-- ══════════════ 1 ══════════════ -->
+  <!-- ═══════════ 01 ═══════════ -->
   <section id="s1">
-    <div class="head">
-      <span class="kicker">01 — 무엇을 하는 프로그램인가</span>
-      <h2>공장을 컴퓨터 안에 지어 봅니다</h2>
-      <p class="sub">그리는 것과 돌려 보는 것이 같은 화면에 있습니다</p>
-    </div>
+    <p class="kicker">01 — Intro</p>
+    <h2 class="title">공장을 컴퓨터 안에 지어 봅니다</h2>
+    <p class="sub">그리는 것과 돌려 보는 것이 같은 화면에 있습니다</p>
 
     <p class="lead">
       게임에서 공장을 짓듯이, 기계를 골라 놓고 컨베이어로 잇습니다.
       다 그렸으면 <strong>실행</strong>을 누릅니다. 그러면 그린 그대로 물건이 흘러가기
       시작합니다.
     </p>
-    <p>
-      다른 점은 그다음입니다. 잠시 돌리고 나면 프로그램이 이렇게 말해 줍니다.
-    </p>
+    <p>다른 점은 그다음입니다. 잠시 돌리고 나면 프로그램이 이렇게 말해 줍니다.</p>
     <ul class="plain">
       <li>한 시간에 <strong>몇 개</strong> 나옵니다</li>
       <li>지금 <strong>3번 기계 때문에</strong> 라인 전체가 기다리고 있습니다</li>
@@ -254,28 +289,24 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </p>
   </section>
 
-  <!-- ══════════════ 2 ══════════════ -->
+  <!-- ═══════════ 02 ═══════════ -->
   <section id="s2">
-    <div class="head">
-      <span class="kicker">02 — 왜 필요한가</span>
-      <h2>기계를 사고 나면 되돌릴 수 없습니다</h2>
-      <p class="sub">그래서 사기 전에 답을 알아야 합니다</p>
-    </div>
+    <p class="kicker">02 — Why</p>
+    <h2 class="title">기계를 사고 나면 되돌릴 수 없습니다</h2>
+    <p class="sub">그래서 사기 전에 답을 알아야 합니다</p>
 
     <p>
       새 라인을 깔 때 가장 먼저 정해야 하는 것은 <strong>「무엇을 몇 대 살 것인가」</strong>
       입니다. 한 대 차이가 큰돈이고, 잘못 사면 공장을 다시 뜯어야 합니다.
-    </p>
-    <p>
-      그런데 이 답은 직관으로 안 나옵니다. 예를 들어 이런 경우입니다.
+      그런데 이 답은 직관으로 나오지 않습니다.
     </p>
 
-    <div class="example">
-      <div class="example__q">
+    <div class="qa">
+      <div class="qa__q">
         <span class="who">흔한 오해</span>
         <p>「제작기는 1분에 20개, 조립기는 1분에 10개. 그러면 조립기가 병목이네?」</p>
       </div>
-      <div class="example__a">
+      <div class="qa__a">
         <span class="who">실제로는</span>
         <p>
           <strong>틀립니다.</strong> 조립기가 한 개를 만드는 데 부품을 <strong>두 개</strong>
@@ -284,7 +315,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
         </p>
         <p>
           이 프로그램은 모든 기계를 <strong>「완성품 몇 개를 지탱하는가」</strong>라는
-          하나의 자로 바꿔서 세웁니다. 그래서 진짜 병목이 어디인지, 무엇을 늘리면
+          하나의 자로 바꿔서 셉니다. 그래서 진짜 병목이 어디인지, 무엇을 늘리면
           얼마나 오르는지를 <strong>돌려 보기도 전에</strong> 알려 줍니다.
         </p>
       </div>
@@ -296,41 +327,39 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </p>
   </section>
 
-  <!-- ══════════════ 3 ══════════════ -->
+  <!-- ═══════════ 03 ═══════════ -->
   <section id="s3">
-    <div class="head">
-      <span class="kicker">03 — 어떻게 쓰나</span>
-      <h2>네 걸음이면 됩니다</h2>
-      <p class="sub">그리고 · 잇고 · 돌리고 · 읽고 — 그다음엔 고쳐서 다시</p>
-    </div>
+    <p class="kicker">03 — Flow</p>
+    <h2 class="title">네 걸음이면 됩니다</h2>
+    <p class="sub">그리고 · 잇고 · 돌리고 · 읽고 — 그다음엔 고쳐서 다시</p>
 
     <figure>
       <div class="canvas">
         <svg viewBox="0 0 820 132" width="820" role="img" aria-label="그린다, 잇는다, 돌린다, 읽는다 네 걸음이 고리를 이루는 그림">
           <defs>
             <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-              <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-4)"/>
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/>
             </marker>
           </defs>
           <g font-family="IBM Plex Sans KR, sans-serif">
-            <rect x="8" y="26" width="168" height="58" rx="3" fill="var(--sunken)" stroke="var(--rule)"/>
-            <text x="92" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="var(--ink)">그린다</text>
-            <text x="92" y="70" text-anchor="middle" font-size="11.5" fill="var(--ink-3)">바닥 · 벽 · 기계</text>
-            <line x1="182" y1="55" x2="204" y2="55" stroke="var(--ink-4)" stroke-width="1.2" marker-end="url(#ar)"/>
-            <rect x="212" y="26" width="168" height="58" rx="3" fill="var(--sunken)" stroke="var(--rule)"/>
-            <text x="296" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="var(--ink)">잇는다</text>
-            <text x="296" y="70" text-anchor="middle" font-size="11.5" fill="var(--ink-3)">컨베이어 · 카트</text>
-            <line x1="386" y1="55" x2="408" y2="55" stroke="var(--ink-4)" stroke-width="1.2" marker-end="url(#ar)"/>
-            <rect x="416" y="26" width="168" height="58" rx="3" fill="var(--sunken)" stroke="var(--good)" stroke-width="1.5"/>
-            <text x="500" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="var(--ink)">돌린다</text>
-            <text x="500" y="70" text-anchor="middle" font-size="11.5" fill="var(--ink-3)">실행을 누른다</text>
-            <line x1="590" y1="55" x2="612" y2="55" stroke="var(--ink-4)" stroke-width="1.2" marker-end="url(#ar)"/>
-            <rect x="620" y="26" width="168" height="58" rx="3" fill="var(--sunken)" stroke="var(--rule)"/>
-            <text x="704" y="50" text-anchor="middle" font-size="15" font-weight="600" fill="var(--ink)">읽는다</text>
-            <text x="704" y="70" text-anchor="middle" font-size="11.5" fill="var(--ink-3)">개수 · 병목 · 원가</text>
-            <path d="M704 92 L704 112 L92 112 L92 92" fill="none" stroke="var(--accent)" stroke-width="1.2"
-                  stroke-dasharray="4 4" marker-end="url(#ar)"/>
-            <rect x="326" y="102" width="144" height="19" fill="var(--sheet)"/>
+            <rect x="8" y="26" width="168" height="58" rx="8" fill="var(--surface-2)"/>
+            <text x="92" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--ink)">그린다</text>
+            <text x="92" y="70" text-anchor="middle" font-size="11.5" fill="var(--muted)">바닥 · 벽 · 기계</text>
+            <line x1="184" y1="55" x2="204" y2="55" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#ar)"/>
+            <rect x="212" y="26" width="168" height="58" rx="8" fill="var(--surface-2)"/>
+            <text x="296" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--ink)">잇는다</text>
+            <text x="296" y="70" text-anchor="middle" font-size="11.5" fill="var(--muted)">컨베이어 · 카트</text>
+            <line x1="388" y1="55" x2="408" y2="55" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#ar)"/>
+            <rect x="416" y="26" width="168" height="58" rx="8" fill="var(--accent-soft)"/>
+            <text x="500" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--accent)">돌린다</text>
+            <text x="500" y="70" text-anchor="middle" font-size="11.5" fill="var(--accent)">실행을 누른다</text>
+            <line x1="592" y1="55" x2="612" y2="55" stroke="var(--muted)" stroke-width="1.4" marker-end="url(#ar)"/>
+            <rect x="620" y="26" width="168" height="58" rx="8" fill="var(--surface-2)"/>
+            <text x="704" y="50" text-anchor="middle" font-size="15" font-weight="700" fill="var(--ink)">읽는다</text>
+            <text x="704" y="70" text-anchor="middle" font-size="11.5" fill="var(--muted)">개수 · 병목 · 원가</text>
+            <path d="M704 92 L704 112 L92 112 L92 92" fill="none" stroke="var(--accent)" stroke-width="1.4"
+                  stroke-dasharray="5 5" marker-end="url(#ar)"/>
+            <rect x="322" y="102" width="152" height="19" fill="var(--surface)"/>
             <text x="398" y="116" text-anchor="middle" font-size="11" fill="var(--accent)" font-family="IBM Plex Mono, monospace">고쳐서 다시 돌린다</text>
           </g>
         </svg>
@@ -338,68 +367,69 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       <figcaption>이 고리가 짧을수록 더 많이 시험해 볼 수 있다 — 네 걸음이 모두 같은 화면 안에 있다</figcaption>
     </figure>
 
-    <h3>처음 열면 따라 하기가 뜹니다</h3>
-    <p>
-      설명서를 읽지 않아도 됩니다. 처음 열면 <strong>배우고 싶은 것을 고르는 창</strong>이
-      뜹니다 — 「처음부터」, 「기계 다루기」, 「돈」, 「계획」 같은 여덟 갈래 중에 궁금한
-      것만 고르면 됩니다.
-    </p>
-    <p>
-      각 걸음은 <strong>실제로 그 일을 해야 넘어갑니다.</strong> 「다음」을 눌러 건너뛰는
-      방식이 아니라, 도면을 보고 스스로 확인합니다. 지금 눌러야 할 버튼은 화면에서
-      테두리가 빛납니다.
-    </p>
+    <div class="cards">
+      <div class="card">
+        <span class="n">설명서 없이</span>
+        <h4>처음 열면 따라 하기가 뜹니다</h4>
+        <p>
+          「처음부터」, 「기계 다루기」, 「돈」, 「계획」 같은 여덟 갈래 중에 궁금한 것만
+          고르면 됩니다. 한 줄짜리 긴 안내를 끝까지 밟을 필요가 없습니다.
+        </p>
+      </div>
+      <div class="card">
+        <span class="n">건너뛸 수 없음</span>
+        <h4>실제로 해야 넘어갑니다</h4>
+        <p>
+          「다음」을 눌러 건너뛰는 방식이 아니라 도면을 보고 스스로 확인합니다.
+          지금 눌러야 할 버튼은 화면에서 테두리가 빛납니다.
+        </p>
+      </div>
+    </div>
   </section>
 
-  <!-- ══════════════ 4 ══════════════ -->
+  <!-- ═══════════ 04 ═══════════ -->
   <section id="s4">
-    <div class="head">
-      <span class="kicker">04 — 화면</span>
-      <h2>어디에 무엇이 있나</h2>
-      <p class="sub">왼쪽에서 고르고, 가운데에 놓고, 오른쪽에서 값을 고치고, 아래에서 결과를 봅니다</p>
-    </div>
+    <p class="kicker">04 — Screen</p>
+    <h2 class="title">어디에 무엇이 있나</h2>
+    <p class="sub">왼쪽에서 고르고, 가운데에 놓고, 오른쪽에서 값을 고치고, 아래에서 결과를 봅니다</p>
 
     <figure>
       <div class="canvas">
-        <svg viewBox="0 0 820 300" width="820" role="img" aria-label="툴바, 라이브러리, 캔버스, 인스펙터, 아래 띠, 상태바로 나뉜 화면 구성">
+        <svg viewBox="0 0 820 300" width="820" role="img" aria-label="위 도구줄, 왼쪽 고르는 곳, 가운데 그리는 곳, 오른쪽 값 고치는 곳, 아래 결과와 상태줄">
           <g font-family="IBM Plex Sans KR, sans-serif">
-            <rect x="8" y="8" width="804" height="284" rx="4" fill="var(--sheet)" stroke="var(--rule)"/>
-            <rect x="8" y="8" width="804" height="30" fill="var(--sunken)" stroke="var(--rule)"/>
-            <text x="22" y="28" font-size="11.5" fill="var(--ink-3)">위 — 도구 · 실행 · 저장 · 따라 하기</text>
+            <rect x="8" y="8" width="804" height="284" rx="10" fill="var(--surface-2)"/>
+            <rect x="20" y="18" width="780" height="28" rx="6" fill="var(--surface)"/>
+            <text x="34" y="37" font-size="11.5" fill="var(--muted)">위 — 도구 · 실행 · 저장 · 따라 하기 · 설정</text>
 
-            <rect x="8" y="38" width="150" height="212" fill="var(--sheet)" stroke="var(--rule)"/>
-            <text x="83" y="118" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">고르는 곳</text>
-            <text x="83" y="140" text-anchor="middle" font-size="11" fill="var(--ink-3)">기계 · 컨베이어</text>
-            <text x="83" y="157" text-anchor="middle" font-size="11" fill="var(--ink-3)">선반 · 카트</text>
-            <text x="83" y="182" text-anchor="middle" font-size="11" fill="var(--ink-4)">아래는 생산 계획</text>
+            <rect x="20" y="54" width="146" height="196" rx="6" fill="var(--surface)"/>
+            <text x="93" y="128" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">고르는 곳</text>
+            <text x="93" y="150" text-anchor="middle" font-size="11" fill="var(--muted)">기계 · 컨베이어</text>
+            <text x="93" y="167" text-anchor="middle" font-size="11" fill="var(--muted)">선반 · 카트</text>
+            <text x="93" y="192" text-anchor="middle" font-size="11" fill="var(--muted)">아래는 생산 계획</text>
 
-            <rect x="158" y="38" width="490" height="130" fill="var(--sunken)" stroke="var(--rule)"/>
-            <g stroke="var(--grid)">
-              <path d="M198 38 V168 M238 38 V168 M278 38 V168 M318 38 V168 M358 38 V168 M398 38 V168 M438 38 V168 M478 38 V168 M518 38 V168 M558 38 V168 M598 38 V168"/>
-              <path d="M158 68 H648 M158 98 H648 M158 128 H648"/>
-            </g>
-            <rect x="196" y="76" width="52" height="34" rx="3" fill="var(--sheet)" stroke="var(--ink-3)"/>
-            <text x="222" y="97" text-anchor="middle" font-size="10.5" fill="var(--ink-2)">제작기</text>
-            <line x1="248" y1="93" x2="392" y2="93" stroke="var(--accent)" stroke-width="4"/>
-            <rect x="392" y="76" width="52" height="34" rx="3" fill="var(--sheet)" stroke="var(--ink-3)"/>
-            <text x="418" y="97" text-anchor="middle" font-size="10.5" fill="var(--ink-2)">조립기</text>
-            <line x1="444" y1="93" x2="536" y2="93" stroke="var(--accent)" stroke-width="4"/>
-            <rect x="536" y="72" width="44" height="42" rx="3" fill="var(--sheet)" stroke="var(--ink-3)"/>
-            <text x="558" y="97" text-anchor="middle" font-size="10.5" fill="var(--ink-2)">선반</text>
-            <text x="403" y="158" text-anchor="middle" font-size="11" fill="var(--ink-4)">그리는 곳 — 위에서 내려다보며 배치, 3D 로 확인</text>
+            <rect x="174" y="54" width="470" height="122" rx="6" fill="var(--surface)"/>
+            <rect x="204" y="86" width="52" height="34" rx="5" fill="var(--surface-2)"/>
+            <text x="230" y="107" text-anchor="middle" font-size="10.5" fill="var(--ink-2)">제작기</text>
+            <line x1="256" y1="103" x2="396" y2="103" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/>
+            <rect x="396" y="86" width="52" height="34" rx="5" fill="var(--surface-2)"/>
+            <text x="422" y="107" text-anchor="middle" font-size="10.5" fill="var(--ink-2)">조립기</text>
+            <line x1="448" y1="103" x2="534" y2="103" stroke="var(--accent)" stroke-width="5" stroke-linecap="round"/>
+            <rect x="534" y="82" width="44" height="42" rx="5" fill="var(--surface-2)"/>
+            <text x="556" y="107" text-anchor="middle" font-size="10.5" fill="var(--ink-2)">선반</text>
+            <text x="409" y="160" text-anchor="middle" font-size="11" fill="var(--muted)">그리는 곳 — 위에서 내려다보며 배치, 3D 로 확인</text>
 
-            <rect x="158" y="168" width="490" height="82" fill="var(--sheet)" stroke="var(--rule)"/>
-            <text x="176" y="189" font-size="11.5" font-weight="600" fill="var(--ink)">결과를 보는 곳</text>
-            <text x="176" y="209" font-size="11" fill="var(--ink-3)">몇 개 나왔나 · 어디가 막혔나 · 얼마 들었나</text>
-            <text x="176" y="227" font-size="11" fill="var(--ink-3)">여러 번 돌린 평균 · 어느 값이 결과를 흔드나</text>
+            <rect x="174" y="184" width="470" height="66" rx="6" fill="var(--surface)"/>
+            <text x="194" y="207" font-size="11.5" font-weight="700" fill="var(--ink)">결과를 보는 곳</text>
+            <text x="194" y="227" font-size="11" fill="var(--muted)">몇 개 나왔나 · 어디가 막혔나 · 얼마 들었나</text>
+            <text x="194" y="243" font-size="11" fill="var(--muted)">여러 번 돌린 평균 · 어느 값이 결과를 흔드나</text>
 
-            <rect x="648" y="38" width="164" height="212" fill="var(--sheet)" stroke="var(--rule)"/>
-            <text x="730" y="118" text-anchor="middle" font-size="13" font-weight="600" fill="var(--ink)">값 고치는 곳</text>
-            <text x="730" y="140" text-anchor="middle" font-size="11" fill="var(--ink-3)">고른 것의 상세</text>
-            <text x="730" y="157" text-anchor="middle" font-size="11" fill="var(--ink-3)">또는 도면 요약</text>
+            <rect x="652" y="54" width="148" height="196" rx="6" fill="var(--surface)"/>
+            <text x="726" y="128" text-anchor="middle" font-size="13" font-weight="700" fill="var(--ink)">값 고치는 곳</text>
+            <text x="726" y="150" text-anchor="middle" font-size="11" fill="var(--muted)">고른 것의 상세</text>
+            <text x="726" y="167" text-anchor="middle" font-size="11" fill="var(--muted)">또는 도면 요약</text>
 
-            <rect x="8" y="250" width="804" height="42" fill="var(--sunken)" stroke="var(--rule)"/>
-            <text x="22" y="276" font-size="11.5" fill="var(--ink-3)">아래 — 좌표 · 지금 든 도구 · 자동 저장됨</text>
+            <rect x="20" y="258" width="780" height="24" rx="6" fill="var(--surface)"/>
+            <text x="34" y="275" font-size="11.5" fill="var(--muted)">아래 — 좌표 · 지금 든 도구 · 자동 저장됨</text>
           </g>
         </svg>
       </div>
@@ -417,15 +447,13 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </div>
   </section>
 
-  <!-- ══════════════ 5 ══════════════ -->
+  <!-- ═══════════ 05 ═══════════ -->
   <section id="s5">
-    <div class="head">
-      <span class="kicker">05 — 무엇을 알려 주나</span>
-      <h2>돌리고 나면 이런 것을 말해 줍니다</h2>
-      <p class="sub">숫자만 주는 것이 아니라, 왜 그런지까지</p>
-    </div>
+    <p class="kicker">05 — Output</p>
+    <h2 class="title">돌리고 나면 이런 것을 말해 줍니다</h2>
+    <p class="sub">숫자만 주는 것이 아니라, 왜 그런지까지</p>
 
-    <h3>어디가 막혔는지 — 그리고 진짜 범인이 누구인지</h3>
+    <h3><span class="hn">5.1</span>어디가 막혔는지 — 그리고 진짜 범인이 누구인지</h3>
     <p>
       기계가 서면 빨갛게 표시됩니다. 그런데 <strong>「막혔다」는 결과지 원인이 아닙니다.</strong>
       3번 기계가 막힌 진짜 이유가 일곱 칸 뒤의 컨베이어 하나일 수도 있습니다.
@@ -439,10 +467,10 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     <div class="tablewrap">
       <table>
         <caption>기계가 서는 다섯 가지 이유</caption>
-        <thead><tr><th>이유</th><th>무슨 뜻인가</th><th>어느 쪽으로 번지나</th><th>어떻게 푸나</th></tr></thead>
+        <thead><tr><th>이유</th><th>무슨 뜻인가</th><th>번지는 쪽</th><th>어떻게 푸나</th></tr></thead>
         <tbody>
-          <tr><td>막힘</td><td>다 만들었는데 내보낼 데가 없다</td><td><span class="chip chip--up">뒤로</span></td><td>뒷단을 늘리거나 쌓을 곳을 둔다</td></tr>
-          <tr><td>굶음</td><td>재료가 안 온다</td><td><span class="chip chip--down">앞으로</span></td><td>앞단을 늘린다</td></tr>
+          <tr><td>막힘</td><td>다 만들었는데 내보낼 데가 없다</td><td><span class="chip">뒤로</span></td><td>뒷단을 늘리거나 쌓을 곳을 둔다</td></tr>
+          <tr><td>굶음</td><td>재료가 안 온다</td><td><span class="chip">앞으로</span></td><td>앞단을 늘린다</td></tr>
           <tr><td>무인</td><td>이 교대에 사람이 모자라다</td><td><span class="chip chip--none">안 번짐</span></td><td>인원을 조정한다</td></tr>
           <tr><td>고장</td><td>고장 나서 수리 중이다</td><td><span class="chip chip--none">안 번짐</span></td><td>보전 주기 · 예비기</td></tr>
           <tr><td>전환</td><td>다른 품종으로 바꾸는 중이다</td><td><span class="chip chip--none">안 번짐</span></td><td>로트 크기 · 만드는 순서</td></tr>
@@ -450,14 +478,14 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       </table>
     </div>
 
-    <h3>얼마가 드는지</h3>
+    <h3><span class="hn">5.2</span>얼마가 드는지</h3>
     <p>
       전기·사람·자재·고정비를 나눠서 셉니다. 개당 원가의 분모는 <strong>양품</strong>입니다 —
       불량까지 나누면 원가가 싸 보이기 때문입니다. 서 있는 기계도 대기 전력과
       감가상각을 씁니다.
     </p>
 
-    <h3>이 숫자를 믿어도 되는지</h3>
+    <h3><span class="hn">5.3</span>이 숫자를 믿어도 되는지</h3>
     <p>
       고장과 불량은 확률입니다. 그래서 <strong>한 번 돌린 값은 사실 아무 말도 안 합니다</strong> —
       주사위를 한 번 굴려 놓고 「이 주사위는 4가 나온다」고 하는 것과 같습니다.
@@ -471,9 +499,9 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       해서 B가 낫다고 하면 틀릴 수 있는데, 이 프로그램은 그 판단을 숫자로 하게 합니다.
     </p>
 
-    <h3>어느 값을 건드려야 하는지</h3>
+    <h3><span class="hn">5.4</span>어느 값을 건드려야 하는지</h3>
     <p>
-      고칠 수 있는 것이 여섯 가지면, 사람은 어느 것부터 손대야 할지 모릅니다.
+      고칠 수 있는 것이 여섯 가지면 사람은 어느 것부터 손대야 할지 모릅니다.
       프로그램이 하나씩 한 칸 올리고 내려 보면서 <strong>결과가 가장 크게 흔들리는
       것</strong>을 짚어 줍니다.
     </p>
@@ -483,16 +511,13 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </div>
   </section>
 
-  <!-- ══════════════ 여기부터 기술 ══════════════ -->
-  <p class="divider">여기부터는 조금 더 자세한 이야기입니다</p>
+  <p class="rule">여기부터는 조금 더 자세한 이야기입니다</p>
 
-  <!-- ══════════════ 6 ══════════════ -->
+  <!-- ═══════════ 06 ═══════════ -->
   <section id="s6">
-    <div class="head">
-      <span class="kicker">06 — 안에서 무슨 일이 일어나나</span>
-      <h2>그린 도면이 곧 계산 모델입니다</h2>
-      <p class="sub">따로 모델을 만드는 단계가 없습니다</p>
-    </div>
+    <p class="kicker">06 — Model</p>
+    <h2 class="title">그린 도면이 곧 계산 모델입니다</h2>
+    <p class="sub">따로 모델을 만드는 단계가 없습니다</p>
 
     <p>
       보통 라인 검토는 두 도구로 나뉩니다. 배치는 CAD 로 그리고, 성능은 엑셀이나 별도
@@ -505,7 +530,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       입니다. 그래서 배치를 30 cm 옮기면 다음 실행의 결과가 달라집니다.
     </p>
 
-    <h3>규칙은 한 벌만 둡니다</h3>
+    <h3><span class="hn">6.1</span>규칙은 한 벌만 둡니다</h3>
     <p>
       처음에는 시뮬레이션이 화면 그리는 코드 안에 흩어져 있었습니다. 그래서
       <strong>화면이 켜져 있어야만 돌았고</strong>, 결과적으로 「여러 번 돌려 평균을 내는 일」이
@@ -517,7 +542,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       어긋나고, 어긋났을 때 화면과 보고서 중 어느 쪽이 맞는지 알 수 없게 됩니다.
     </p>
 
-    <h3>공정 시간의 흔들림</h3>
+    <h3><span class="hn">6.2</span>공정 시간의 흔들림</h3>
     <p>
       기계가 늘 정확히 30초 걸리지는 않습니다. 그 흔들림의 <strong>모양</strong>을 고를 수
       있습니다. 처음에는 「고르게」 하나뿐이었는데, 그러면 앞의 ± 값이 「이 배치가 얼마나
@@ -543,13 +568,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </p>
   </section>
 
-  <!-- ══════════════ 7 ══════════════ -->
+  <!-- ═══════════ 07 ═══════════ -->
   <section id="s7">
-    <div class="head">
-      <span class="kicker">07 — 성과 지표</span>
-      <h2>OEE 와 리드타임</h2>
-      <p class="sub">현장에서 쓰는 지표를 그대로 냅니다</p>
-    </div>
+    <p class="kicker">07 — Metrics</p>
+    <h2 class="title">OEE 와 리드타임</h2>
+    <p class="sub">현장에서 쓰는 지표를 그대로 냅니다</p>
 
     <div class="eq">
       <span class="big">OEE = 가동률(A) × 성능(P) × 양품률(Q)</span>
@@ -570,7 +593,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       <span class="small">리틀의 법칙 — 셋 중 둘은 이미 세고 있었고 리드타임 하나가 비어 있었다</span>
     </div>
 
-    <h3>언제부터 세기 시작하나</h3>
+    <h3><span class="hn">7.1</span>언제부터 세기 시작하나</h3>
     <p>
       갓 켠 라인의 숫자는 그 배치의 실력이 아닙니다. 컨베이어가 비어 있고 쌓을 곳도
       비어 있습니다. 그동안 나온 몇 개로 시간당을 내면 <strong>몇 초 만에 수천 개/시간</strong>
@@ -588,13 +611,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </p>
   </section>
 
-  <!-- ══════════════ 8 ══════════════ -->
+  <!-- ═══════════ 08 ═══════════ -->
   <section id="s8">
-    <div class="head">
-      <span class="kicker">08 — 만듦새</span>
-      <h2>어떻게 만들었나</h2>
-      <p class="sub">브라우저 안에서만 돌고, 검증이 코드의 44%</p>
-    </div>
+    <p class="kicker">08 — Build</p>
+    <h2 class="title">어떻게 만들었나</h2>
+    <p class="sub">브라우저 안에서만 돌고, 검증이 코드의 44%</p>
 
     <div class="tablewrap">
       <table>
@@ -632,7 +653,7 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       재발이 없습니다.
     </p>
 
-    <h3>데이터는 어디에 있나</h3>
+    <h3><span class="hn">8.1</span>데이터는 어디에 있나</h3>
     <p>
       서버가 없습니다. 도면은 <strong>쓰는 사람의 브라우저에 저장</strong>되고, 올린 3D 모델도
       마찬가지입니다. 데이터가 밖으로 나가는 길은 사용자가 <strong>내보내기를 직접 누를
@@ -641,13 +662,11 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
     </p>
   </section>
 
-  <!-- ══════════════ 부록 ══════════════ -->
+  <!-- ═══════════ 09 ═══════════ -->
   <section id="s9">
-    <div class="head">
-      <span class="kicker">부록</span>
-      <h2>용어와 실행</h2>
-      <p class="sub">문서에 나온 말들</p>
-    </div>
+    <p class="kicker">09 — Glossary</p>
+    <h2 class="title">용어와 실행</h2>
+    <p class="sub">문서에 나온 말들</p>
 
     <dl class="defs">
       <div class="def"><dt>병목</dt>
@@ -659,14 +678,14 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       <div class="def"><dt>재공</dt>
         <dd>지금 라인 안에 떠 있는 물건의 수.</dd></div>
       <div class="def"><dt>OEE</dt>
-        <dd>설비종합효율. 「살 수 있었던 시간 중 실제로 쓸모 있게 쓴 비율」을 하나로 묶은 지표.</dd></div>
+        <dd>설비종합효율. 「쓸 수 있었던 시간 중 실제로 쓸모 있게 쓴 비율」을 하나로 묶은 지표.</dd></div>
       <div class="def"><dt>로트 · 전환</dt>
         <dd>같은 품종을 묶어 만드는 단위. 다른 품종으로 바꾸려면 준비 시간이 듭니다.</dd></div>
       <div class="def"><dt>예열</dt>
         <dd>라인이 채워지는 동안. 이때 나온 숫자는 세지 않습니다.</dd></div>
     </dl>
 
-    <h3>직접 돌려 보려면</h3>
+    <h3><span class="hn">9.1</span>직접 돌려 보려면</h3>
     <div class="term">
       <div><span class="p">$</span> <span class="c">npm install</span></div>
       <div><span class="p">$</span> <span class="c">npm run dev</span> <span class="o">&nbsp;&nbsp;# 브라우저에서 열린다</span></div>
@@ -678,9 +697,10 @@ a:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
       그 브라우저에만 남습니다.
     </p>
 
-    <div class="colophon">
+    <div class="foot">
       <span>Smart Factory — 설비 배치 에디터 · 라인 시뮬레이터</span>
-      <span><a href="./">앱 열기</a></span>
+      <span><a href="./">프로그램 열기</a></span>
+      <span><a href="https://github.com/Seongyoru/SmartFactory">GitHub</a></span>
       <span>2026-09-07</span>
     </div>
   </section>
