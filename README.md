@@ -1111,8 +1111,7 @@ src/
   data/library.js   기본 제공 카탈로그
   theme.js          3D 씬 색·조명 (UI 색은 index.css 의 CSS 변수)
 
-api/share.js        공유 서버 — **지금은 꺼져 있다** (정적 호스팅에는 서버 함수가 없다)
-tools/check/        npm test — 검사 파일 48개, 1117건, 의존성 없음
+tools/check/        npm test — 검사 파일 56개, 1360건, 의존성 없음
 tools/check/fixtures/  시험용 DXF (치수선·해칭을 섞은 것, 단위 표시가 없는 것)
 public/layouts/     저장소에 담아 둔 예제 도면 (index.json + *.json)
 docs/HANDOFF.md     **가장 최신 기록** — 무엇을 왜 그렇게 정했는지
