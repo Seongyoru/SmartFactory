@@ -66,8 +66,12 @@ t('**다음 프레임에 푼다** — 같은 프레임에 풀면 아무 일도 �
   const body = flip.slice(at, at + 220);
   assert.match(body, /transition = 'transform/, '푸는 자리에서 전이를 안 건다');
   assert.match(body, /transform = ''/, '되돌려 놓은 것을 안 푼다');
-  /* 되돌릴 때는 전이가 없어야 한다 — 있으면 되돌아가는 것까지 보인다 */
-  assert.ok(flip.indexOf("transition = 'none'") < at, '옛 자리로 되돌릴 때 전이를 껐는지');
+  /* 되돌릴 때는 전이가 없어야 한다 — 있으면 되돌아가는 것까지 보인다.
+     **있는지부터 본다.** `indexOf` 는 없으면 −1 을 주는데, 그냥 `< at` 로만
+     견주면 그 −1 이 조건을 통과시킨다 — 지워도 안 무는 검사가 된다(당했다). */
+  const off = flip.indexOf("transition = 'none'");
+  assert.ok(off >= 0, '옛 자리로 되돌릴 때 전이를 안 껐다 — 되돌아가는 것까지 보인다');
+  assert.ok(off < at, '전이를 끄는 자리가 푸는 자리보다 뒤에 있다');
 });
 
 t('아주 작은 움직임은 건너뛴다 — 반올림 찌꺼기로 매번 떨면 안 된다', () => {
